@@ -66,7 +66,7 @@ async function harness() {
       const batch = request.body as Batch;
       if (saved.has(batch.process_definition.logic_gate_id)) return reply({ error: "process_definition_already_exists" }, 409);
       if (state.batchStatus !== 200 && !state.commitThenFail) return reply({ error: "Could not save this Process" }, state.batchStatus);
-      saved.set(batch.process_definition.logic_gate_id, batch);
+      saved.set(batch.process_definition.logic_gate_id, structuredClone(batch));
       if (state.commitThenFail) return reply({ error: "Save response unavailable" }, 500);
       return reply({ items: [{ client_id: batch.items[0].client_id, entity_id: batch.items[0].client_id }] }, 201);
     }
@@ -80,13 +80,20 @@ async function harness() {
       const path = folders.filter((folder) => folder.folder_id === parentFolderID || folder.folder_id === state.recoveryFolderID);
       return reply({ kind: "company_explorer", status: "resolved", segments: [...path.map((folder) => ({ entity_type: "folder", entity_id: folder.folder_id, name: folder.name })), { entity_type: "logic_gate", entity_id: batch.process_definition.logic_gate_id, name: batch.items[0].title }] });
     }
-    const process = request.path.match(/^\/v2\/logic-gates\/([^/]+)\/(work|step-map)$/);
+    const process = request.path.match(/^\/v2\/logic-gates\/([^/]+)\/(work|step-map|steps)$/);
     if (process) {
-      assert.equal(request.method, "GET", "all draft mutations must be in the one batch");
       if (process[2] === "work") workReads.push({ path: request.path, cache: options?.cache });
       const batch = saved.get(process[1]);
       assert.ok(batch, "saved map must use the exact committed Process UUID");
       const definition = batch.process_definition;
+      if (process[2] === "steps") {
+        assert.equal(request.method, "POST");
+        assert.equal(request.body.company_id, state.companyID);
+        const step = { process_step_id: crypto.randomUUID(), name: request.body.name as string };
+        definition.steps.push(step);
+        return reply({ step: { ...step, logic_gate_id: process[1], position: definition.steps.length * 1000 } }, 201);
+      }
+      assert.equal(request.method, "GET", "draft geometry must only be written in the one batch");
       return reply(process[2] === "step-map" ? { revision: 1, ...definition.layout } : {
         logic_gate: { logic_gate_id: process[1], header: batch.items[0].title },
         permissions: { can_edit: true, can_resolve_requests: false },
@@ -106,12 +113,15 @@ async function harness() {
   const button = (label: string) => { const element = findButton(label); assert.ok(element, `Missing visible button ${label}`); return element; };
   const click = async (label: string) => { await act(async () => button(label).click()); await flush(); };
   const input = async (selector: string, value: string) => {
+    const isProcessName = selector === '[placeholder="Untitled Process"]';
+    if (isProcessName && !dom.window.document.querySelector(selector)) await click("Name Process");
     const element = dom.window.document.querySelector<HTMLInputElement>(selector);
     assert.ok(element, `Missing input ${selector}`);
     await act(async () => {
       Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")!.set!.call(element, value);
       element.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
     });
+    if (isProcessName) await key(element, "Enter");
   };
   const key = async (element: Element, value: string) => { await act(async () => element.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true }))); await flush(); };
   const pointer = async (element: Element, type: string, x: number, y: number) => { await act(async () => element.dispatchEvent(new dom.window.MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y }))); };
@@ -262,7 +272,7 @@ test("lost Save response preserves newer local edits until explicit recovery loa
     assert.equal(h.batches().length, 2);
     assert.equal(h.batches()[1].process_definition.logic_gate_id, committed.process_definition.logic_gate_id);
     assert.equal(h.batches()[1].process_definition.steps[0].process_step_id, committedStepID);
-    assert.equal(h.container.querySelector<HTMLInputElement>('[placeholder="Untitled Process"]')!.value, "Newer local Process name");
+    assert.equal(h.button("Name Process").firstChild!.textContent, "Newer local Process name");
     assert.deepEqual(h.cards().map((card) => card.dataset.stepMapId), [committedStepID, laterStepID]);
     assert.equal(h.cards()[0].style.left, "80px");
     assert.equal(h.draftStates.at(-1), true);
@@ -300,7 +310,7 @@ test("discard asks first, keeping edits sends no writes, and company navigation 
     await h.click("Keep editing");
     assert.equal(h.preventsUnload(), true);
     assert.equal(h.cards()[0].dataset.stepMapId, firstStepID);
-    assert.equal(h.container.querySelector<HTMLInputElement>('[placeholder="Untitled Process"]')!.value, "Unsaved first company");
+    assert.equal(h.button("Name Process").firstChild!.textContent, "Unsaved first company");
     await h.click("← Company map");
     await h.click("Discard draft");
     assert.equal(h.container.querySelector('[aria-label="New Process map"]'), null);
@@ -316,7 +326,7 @@ test("discard asks first, keeping edits sends no writes, and company navigation 
     assert.equal(h.draftStates.at(-1), false);
     assert.equal(h.preventsUnload(), false);
     await h.start();
-    assert.equal(h.container.querySelector<HTMLInputElement>('[placeholder="Untitled Process"]')!.value, "");
+    assert.equal(h.button("Name Process").firstChild!.textContent, "Untitled Process");
     assert.equal(h.cards().length, 0);
     assert.equal(h.mutations().length, 0);
     assert.deepEqual(h.opened, []);
@@ -345,12 +355,12 @@ test("inactive Page retains its draft but closes portal menus, Folder and discar
     assert.equal(h.button("+ Create Step").disabled, true);
     assert.equal(h.cards()[0].dataset.stepMapId, stepID);
     assert.equal(h.cards()[0].style.left, "80px");
-    assert.equal(h.container.querySelector<HTMLInputElement>('[placeholder="Untitled Process"]')!.value, "Retained draft");
+    assert.equal(h.button("Name Process").firstChild!.textContent, "Retained draft");
     assert.equal(h.draftStates.at(-1), true);
     assert.equal(h.preventsUnload(), true, "a hidden unsaved draft still needs the unload warning");
     h.state.active = true;
     await h.render();
-    await h.click("Create Folder");
+    await h.click("+ Create Folder");
     assert.ok(h.dom.window.document.querySelector('form[role="dialog"]'));
     h.state.active = false;
     await h.render();
@@ -377,7 +387,7 @@ test("inactive Page retains its draft but closes portal menus, Folder and discar
     assert.equal(h.cards()[0].dataset.stepMapId, stepID);
     assert.equal(h.cards()[0].style.left, "80px", "a cancelled gesture cannot replace the retained draft geometry");
     assert.equal(h.button("Save Process").disabled, false);
-    assert.equal(h.container.querySelector<HTMLInputElement>('[placeholder="Untitled Process"]')!.value, "Retained draft");
+    assert.equal(h.button("Name Process").firstChild!.textContent, "Retained draft");
     assert.equal(h.dom.window.document.querySelector('[role="menu"], [role="dialog"]'), null);
     assert.equal(h.mutations().length, 0);
     assert.deepEqual(h.opened, []);
@@ -389,6 +399,7 @@ test("Page Create Folder uses the canonical Folder POST and stays on the company
   try {
     await h.click("+ Create Folder");
     await settle(() => Boolean(h.dom.window.document.querySelector('form[role="dialog"] input')), "Folder dialog did not load");
+    assert.ok(h.container.querySelector('.process-map-page form[role="dialog"]'), "Folder creation must remain inside the map pane");
     await h.input('form[role="dialog"] input', "  Procurement  ");
     await h.click("Create Folder");
     await settle(() => h.container.textContent!.includes("Folder “Procurement” created."), "created Folder did not return to the canvas");
@@ -396,5 +407,125 @@ test("Page Create Folder uses the canonical Folder POST and stays on the company
     assert.equal(h.dom.window.document.querySelector('form[role="dialog"]'), null);
     assert.equal(h.container.querySelector(".process-map-workspace"), null);
     assert.deepEqual(h.opened, []);
+  } finally { await h.dispose(); }
+});
+
+test("one creation card and Hover mode remain available from the company map through draft and saved Step creation", async () => {
+  const h = await harness();
+  const actions = () => {
+    const cards = [...h.container.querySelectorAll<HTMLElement>(".process-map-page__actions")].filter((card) => !card.closest('[aria-hidden="true"], [inert]'));
+    assert.equal(cards.length, 1, "the current map must have one visible creation card");
+    assert.deepEqual([...cards[0].querySelectorAll("button")].slice(0, 3).map((button) => button.textContent), ["+ Create Folder", "+ Create Process", "+ Create Step"]);
+    const hover = cards[0].querySelector<HTMLInputElement>('input[type="checkbox"]');
+    assert.ok(hover, "Hover mode must share the creation card");
+    assert.ok(h.container.querySelector(".process-map-page__canvas")!.contains(cards[0]));
+    return hover;
+  };
+  try {
+    const hover = actions();
+    assert.equal(hover.checked, false);
+    await act(async () => hover.click());
+    await h.start(true);
+    assert.equal(actions().checked, true);
+    assert.equal(h.container.querySelector('[placeholder="Untitled Process"]'), null, "a new draft starts with a compact filename, not a large name field");
+    assert.equal(h.button("Name Process").firstChild!.textContent, "Untitled Process");
+    await h.input('[placeholder="Untitled Process"]', "Shipping");
+    assert.equal(h.button("Name Process").firstChild!.textContent, "Shipping");
+    assert.equal(h.container.querySelector('[aria-label="Process name"]'), null, "Enter must finish inline naming");
+    await h.chooseFolder();
+    const firstStepID = h.cards()[0].dataset.stepMapId;
+    await h.click("+ Create Step");
+    assert.equal(h.cards().length, 2);
+    assert.equal(h.cards()[0].dataset.stepMapId, firstStepID, "the persistent control must add to the current draft");
+    assert.equal(h.dom.window.document.querySelector('[role="dialog"]'), null, "Create Step must not replace the current Process");
+    assert.equal(h.mutations().length, 0);
+    await h.click("Save Process");
+    await settle(() => Boolean(h.container.querySelector('[aria-label="Saved Process map"]')) && h.findButton("+ Create Step")?.disabled === false, "saved Step creation did not become available");
+    assert.equal(actions().checked, true);
+    const processID = h.batches()[0].process_definition.logic_gate_id;
+    await h.click("+ Create Step");
+    await settle(() => h.cards().length === 3 && h.findButton("+ Create Step")?.disabled === false, "saved creation card did not add a Step");
+    assert.equal(h.cards()[0].dataset.stepMapId, firstStepID);
+    assert.equal(h.batches().length, 1, "adding a saved Step must not create another Process");
+    assert.deepEqual(h.mutations().at(-1), { path: `/v2/logic-gates/${processID}/steps`, method: "POST", body: { company_id: companyID, name: "New step" } });
+    assert.equal(actions().checked, true);
+    assert.deepEqual(h.opened, []);
+  } finally { await h.dispose(); }
+});
+
+test("the shared Folder and Process actions use the draft's current destination and preserve edits until discard", async () => {
+  const h = await harness();
+  try {
+    await h.start(true);
+    await h.input('[placeholder="Untitled Process"]', "Order fulfilment");
+    await h.chooseFolder();
+    const stepID = h.cards()[0].dataset.stepMapId;
+    await h.click("+ Create Folder");
+    const dialog = h.container.querySelector('form[role="dialog"]');
+    assert.ok(dialog, "the Folder surface must be embedded in the map");
+    assert.equal(dialog.querySelector('[aria-label="Destination path"]')!.textContent, "Workspace/Operations/Orders");
+    await h.click("Cancel");
+    assert.equal(h.cards()[0].dataset.stepMapId, stepID);
+    await h.click("+ Create Process");
+    await h.click("Keep editing");
+    assert.equal(h.cards()[0].dataset.stepMapId, stepID);
+    assert.equal(h.button("Name Process").firstChild!.textContent, "Order fulfilment");
+    await h.click("+ Create Process");
+    await h.click("Discard draft");
+    await settle(() => h.findButton("+ Create Step")?.disabled === false, "replacement draft did not finish loading");
+    assert.equal(h.button("Name Process").firstChild!.textContent, "Untitled Process");
+    assert.equal(h.cards().length, 0);
+    assert.equal(h.container.querySelector('[aria-label="Destination path"]')!.textContent, "Workspace/Operations/Orders");
+    assert.equal(h.mutations().length, 0);
+  } finally { await h.dispose(); }
+});
+
+test("a nonmodal discard prompt cannot discard an in-flight Save and closes after that Save succeeds", async () => {
+  const h = await harness();
+  try {
+    await h.start(true);
+    await h.input('[placeholder="Untitled Process"]', "Pending save");
+    await h.chooseFolder();
+    const stepID = h.cards()[0].dataset.stepMapId;
+    await h.click("← Company map");
+    assert.ok(h.container.querySelector('[aria-labelledby="process-map-discard-title"]'));
+    assert.equal(h.button("Discard draft").disabled, false);
+    h.state.holdBatch = true;
+    // Keyboard activation has no outside pointerdown to dismiss the nonmodal prompt.
+    await act(async () => { const save = h.button("Save Process"); save.focus(); save.click(); });
+    await settle(() => Boolean(h.state.releaseBatch), "Save was not sent while the discard prompt remained open");
+    assert.equal(h.button("Discard draft").disabled, true, "an active Save must block the pending discard action");
+    await h.click("Discard draft");
+    assert.ok(h.container.querySelector('[aria-label="New Process map"]'));
+    assert.equal(h.cards()[0].dataset.stepMapId, stepID);
+    assert.equal(h.batches().length, 1);
+    await act(async () => h.state.releaseBatch!());
+    await settle(() => Boolean(h.container.querySelector('[aria-label="Saved Process map"]')) && h.findButton("+ Create Step")?.disabled === false, "Save did not finish on the saved map");
+    assert.equal(h.container.querySelector('[aria-labelledby="process-map-discard-title"]'), null, "a successful Save must clear the obsolete discard prompt");
+    assert.equal(h.cards()[0].dataset.stepMapId, stepID);
+    assert.equal(h.preventsUnload(), false);
+  } finally { await h.dispose(); }
+});
+
+test("Enter and Escape finish inline naming and return keyboard focus to the Process filename", async () => {
+  const h = await harness();
+  try {
+    await h.start();
+    await h.click("Name Process");
+    const enterInput = h.container.querySelector<HTMLInputElement>('[aria-label="Process name"]')!;
+    assert.equal(h.dom.window.document.activeElement, enterInput);
+    await h.input('[aria-label="Process name"]', "Receiving");
+    await h.key(enterInput, "Enter");
+    assert.equal(h.container.querySelector('[aria-label="Process name"]'), null);
+    await settle(() => h.dom.window.document.activeElement === h.findButton("Name Process"), "Enter left keyboard focus outside the filename");
+    assert.equal(h.button("Name Process").firstChild!.textContent, "Receiving");
+    await h.click("Name Process");
+    const escapeInput = h.container.querySelector<HTMLInputElement>('[aria-label="Process name"]')!;
+    await h.input('[aria-label="Process name"]', "Receiving orders");
+    await h.key(escapeInput, "Escape");
+    assert.equal(h.container.querySelector('[aria-label="Process name"]'), null);
+    await settle(() => h.dom.window.document.activeElement === h.findButton("Name Process"), "Escape left keyboard focus outside the filename");
+    assert.equal(h.button("Name Process").firstChild!.textContent, "Receiving orders");
+    assert.equal(h.mutations().length, 0);
   } finally { await h.dispose(); }
 });

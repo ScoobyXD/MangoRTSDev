@@ -45,3 +45,34 @@
 .process-step-map__context-action { display:block; width:100%; padding:9px 14px; border:0; background:transparent; color:#273449; text-align:left; font-size:12px; cursor:pointer; }
 .process-step-map__context-action:hover:not(:disabled), .process-step-map__context-action:focus-visible { background:#dfeaf7; }
 .process-step-map__context-action:disabled { opacity:.5; cursor:default; }
+.process-step-map__step.is-hovered { z-index:3; outline:2px solid #6b9fc0; outline-offset:2px; }
+.process-step-map__edges .is-hovered { color:#328dbe; }
+.process-step-map__hover-preview { position:absolute; top:calc(100% + 10px); left:0; z-index:4; width:max-content; max-width:260px; padding:10px 12px; border-radius:10px; background:rgba(255,255,255,.94); box-shadow:0 6px 24px #2634491f; color:#273449; font-size:12px; font-weight:650; overflow-wrap:anywhere; pointer-events:none; }
+.process-step-map__hover-preview span { display:block; margin-top:4px; color:#63738a; font-size:11px; font-weight:400; }
+.process-step-map--canvas { position:relative; min-height:0; gap:0; background:#fff; }
+.process-step-map--canvas .process-step-map__viewport { min-height:0; border:0; border-radius:0; padding:80px 24px; box-sizing:border-box; background:#fff; }
+.process-step-map--canvas .process-step-map__canvas { background:none; }
+.process-step-map--canvas .process-step-map__zoom,
+.process-step-map--canvas .process-step-map__status,
+.process-step-map--canvas .process-step-map__inspector { position:absolute; z-index:5; background:rgba(255,255,255,.86); box-shadow:0 6px 28px #26344914; backdrop-filter:blur(16px); border:1px solid rgba(223,228,236,.7); border-radius:14px; }
+.process-step-map--canvas .process-step-map__zoom { right:16px; bottom:16px; padding:5px; gap:3px; }
+.process-step-map--canvas .process-step-map__zoom button { min-width:30px; height:30px; padding:4px 8px; border:0; box-shadow:none; background:transparent; }
+.process-step-map--canvas .process-step-map__status { left:16px; bottom:16px; min-height:0; max-width:calc(100% - 225px); padding:9px 12px; box-sizing:border-box; font-size:11px; }
+.process-step-map--canvas .process-step-map__inspector { left:16px; bottom:70px; width:360px; max-width:calc(100% - 32px); max-height:calc(100% - 160px); box-sizing:border-box; overflow:auto; padding:14px; gap:12px; }
+.process-step-map--canvas .process-step-map__inspector-heading { display:flex; flex-basis:100%; align-items:center; justify-content:space-between; color:#44526a; font-size:12px; }
+.process-step-map--canvas .process-step-map__inspector .process-step-map__inspector-heading button { width:24px; height:24px; padding:0; border:0; box-shadow:none; background:none; font-size:19px; }
+.process-step-map--canvas .process-step-map__inspector form,
+.process-step-map--canvas .process-step-map__connect { width:100%; }
+.process-step-map--canvas .process-step-map__inspector label { flex:1; min-width:0; }
+.process-step-map--canvas .process-step-map__inspector input,
+.process-step-map--canvas .process-step-map__inspector select { width:100%; max-width:none; box-sizing:border-box; border:1px solid #dbe3ed; border-radius:7px; padding:7px 8px; background:#fff; color:#334155; font:inherit; }
+.process-step-map--canvas .process-step-map__error { position:absolute; z-index:6; top:80px; left:16px; max-width:calc(100% - 240px); box-shadow:0 6px 28px #26344914; }
+.process-step-map--canvas .process-step-map__step { background:#f7fbf9; box-shadow:0 5px 16px #26344914; }
+.process-step-map--canvas .process-step-map__empty { top:40px; }
+@media (max-width:700px) {
+  .process-step-map--canvas .process-step-map__viewport { padding:100px 12px 90px; }
+  .process-step-map--canvas .process-step-map__zoom { right:12px; bottom:12px; }
+  .process-step-map--canvas .process-step-map__status { left:12px; bottom:60px; max-width:calc(100% - 24px); }
+  .process-step-map--canvas .process-step-map__inspector { left:12px; bottom:105px; max-width:calc(100% - 24px); max-height:calc(100% - 260px); }
+  .process-step-map--canvas .process-step-map__error { top:100px; left:12px; max-width:calc(100% - 190px); }
+}

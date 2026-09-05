@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
-import { AppModalPortal } from "../../app/AppModalPortal.js";
+import { appOverlayCanHandleEscape } from "../../app/AppModalPortal.js";
 import { APIHTTPError, requestJSON } from "../../modules/api/requestJSON.js";
 import type { CompanyExplorerV2Row } from "../../modules/company-explorer/companyExplorerLazyApi.js";
 import type { CompanyExplorerFolder } from "../../modules/folders/companyExplorerFolders.js";
@@ -21,9 +21,21 @@ export function ProcessMapCreateFolderDialog({ apiBase, companyID, folders, init
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const requestRef = useRef<AbortController | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   useEffect(() => () => { requestRef.current?.abort(); }, [apiBase, companyID]);
   const validDestination = useMemo(() => !parentFolderID || processMapFolderPath(folders, parentFolderID).length > 0, [folders, parentFolderID]);
   const close = () => { if (!requestRef.current) onClose(); };
+  useEffect(() => {
+    const escape = (event: KeyboardEvent) => {
+      // The destination browser handles Escape first, preserving this form's name.
+      if (event.key !== "Escape" || event.defaultPrevented || requestRef.current || !appOverlayCanHandleEscape(formRef.current)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    };
+    document.addEventListener("keydown", escape);
+    return () => document.removeEventListener("keydown", escape);
+  }, [onClose]);
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (requestRef.current || !companyID.trim() || !name.trim() || !validDestination) return;
@@ -52,9 +64,7 @@ export function ProcessMapCreateFolderDialog({ apiBase, companyID, folders, init
       }
     }
   };
-  return <AppModalPortal onRequestClose={close}>
-    <div className="process-map-folder-dialog__backdrop">
-      <form className="process-map-folder-dialog" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-busy={saving} onSubmit={(event) => void submit(event)}>
+  return <form ref={formRef} className="process-map-folder-dialog" role="dialog" aria-labelledby={`${id}-title`} aria-busy={saving} onSubmit={(event) => void submit(event)}>
         <h2 id={`${id}-title`}>Create Folder</h2>
         <label className="process-map-folder-dialog__field">Folder name
           <input autoFocus required value={name} disabled={saving} onChange={(event) => setName(event.currentTarget.value)} />
@@ -68,7 +78,5 @@ export function ProcessMapCreateFolderDialog({ apiBase, companyID, folders, init
           <button type="button" disabled={saving} onClick={close}>Cancel</button>
           <button type="submit" disabled={saving || !companyID.trim() || !name.trim() || !validDestination}>{saving ? "Creating…" : "Create Folder"}</button>
         </div>
-      </form>
-    </div>
-  </AppModalPortal>;
+      </form>;
 }

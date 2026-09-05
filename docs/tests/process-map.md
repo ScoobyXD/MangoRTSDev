@@ -97,9 +97,9 @@
 95. An inaccessible mapped Folder MUST render only as the uniform restricted placeholder; its real perimeter, map identity, descendant map structure, anchors, and incident traces MUST NOT be returned through scene or tile reads.
 96. Traces MUST render below map items so that items remain the top interactive layer.
 97. The Process Map canvas and its map content MUST use a white non-geographic surface without changing the surrounding application's theme, and MUST have no basemap, imagery, terrain, streets, buildings, globe, latitude/longitude projection, or geographic attribution.
-98. If the existing background grid is retained, it MUST use one subtle uniform smallest-square pattern whose lines have one color and weight, with no emphasized large-square or two-by-two grouping.
+98. The company canvas and focused Step canvas MUST omit background dots and grid lines.
 99. Every accessible Process card and Folder MUST render as a contrasting elevated surface with a subtle presentation shadow above the light canvas; names and assignment text MUST remain readable dark text while Q/C/D, R/A, type, and selection colors retain their semantic meaning. At editing detail each Process MUST show current-day Q/C/D letters at the top left that are larger than the assignment names and each resolved Responsible and Accountable row at the top right with its larger R or A icon before the name, while every Folder surface MUST remain translucent and non-pickable beneath its contained placements.
-100. The background grid MUST move and scale with the map viewport while the user pans and zooms.
+100. Map controls and status information MUST use compact elevated surfaces inside the map without reducing its canvas layout area.
 101. Process Map MUST NOT include a minimap.
 102. Process Map MUST omit decorative infographic ribbons, ornamental paths, and visuals that do not represent map data.
 103. The new Process Map MUST NOT restore, depend on, or add compatibility behavior for the removed Node Map or Logic Gate Map implementations.
@@ -120,9 +120,9 @@
 118. Automatic insertion MUST follow existing sibling order by saved Y, saved X, resource type, and resource ID, preserving saved positions and dimensions unless fitting the changed contents into their parent requires a proportional group transform.
 119. Process Map MUST omit the former left placement tray and its collapsed preference, branch reads, candidate state, cards, and controls.
 120. Every visible saved or pending trace MUST remain static; saved traces and connection previews MUST use the same orthogonal cyan-to-blue direction treatment, and Process Map MUST NOT create a moving flow marker, animation timer, phase state, or second trace presentation.
-121. The company overview MUST fill its route area with the canvas and omit a dedicated title row, manual placement picker, and fixed selection or delete toolbar; a focused Process workspace MUST show its name and destination path above its Step canvas.
+121. The company overview, new Process draft, and saved focused Process MUST fill the route area with one edge-to-edge white map pane without outer panels, middle panels, a dedicated title row, or a separate creation form.
 122. Accessible placement anchors and resize grips MUST be invisible and noninteractive by default; at every display detail where an accessible Folder or Process name is shown, hovering or selecting it MUST reveal its left input, right output, and four corner resize grips, and each corner MUST use its correct diagonal resize cursor instead of a hand cursor. Starting from the output MUST retain that source output and reveal only distinct name-visible eligible target inputs; leaving the placement, anchors, and grips MUST hide hover-only controls, and completion, invalid drop, cancellation, camera change, or permission change MUST clear temporary controls and connection state.
-123. One **Hover mode** checkbox MUST remain pinned at the map canvas's top-right as its only persistent corner control; it controls only transient Process data cards, MUST NOT control placement-anchor discovery, and changing it MUST NOT change selection, a pinned card, placement, operational relationships, traces, or saved Process Map state.
+123. One **Hover mode** checkbox MUST remain below the creation actions in the common top-right card; on the company canvas it controls only transient Process data cards, MUST NOT control placement-anchor discovery, and changing it MUST NOT change selection, a pinned card, placement, operational relationships, traces, or saved Process Map state.
 124. When Hover mode is checked, hovering an accessible Process MUST show its transient data card immediately to the Process's right and leaving both the Process and card MUST remove it; unchecked hover MUST show no data card.
 125. A transient hover data card MUST be read-only; clicking an accessible Process MUST pin its data card regardless of Hover mode, and the pinned card MUST remain visible after the pointer leaves the Process.
 126. Every transient or pinned Process data card MUST stay immediately to the right of its Process through deck.gl projection without covering or disabling the Process's output anchor or connection hit area, and moving the placement or camera MUST keep a pinned card attached to that Process.
@@ -196,20 +196,28 @@
 194. Every successful mutation acknowledgement in the current protected generation MUST request canonical validation even when a newer object operation prevents applying its overlay.
 195. Canonical coverage MUST NOT retire mutation masks until it reaches every acknowledged read version; after replacement coverage completes, later pans MUST NOT render older cached moved or deleted objects.
 196. Ordinary local and remote refresh requests MUST coalesce while preserving a queued refresh for changes arriving during an active read.
-197. The company map MUST offer Create Folder, Create Process, and Create Step in its top-right controls and blank-canvas context menu.
+197. One elevated translucent card inside the map's top-right corner MUST retain vertically stacked Create Folder, Create Process, and Create Step actions in that order during company browsing, Process creation, and Step creation.
 198. A context creation action on an accessible Folder MUST carry that exact Folder as its proposed destination.
-199. Create Process MUST open a full-canvas local draft with a selectable destination breadcrumb above it and MUST NOT open the Board or SOP split.
+199. Create Process MUST open a full-canvas local draft inside the shared map pane without opening the Board or SOP split.
 200. Create Step without an open Process MUST start a new Process draft containing one Step; Steps MUST remain owned by a Process.
 201. Save Process MUST create the Process, Steps, connections, geometry, and chosen Explorer placement atomically through the existing workspace batch command.
 202. Create Folder MUST use the canonical Explorer Folder command with the chosen parent and MUST create no separate map resource.
 203. Returning from the focused Process canvas MUST preserve the mounted company canvas and its camera.
 204. An initially empty scene MUST remain eligible to fit the first nonempty company bounds; ordinary later refreshes MUST preserve the camera.
-205. An empty company scene MUST show an explanatory status with read-only Retry and MUST NOT silently reset or backfill saved map geometry.
+205. An empty company scene MUST show an explanatory status with read-only Retry inside the map and MUST NOT silently reset or backfill saved map geometry.
+206. Create Step with a focused draft or saved Process MUST add the Step to that exact Process.
+207. A focused Process MUST show its Folder and file breadcrumb inline along the top of the map, with the draft name edited as a compact filename instead of a separate Process name field.
+208. Folder selection and Folder creation MUST use compact elevated surfaces inside the shared map pane.
+209. Save Process and its save status MUST appear in the common top-right card instead of a separate header or button row.
+210. The company map's blank-canvas context menu MUST offer Create Folder, Create Process, and Create Step.
+211. Hover mode MUST retain its checked state when entering or leaving a focused Process.
 Last updated: 2026-09-04
 
 # Process Story: One company canvas moves from overview to Process work
 
-An authorized user opens `/process-map` at the company overview with its existing root Folders and saved geometry. Create Process opens a focused Step canvas: the user chooses its destination path, names the Process, and arranges Steps before Save commits it to Explorer. Returning restores the same company camera. Folder moves and resizes preserve their contained structure; ordinary changes refresh affected tiles, while permission changes remove protected coverage before replacement. Reads never reset saved layouts.
+An authorized user opens `/process-map` on one white map pane. The same top-right card stays available while browsing, creating a Process, and adding Steps. The user chooses a Folder and edits the draft filename in the inline path, arranges Steps, then saves through the card. The complete draft commits to Explorer and remains in the map pane; returning to the company overview restores its mounted camera. Existing geometry and permission rules remain unchanged.
+
+## Scenario: Fit nested Folders within the existing world
 
 The default root size is `14 × 8^8` by `8 × 8^8`. At Folder level `L`, the preferred size is `14 × 8^(9-L)` by `8 × 8^(9-L)`. Each step reduces both dimensions eightfold, giving a 64-fold area reduction:
 

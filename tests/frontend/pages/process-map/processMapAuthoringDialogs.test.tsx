@@ -105,6 +105,7 @@ test("Create Folder posts one canonical request and returns the exact Explorer r
     return pending;
   }) as typeof fetch);
   try {
+    assert.ok(ui.document.querySelector('#root form[role="dialog"]'), "Folder creation must stay inside its map mount instead of moving to a body portal");
     await ui.submit();
     assert.equal(writes.length, 0);
     await ui.name("  Incoming  ");
@@ -119,6 +120,31 @@ test("Create Folder posts one canonical request and returns the exact Explorer r
     assert.deepEqual(writes, [{ url: "https://api.test/v1/company-explorer/folders", method: "POST", body: { company_id: "company", parent_folder_id: "orders", name: "Incoming" } }]);
     assert.deepEqual(creations, [createdFolder]);
     assert.equal(closes, 1);
+  } finally { await ui.cleanup(); }
+});
+
+test("Escape closes the nested Folder browser before the Folder form and preserves its entered name", async () => {
+  let closes = 0;
+  function Dialog() {
+    const [open, setOpen] = useState(true);
+    return open ? <ProcessMapCreateFolderDialog apiBase="https://api.test" companyID="company" folders={folders} initialParentFolderID="orders" onClose={() => { closes++; setOpen(false); }} onCreated={() => assert.fail("Escape cannot create a Folder")} /> : null;
+  }
+  const ui = await mount(<Dialog />, (async () => assert.fail("dismissal cannot send a request")) as typeof fetch);
+  try {
+    await ui.name("Incoming orders");
+    await ui.click("Workspace");
+    await ui.click("Open Operations");
+    assert.ok(ui.document.querySelector('[aria-label="Choose destination Folder"]'));
+    await act(async () => { ui.document.activeElement!.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
+    assert.equal(ui.document.querySelector('[aria-label="Choose destination Folder"]'), null);
+    assert.equal(closes, 0, "the child browser must consume Escape before the parent form");
+    const input = ui.document.querySelector<HTMLInputElement>('form[role="dialog"] input');
+    assert.ok(input, "closing the destination browser must leave the Folder form open");
+    assert.equal(input.value, "Incoming orders");
+    assert.equal(ui.document.querySelector('[aria-label="Destination path"]')!.textContent, "Workspace/Operations/Orders", "browsing without choosing must preserve the original destination");
+    await act(async () => { ui.document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
+    assert.equal(closes, 1);
+    assert.equal(ui.document.querySelector('form[role="dialog"]'), null);
   } finally { await ui.cleanup(); }
 });
 

@@ -358,14 +358,14 @@ type AppProps = {
   overrideContent?: React.ReactNode;
 };
 
-function appBodyStyle(sidebarWidth: number): React.CSSProperties {
+function appBodyStyle(sidebarWidth: number, pageEdgeGap: number): React.CSSProperties {
   return {
     height: "100vh",
     minHeight: 0,
     display: "grid",
     gridTemplateColumns: `${sidebarWidth}px ${APP_RESIZE_HANDLE_W}px minmax(0, 1fr)`,
     gap: 0,
-    padding: `${PAGE_EDGE_GAP}px ${PAGE_EDGE_GAP}px ${PAGE_EDGE_GAP}px`,
+    padding: pageEdgeGap,
     alignItems: "stretch",
   };
 }
@@ -760,10 +760,11 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     lastSnapshotRef.current = snapshot;
   }, [buildSnapshot]);
 
-  const canvasW = Math.max(1, viewSize.w - appSidebarWidth - APP_RESIZE_HANDLE_W - PAGE_EDGE_GAP * 2);
+  const pageEdgeGap = processMapVisible ? 0 : PAGE_EDGE_GAP;
+  const canvasW = Math.max(1, viewSize.w - appSidebarWidth - APP_RESIZE_HANDLE_W - pageEdgeGap * 2);
   const assistantBottomInset = dockTabs.length > 0 ? 62 : PAGE_EDGE_GAP;
-  const canvasH = Math.max(1, viewSize.h - PAGE_EDGE_GAP * 2);
-  const taskbarLeftInset = PAGE_EDGE_GAP + appSidebarWidth + APP_RESIZE_HANDLE_W;
+  const canvasH = Math.max(1, viewSize.h - pageEdgeGap * 2);
+  const taskbarLeftInset = pageEdgeGap + appSidebarWidth + APP_RESIZE_HANDLE_W;
   const gridCols = Math.max(1, Math.round(canvasW / CELL_SIZE));
   const gridRows = Math.max(1, Math.round(canvasH / CELL_SIZE));
   const stepX = canvasW / gridCols;
@@ -2012,7 +2013,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       </header>
       )}
 
-      <div data-app-shell-body="true" style={appBodyStyle(appSidebarWidth)}>
+      <div data-app-shell-body="true" style={appBodyStyle(appSidebarWidth, pageEdgeGap)}>
         <AppSidebar
           accountChrome={accountChrome}
           activePage={activePrimaryPage}
@@ -2304,7 +2305,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
         data-process-map-retained="true"
         aria-hidden={!processMapVisible}
         ref={(element) => element?.toggleAttribute("inert", !processMapVisible)}
-        style={{ ...frameCanvasStyle, position: "absolute", inset: 0, visibility: processMapVisible ? "visible" : "hidden", pointerEvents: processMapVisible ? "auto" : "none" }}
+        style={{ position: "absolute", inset: 0, overflow: "hidden", background: "#fff", visibility: processMapVisible ? "visible" : "hidden", pointerEvents: processMapVisible ? "auto" : "none" }}
         onContextMenu={(event) => { if (!shouldDeferToNativeTextEditing(event.target)) event.preventDefault(); }}
       >
         <React.Suspense fallback={fullPageFallback}>
