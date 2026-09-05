@@ -152,18 +152,10 @@ func (s *Server) handleAssistantChat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "assistant_request_already_started_or_busy")
 		return
 	}
+	var runErr error
 	defer func() {
-		key := owner + ":" + request.RequestID
-		s.assistant.finishAssistantResult(key)
-		s.assistant.mu.Lock()
-		if capture := s.assistant.captures[key]; capture != nil && !capture.finished {
-			capture.finished = true
-			close(capture.done)
-			if !capture.inspect {
-				delete(s.assistant.captures, key)
-			}
-		}
-		s.assistant.mu.Unlock()
+		// Also finalize admitted Sends that lose the connection before Pi starts.
+		s.finishAssistantCapture(r, request, nil, runErr)
 		s.assistant.finish(owner)
 	}()
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -173,9 +165,11 @@ func (s *Server) handleAssistantChat(w http.ResponseWriter, r *http.Request) {
 	// Bound a slow browser as well as provider work; existing wrappers expose Unwrap.
 	_ = controller.SetWriteDeadline(time.Now().Add(assistantTimeout))
 	if _, err := io.WriteString(w, ": connected\n\n"); err != nil {
+		runErr = err
 		return
 	}
 	if err := controller.Flush(); err != nil {
+		runErr = err
 		return
 	}
 	emit := func(event assistantEvent) error {
@@ -188,11 +182,12 @@ func (s *Server) handleAssistantChat(w http.ResponseWriter, r *http.Request) {
 		}
 		return controller.Flush()
 	}
-	if err := s.runAssistant(r, request, emit); err != nil {
+	runErr = s.runAssistant(r, request, emit)
+	if runErr != nil {
 		// Never expose or log SDK errors: they may contain credentials, prompts or provider internals.
 		message := "Chat stopped. Check Mango before repeating an action; completed changes may remain."
 		var actionError assistantActionError
-		if errors.As(err, &actionError) {
+		if errors.As(runErr, &actionError) {
 			message = actionError.Error()
 		}
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -267,7 +262,7 @@ func (a *mangoAssistant) begin(owner, id string) bool {
 	if len(a.captures) >= assistantTraceTotalLimit/assistantTraceLimit {
 		return false
 	}
-	a.captures[key] = &assistantCapture{events: []assistantTrace{}, done: make(chan struct{})}
+	a.captures[key] = &assistantCapture{events: []assistantTrace{}, startTime: now.UTC(), done: make(chan struct{})}
 	if a.results == nil {
 		a.results = make(map[string]*assistantResult)
 	}

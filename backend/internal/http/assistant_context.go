@@ -1,14 +1,17 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
 	"time"
 
 	"miraeopus/backend/internal/domain"
+	"miraeopus/backend/internal/store"
 )
 
 const assistantTraceLimit = 8 << 20
@@ -28,11 +31,12 @@ type assistantTrace struct {
 	Data     json.RawMessage `json:"data"`
 }
 type assistantCapture struct {
-	events   []assistantTrace
-	bytes    int
-	finished bool
-	done     chan struct{}
-	inspect  bool
+	events    []assistantTrace
+	startTime time.Time
+	bytes     int
+	finished  bool
+	done      chan struct{}
+	inspect   bool
 }
 
 var assistantSecretURL = regexp.MustCompile(`(?i)https?://[^\s"<>]*(?:[?&](?:x-amz-signature|x-amz-credential|token|access_token|key|sig|signature)=)[^\s"<>]*`)
@@ -96,7 +100,7 @@ func (s *Server) captureAssistant(r *http.Request, capture *assistantCapture, em
 	capture.events = append(capture.events, event)
 	capture.bytes += len(serialized)
 	a.mu.Unlock()
-	if capture.inspect && r.Context().Err() == nil {
+	if capture.inspect && emit != nil && r.Context().Err() == nil {
 		actor, ok := authenticatedActor(r)
 		role, err := s.currentActorRoleForCompanyContext(r.Context(), actor, actor.CompanyID)
 		if !ok || err != nil || role != domain.RoleDevAdmin {
@@ -105,6 +109,63 @@ func (s *Server) captureAssistant(r *http.Request, capture *assistantCapture, em
 		return emit(assistantEvent{Type: "trace", Trace: &event})
 	}
 	return nil
+}
+
+// Save the existing sanitized events once, after the terminal outcome. This is
+// diagnostic storage only: a failed save must never retry or fail business work.
+func (s *Server) finishAssistantCapture(r *http.Request, request assistantRequest, emit func(assistantEvent) error, runErr error) {
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		return
+	}
+	a := s.assistant
+	key := actor.CompanyID + ":" + actor.User.UserID + ":" + request.RequestID
+	a.mu.Lock()
+	capture := a.captures[key]
+	if capture == nil || capture.finished {
+		a.mu.Unlock()
+		return
+	}
+	capture.inspect = request.InspectContext
+	a.mu.Unlock()
+	status, message := "completed", "Foreground interaction completed."
+	if runErr != nil {
+		status, message = "failed", "Chat stopped. Check saved work before repeating an action."
+		var actionError assistantActionError
+		if errors.As(runErr, &actionError) {
+			message = actionError.Error()
+		}
+	}
+	if r.Context().Err() != nil {
+		status, message = "stopped", "Cancellation or deadline stopped further work. An entered action may have committed."
+	}
+	_ = s.captureAssistant(r, capture, emit, "termination", status, map[string]any{"message": message})
+	finishTime := time.Now().UTC()
+	a.finishAssistantResult(key)
+	a.mu.Lock()
+	capture.finished = true
+	close(capture.done)
+	a.mu.Unlock()
+	inspection, err := json.Marshal(capture.events)
+	if err == nil {
+		// Stop cancels provider/tools, but cannot cancel the final archive attempt.
+		// This synchronous, bounded save runs no model or business action.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+		defer cancel()
+		err = s.repo.SaveAIRunContext(ctx, store.AIRun{
+			CompanyID: actor.CompanyID, UserID: actor.User.UserID, AIRunsID: request.RequestID,
+			StartTime: capture.startTime, FinishTime: finishTime, InspectionJSON: inspection,
+		})
+	}
+	if err != nil {
+		// Database errors can contain inspection data; log no body or raw error.
+		log.Printf("assistant_inspection_archive status=failed")
+	}
+	a.mu.Lock()
+	if !capture.inspect {
+		delete(a.captures, key)
+	}
+	a.mu.Unlock()
 }
 
 // One bounded recovery read preserves an already entered action's outcome after

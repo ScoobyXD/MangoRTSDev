@@ -1,3 +1,16 @@
+# Current AI Inspection Ownership Business Logic Laws
+
+1. `public."AI_runs"` records the exact authenticated company and user accepted by the existing Send authorization rules and uses that owner's existing request UUID as `"AI_runs_id"`.
+2. One company, user, and request UUID has at most one immutable inspection archive; repeated saves never overwrite it.
+3. Membership changes preserve historical archives and allow an already admitted Send to save its final inspection; existing global administrator access requires no new company membership.
+4. Permanently deleting the exact company or user cascades its dependent archives and preserves unrelated owners' archives.
+5. Captured resource identities and contents remain historical diagnostic data; they grant no permission, create no live resource relationship, and never become business truth.
+6. Recycling, editing, or deleting a business resource does not rewrite the historical inspection snapshot or create an archive restore relationship.
+
+## AI Inspection Ownership Story
+
+A foreground Send captures the existing inspection events under its authenticated company and user. When the Send ends, one archive stores that same request UUID and ordered timestamped event array, even if membership changed while it ran. Later membership or business-resource changes leave the snapshot historical. Deleting its exact company or user removes the dependent archives; no captured resource is deleted or restored through the archive.
+
 # Current Process Step Relationship Business Logic Laws
 
 1. `process_steps.logic_gate_id` is the exact same-company owning Process identity, and every step has one immutable Process owner.

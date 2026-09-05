@@ -970,6 +970,11 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 		restore()
 		return DeleteCompanyUserResult{}, err
 	}
+	for key, run := range r.aiRuns {
+		if run.UserID == userID {
+			delete(r.aiRuns, key)
+		}
+	}
 	return DeleteCompanyUserResult{User: deleted, DeleteExternalIdentity: true}, nil
 }
 

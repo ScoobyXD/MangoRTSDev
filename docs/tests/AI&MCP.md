@@ -54,7 +54,7 @@
 52. Upload-status reads retain the upload handler's observed-part synchronization and lost-access cleanup behavior.
 53. Adding, removing, or changing an in-app AI tool requires updating this inventory in the same change.
 54. Opt-in Inspect requires current dev_admin access and retains the complete final request body for every provider invocation, exact runtime instructions/history/context, native skill discovery and loads, tool arguments/results/errors, limits, and cancellation.
-55. Inspection remains in browser memory after failure or Stop; server recovery lasts until the next Send by the same actor/company, fifteen minutes, or backend restart, and every recovery rechecks that retention and current actor/company/dev_admin access before returning data.
+55. Inspection remains in browser memory after failure or Stop; the existing trace endpoint recovers process memory until the next Send by the same actor/company, fifteen minutes, or backend restart, and rechecks that retention and current actor/company/dev_admin access before returning data.
 56. Assignment questions use the current user's existing assigned-to-me query across all effective RACI roles and permitted Processes; the first 50 company Processes never establish whether the user has assignments.
 57. SOP discovery uses the latest live canonical Process textbox even when its body was saved without a separate metadata save; metadata alone never hides a newer saved SOP body.
 58. The actual pinned Pi SDK owns the only model/tool loop; Go supervises one bounded Node child and retains all authenticated business dispatch.
@@ -68,16 +68,22 @@
 66. An incomplete or multi-tool model response causes no tool dispatch; native and Go tools execute sequentially within the same total limit.
 67. Playful or physical procedures may produce an honestly labelled written simulation; the assistant never claims unsupported physical or external actions occurred.
 68. The backend reserves 8 MiB per current interaction before admitting at most eight retained/active captures; a tool starts only when space remains for its bounded result and a terminal marker.
-69. Clearing or reloading browser chat discards its visible history and pending recovery; server recovery is temporary process memory and never a durable Run or transcript archive.
+69. Clearing or reloading browser chat discards its visible history and pending recovery; the inspection archive does not supply chat history or change the existing trace/result endpoints.
 70. A confirmed textbox save remains inspectable if Stop prevents its canonical read; its saved response is retained separately from the unconfirmed read.
 71. Every actor may recover only their own saved Process/Node links through the current-company result endpoint; it rechecks current resource access and returns no prompts or traces.
 72. Stopped or failed turns can recover their saved links through the result endpoint when inspection is unavailable while retaining received traces; unfinished recovery offers a manual refresh without repeating the action or polling automatically.
 73. Inspection records the HTTP status of every provider response, including rejected requests, without exposing private error bodies.
 74. General AI rules live in AGENTS.md; the Process skill adds only Process-specific execution guidance, and tool/skill catalogs come from their registered definitions.
+75. Every admitted Send attempts one complete inspection save when foreground work ends, including completion, failure, and Stop, whether Inspect is enabled or disabled.
+76. `AI_runs` has exactly `company_id`, `user_id`, `AI_runs_id`, `start_time`, `finish_time`, and `inspection_json`; its IDs are the authenticated company/user and existing Send request ID, and its times record actual admission and completion before the archive write.
+77. `inspection_json` stores the existing sanitized ordered event array, including the terminal outcome and each event's original sequence, time, kind, status, and captured data, without reconstruction or replacement timestamps.
+78. One company/user/request may have only one immutable archive; persistence never inserts per event, updates a growing body, retries, or restarts model or business work.
+79. Stop cannot cancel the final synchronous archive attempt, which has a five-second limit; archive failure logs no inspection body or raw error and must not change a business action's outcome.
+80. A backend crash before the final save may lose that inspection; archives have no automatic age-based deletion, background continuation, or authority over live resources and permissions.
 
 ## Process story
 
-A user sends a message from the existing composer. Mango supplies current identity and any picker-selected Process. Pi can also search and bind one exact saved Process in the same interaction. Discussion creates no Node; an explicit execution request uses the same guarded create, append-text, and move commands. Pi loads generic native guidance from approved ai files while the saved SOP remains the procedure. Inspect shows complete provider requests and actual harness/action outcomes. Stop prevents further work and preserves saved changes and the Node link.
+A user sends a message from the existing composer. Mango supplies current identity and any picker-selected Process. Pi can also search and bind one exact saved Process in the same interaction. Discussion creates no Node; an explicit execution request uses the same guarded create, append-text, and move commands. Pi loads generic native guidance from approved ai files while the saved SOP remains the procedure. Inspect shows complete provider requests and actual harness/action outcomes. Stop prevents further work and preserves saved changes and the Node link. When foreground work ends, Mango saves the captured timestamped events and terminal outcome once in `AI_runs`; a failed archive write leaves business results unchanged, and a crash before the save can lose the inspection.
 
 ## Current AI and MCP inventory
 
