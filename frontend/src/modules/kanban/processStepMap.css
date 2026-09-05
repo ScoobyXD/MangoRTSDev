@@ -50,8 +50,8 @@
 .process-step-map__hover-preview { position:absolute; top:calc(100% + 10px); left:0; z-index:4; width:max-content; max-width:260px; padding:10px 12px; border-radius:10px; background:rgba(255,255,255,.94); box-shadow:0 6px 24px #2634491f; color:#273449; font-size:12px; font-weight:650; overflow-wrap:anywhere; pointer-events:none; }
 .process-step-map__hover-preview span { display:block; margin-top:4px; color:#63738a; font-size:11px; font-weight:400; }
 .process-step-map--canvas { position:relative; min-height:0; gap:0; background:#fff; }
-.process-step-map--canvas .process-step-map__viewport { min-height:0; border:0; border-radius:0; padding:80px 24px 24px; box-sizing:border-box; background:#fff; }
-.process-step-map--canvas .process-step-map__extent { min-width:100%; min-height:100%; }
+.process-step-map--canvas .process-step-map__viewport { min-height:0; border:0; border-radius:0; padding:80px 24px 24px; box-sizing:border-box; background:#fff; overflow:clip; cursor:grab; touch-action:none; }
+.process-step-map--canvas .process-step-map__viewport.is-panning { cursor:grabbing; }
 .process-step-map--canvas .process-step-map__canvas { background:none; }
 .process-step-map--canvas .process-step-map__step { cursor:grab; touch-action:none; }
 .process-step-map--canvas .process-step-map__step:active { cursor:grabbing; }

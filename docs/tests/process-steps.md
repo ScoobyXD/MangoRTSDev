@@ -51,14 +51,14 @@
 49. Process recycle and restore preserve exact surviving Step geometry and routes, and permanent Process deletion removes its layout.
 50. Layout reads and writes require current access to the exact owning Process and reject references to another Process.
 51. SOP text provides written Step explanations; the map introduces no separate instruction fields or inferred Step identities.
-52. Zoom, scrolling, and the selected view are local presentation state and never replace shared Step layout.
+52. Pan, zoom, Board scrolling, and the selected view are local presentation state and never write layout or resource records.
 53. Create Process on the company map opens an empty local draft inside the shared map pane.
 54. Save Process requires a nonblank name and an existing destination Folder selected through its breadcrumb path.
 55. Initial Save stores the Process, Folder placement, zero to 200 Steps, up to 500 same-Process connections, layout, and committed events in one transaction.
 56. Initial Step array order sets Board order independently of authored geometry.
 57. A rejected save retains the local draft and commits no partial Process, relationship, placement, or event.
 58. Repeated save attempts retain the same allocated UUIDs and cannot create duplicate Processes or overwrite an existing identity.
-59. Save and navigation controls stay disabled during a layout gesture or pending mutation.
+59. Save and controls that leave the Process stay disabled during a layout gesture or pending mutation.
 60. Leaving an unsaved draft through its Company map or Create Process action requires explicit discard; successful Save stays in the full Process canvas.
 61. Sidebar navigation retains the current company's draft in memory; returning to Process Map restores that draft without a server write.
 62. An uncertain Save offers an explicit saved-version recovery that freshly authorizes the exact Process and its Explorer location before leaving the draft.
@@ -70,7 +70,7 @@
 68. Save Process and its save status stay inside the common top-right card.
 69. Hover mode on the focused map previews the hovered Step's name and highlights its connections without changing selection or pending edits.
 70. Closing Step or connection details returns keyboard focus to that exact map item.
-71. The focused draft and saved map show a labeled Process outline that retains its top and left inset and fills the available viewport width and height at the current zoom.
+71. The focused Process outline uses unscaled work-area dimensions and pans and zooms with its Steps and routes.
 72. The Process outline expands to contain authored Step and route geometry without changing that geometry or Board layout.
 73. New Step-map boxes use dimensions of 112 by 56 canvas units.
 74. Existing saved Step boxes retain their dimensions until explicitly resized.
@@ -82,10 +82,16 @@
 80. Enter or blur commits a changed, trimmed nonblank inline title through the existing Step rename command.
 81. Escape cancels inline title changes and retains the last committed name.
 82. A blank inline title leaves the last committed Step name unchanged.
+83. Dragging blank space in the focused map pans its camera without moving authored geometry.
+84. Wheel zoom in the focused map keeps the world point beneath the pointer fixed within a 50% to 800% range.
+85. The focused map's zoom buttons zoom around the current view center.
+86. Fit centers the focused Process outline at the best fitting zoom within the 50% to 800% range.
+87. Read-only access allows focused-map camera navigation.
+88. A Step or route editing gesture holds the focused-map camera fixed until that gesture ends.
 
 ## Process Story
 
-A user chooses Create Process from the map's persistent top-right card, chooses a Folder and edits the filename in the inline path. Create Step adds a compact card with its title selected for typing; the user names, drags, and resizes Steps inside the Process outline. Save commits the complete draft to Company Explorer. Further Step edits save normally, and the Board uses those exact Steps as columns. Written explanations remain in the SOP; deleting a Step preserves every Node and status.
+A user chooses Create Process, chooses a Folder, and edits the filename in the inline path. Create Step adds a compact card with its title selected for typing. The user arranges Steps inside the outline, pans blank space, and zooms to inspect the work while the controls stay fixed. Save commits the complete draft to Company Explorer. Further Step edits save normally, and the Board uses those exact Steps as columns. Written explanations remain in the SOP; deleting a Step preserves every Node and status.
 
 ## Main Scenarios
 

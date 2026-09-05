@@ -539,3 +539,39 @@ test("Enter and Escape finish inline naming and return keyboard focus to the Pro
     assert.equal(h.mutations().length, 0);
   } finally { await h.dispose(); }
 });
+
+test("late Folder and Process filename focus restoration preserves a newer inline Step editor", async () => {
+  const h = await harness();
+  const originalFrame = h.dom.window.requestAnimationFrame.bind(h.dom.window);
+  const pendingFrames: FrameRequestCallback[] = [];
+  try {
+    await h.start(true);
+    await h.input('[placeholder="Untitled Process"]', "Order fulfilment");
+    await act(async () => { await new Promise<void>((resolve) => originalFrame(() => resolve())); });
+    h.dom.window.requestAnimationFrame = (callback) => { pendingFrames.push(callback); return pendingFrames.length; };
+
+    await h.chooseFolder();
+    assert.equal(pendingFrames.length, 1, "choosing the destination schedules its return focus");
+    await h.click("Move New Step");
+    await h.click("Rename Step");
+    const afterFolder = h.container.querySelector<HTMLInputElement>('[aria-label="Step name"]')!;
+    assert.ok(afterFolder);
+    assert.equal(h.dom.window.document.activeElement, afterFolder);
+    await act(async () => pendingFrames.shift()!(16));
+    assert.ok(h.container.querySelector('[aria-label="Step name"]') === afterFolder, "late Folder focus must not blur and close the newer Step input");
+    assert.equal(h.dom.window.document.activeElement, afterFolder);
+
+    await h.key(afterFolder, "Escape");
+    await h.input('[placeholder="Untitled Process"]', "Shipping orders");
+    assert.equal(pendingFrames.length, 1, "finishing the Process filename schedules its return focus");
+    await h.click("Move New Step");
+    await h.click("Rename Step");
+    const afterFilename = h.container.querySelector<HTMLInputElement>('[aria-label="Step name"]')!;
+    assert.ok(afterFilename);
+    assert.equal(h.dom.window.document.activeElement, afterFilename);
+    await act(async () => pendingFrames.shift()!(32));
+    assert.ok(h.container.querySelector('[aria-label="Step name"]') === afterFilename, "late filename focus must not blur and close the newer Step input");
+    assert.equal(h.dom.window.document.activeElement, afterFilename);
+    assert.equal(h.mutations().length, 0);
+  } finally { h.dom.window.requestAnimationFrame = originalFrame; await h.dispose(); }
+});
