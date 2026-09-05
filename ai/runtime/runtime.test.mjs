@@ -57,7 +57,7 @@ test('unknown configured model stops the actual interaction before provider egre
 
 test('real Pi captures exact initial and continuation HTTP bodies, complete native skill loads, and saved results', async t => {
   const f = await fixture(t, (response, call) => reply(response, call === 1
-    ? [toolItem('read', { path: 'skills/mango-process/SKILL.md' })]
+    ? [toolItem('read', { path: f.captured.find(e => e.kind === 'runtime').data.effective_system_prompt.match(/<location>([^<]+)<\/location>/)[1] })]
     : call === 2 ? [toolItem('fixture_write', { text: 'A saved written simulation.' }, 'call_2')]
     : [textItem('Saved a written simulation.')]));
   await runInteraction(f.start, f.transport);
@@ -70,6 +70,8 @@ test('real Pi captures exact initial and continuation HTTP bodies, complete nati
   assert.ok(f.requests.every(request => request.tools.every(tool => tool.type === 'function' && tool.strict === true)));
   assert.match(JSON.stringify(f.requests[0]), /Cloud Bakery/);
   assert.match(JSON.stringify(f.requests[0]), /available_skills/);
+  assert.match(f.captured.find(e => e.kind === 'runtime').data.effective_system_prompt, /<location>skills\/mango-process\/SKILL\.md<\/location>/);
+  assert.deepEqual(f.requests[0].tools.find(tool => tool.name === 'read').parameters.properties.path.enum, ['AGENTS.md', 'skills/mango-process/SKILL.md']);
   assert.equal(f.captured.filter(e => e.kind === 'skill_load').length, 1);
   assert.match(JSON.stringify(f.requests[1]), /Work with a saved Mango Process/);
   assert.match(JSON.stringify(f.requests[2]), /A saved written simulation/);
@@ -105,12 +107,14 @@ test('capture acknowledgment failure prevents initial and continuation provider 
 });
 
 test('denied native read records failure and stops continuation', async t => {
-  const f = await fixture(t, response => reply(response, [toolItem('read', { path: '../../AGENTS.md' })]));
-  await assert.rejects(runInteraction(f.start, f.transport));
-  assert.equal(f.requests.length, 1);
-  assert.equal(f.dispatches.length, 0);
-  assert.equal(f.captured.filter(e => e.kind === 'skill_load').length, 0);
-  assert.ok(f.captured.some(e => e.kind === 'tool_result' && e.status === 'failed'));
+  for (const path of ['../../AGENTS.md', 'C:\\Users\\Jonat\\MangoRTSDev\\a']) {
+    const f = await fixture(t, response => reply(response, [toolItem('read', { path })]));
+    await assert.rejects(runInteraction(f.start, f.transport));
+    assert.equal(f.requests.length, 1);
+    assert.equal(f.dispatches.length, 0);
+    assert.equal(f.captured.filter(e => e.kind === 'skill_load').length, 0);
+    assert.ok(f.captured.some(e => e.kind === 'tool_result' && e.status === 'failed'));
+  }
 });
 
 test('Go failure stops continuation and records independent tool failure', async t => {
