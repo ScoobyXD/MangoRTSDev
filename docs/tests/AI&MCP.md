@@ -60,7 +60,7 @@
 58. The actual pinned Pi SDK owns the only model/tool loop; Go supervises one bounded Node child and retains all authenticated business dispatch.
 59. The model may search visible Processes and bind one exact Process during the same Send; binding loads fresh authorized context, changes the tool catalog, and never mutates or authorizes execution.
 60. After binding, no ordinary mutation tool can dispatch; one interaction binds at most one Process and creates at most one Process Node.
-61. Native Pi skills use only packaged AGENTS.md and the Process SKILL.md; home/project instructions, arbitrary filesystem/shell tools, extensions, customer slash expansion, retries, and compaction remain disabled.
+61. Native Pi skills use only packaged AGENTS.md and the Process SKILL.md; the skill catalog and read tool use the exact ai-relative paths `AGENTS.md` and `skills/mango-process/SKILL.md`; home/project instructions, absolute read paths, arbitrary filesystem/shell tools, extensions, customer slash expansion, retries, and compaction remain disabled.
 62. Required request capture must be retained before provider dispatch; capture failure or a size limit stops further work without silently truncating retained events.
 63. Inspection distinguishes preparation, dispatch, confirmed saved results, failures, denials, stops, and uncertain outcomes; provider-hidden instructions and private reasoning are unavailable.
 64. Credentials, authorization headers, secret URLs, opaque private continuation fields, and raw provider errors never enter inspection; security omissions are explicit and credentials/secret URLs are removed before model egress.
