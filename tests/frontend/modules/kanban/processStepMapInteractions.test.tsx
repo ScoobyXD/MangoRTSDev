@@ -169,6 +169,215 @@ function cameraFixture(h: Awaited<ReturnType<typeof harness>>) {
 
 const near = (actual: number, expected: number, message?: string) => assert.ok(Math.abs(actual - expected) < 1e-7, message ?? `expected ${actual} to equal ${expected}`);
 
+function connectionFixture(h: Awaited<ReturnType<typeof harness>>) {
+  const viewport = h.container.querySelector<HTMLElement>(".process-step-map__viewport")!;
+  let hit: Element | null = null;
+  const hitPoints: Array<[number, number]> = [];
+  Object.defineProperty(h.dom.window.document, "elementFromPoint", { configurable: true, value: (x: number, y: number) => { hitPoints.push([x, y]); return hit; } });
+  const port = (name: string, side: "input" | "output") => h.button(`Connect ${side === "input" ? "into" : "from"} ${name}`);
+  const preview = () => h.container.querySelector<SVGPathElement>(".process-step-map__connection-preview");
+  const hover = async (target: Element | null, x = 480, y = 312) => { hit = target; await h.pointer(viewport, "pointermove", x, y); };
+  const drop = async (target: Element | null, x = 480, y = 312) => { hit = target; await h.pointer(viewport, "pointerup", x, y); await flush(); };
+  return { viewport, port, preview, hover, drop, hitPoints };
+}
+
+test("canvas ports create one directed connection at the current zoom and reuse an existing pair", async () => {
+  const h = await harness(false, true);
+  try {
+    h.state.relationships = [];
+    h.state.layout.routes = [];
+    await h.mount();
+    const c = cameraFixture(h), p = connectionFixture(h);
+    c.canvas.getBoundingClientRect = () => {
+      const camera = c.read(), x = 44 + camera.x, y = 110 + camera.y;
+      const width = Number.parseFloat(c.canvas.parentElement!.style.width) * camera.zoom, height = Number.parseFloat(c.canvas.parentElement!.style.height) * camera.zoom;
+      return { x, y, left: x, top: y, right: x + width, bottom: y + height, width, height, toJSON() {} };
+    };
+    await c.wheel(-Math.log(2) / .002);
+    const cameraBefore = c.read(), layoutBefore = structuredClone(h.state.layout);
+    const source = p.port("Receive", "output"), target = p.port("Check", "input");
+    assert.equal(source.dataset.stepMapPort, "output");
+    assert.equal(target.dataset.stepMapPort, "input");
+    await h.pointer(source, "pointerdown", 420, 200);
+    assert.ok(p.preview(), "dragging from a port must show a live connection");
+    const firstPath = p.preview()!.getAttribute("d");
+    assert.equal(h.busyStates.at(-1), true);
+    assert.equal(h.button("Create Step").disabled, true);
+    await p.hover(null, 580, 420);
+    assert.notEqual(p.preview()!.getAttribute("d"), firstPath, "the preview must follow the pointer before a target is reached");
+    const pathCoordinates = p.preview()!.getAttribute("d")!.match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/gi)!.map(Number);
+    assert.deepEqual(pathCoordinates.slice(0, 2), [288, 120], "the path must start at the output port in world coordinates");
+    near(pathCoordinates.at(-2)!, 368);
+    near(pathCoordinates.at(-1)!, 230);
+    await c.wheel(-200);
+    assert.deepEqual(c.read(), cameraBefore, "connection dragging must lock camera zoom");
+    await p.hover(target, 804, 584);
+    assert.ok(target.classList.contains("is-connection-target"));
+    assert.deepEqual(p.hitPoints.at(-1), [804, 584], "port hit testing must use screen coordinates even while zoomed");
+    assert.equal(h.requests.filter((request) => request.method !== "GET").length, 0);
+    await p.drop(target, 804, 584);
+    assert.deepEqual(h.requests.filter((request) => request.method !== "GET"), [{ path: "/v2/logic-gates/process/step-relationships", method: "POST", body: { company_id: "company", source: { resource_type: "process_step", resource_id: "a" }, target: { resource_type: "process_step", resource_id: "b" } } }]);
+    assert.equal(p.preview(), null);
+    assert.equal(h.container.querySelector(".is-connection-target"), null);
+    assert.equal(h.busyStates.at(-1), false);
+    assert.deepEqual(h.state.layout, layoutBefore, "connecting must not drag or resize either Step");
+    assert.deepEqual(c.read(), cameraBefore, "port events must not bubble into blank-canvas panning");
+    assert.ok(h.container.querySelector('[aria-label="Connection from Receive to Check"]'));
+    await h.click("Move Receive");
+    await h.pointer(p.port("Check", "input"), "pointerdown", 804, 584);
+    await p.drop(p.port("Receive", "output"), 420, 200);
+    assert.equal(h.requests.filter((request) => request.method === "POST").length, 1, "the same directed pair must reuse its existing relationship");
+    assert.ok(h.container.querySelector('.process-step-map__edges .is-selected [aria-label="Connection from Receive to Check"]'));
+    assert.equal(h.writes().length, 0);
+  } finally { await h.dispose(); }
+});
+
+test("dragging backward from an input to an output connects the output Step to the input Step locally", async () => {
+  const h = await harness(true, true);
+  try {
+    h.state.relationships = [];
+    h.state.layout.routes = [];
+    await h.mount();
+    const p = connectionFixture(h);
+    await h.pointer(p.port("Check", "input"), "pointerdown", 480, 312);
+    await p.hover(p.port("Receive", "output"), 288, 120);
+    assert.ok(p.port("Receive", "output").classList.contains("is-connection-target"));
+    await p.drop(p.port("Receive", "output"), 288, 120);
+    assert.deepEqual(h.localCalls, ["connect"]);
+    assert.deepEqual(h.state.relationships, [{ resource_operational_relationship_id: "new-edge", source: { resource_type: "process_step", resource_id: "a" }, target: { resource_type: "process_step", resource_id: "b" } }]);
+    assert.deepEqual(h.requests, [], "draft connections must use the supplied local command only");
+    assert.equal(h.busyStates.at(-1), false);
+  } finally { await h.dispose(); }
+});
+
+test("keyboard users can connect opposite ports with Enter or Space and cancel with Escape", async () => {
+  const h = await harness(true, true);
+  try {
+    h.state.relationships = [];
+    h.state.layout.routes = [];
+    await h.mount();
+    const p = connectionFixture(h);
+    const source = p.port("Receive", "output"), target = p.port("Check", "input");
+    await act(async () => source.focus());
+    await h.key(source, "Enter");
+    assert.ok(p.preview());
+    assert.equal(h.busyStates.at(-1), true);
+    await h.key(p.port("Check", "output"), "Enter");
+    assert.deepEqual(h.localCalls, [], "a same-side keyboard activation cannot complete a connection");
+    // jsdom does not perform native Tab focus traversal.
+    await act(async () => target.focus());
+    await h.key(target, " ");
+    assert.deepEqual(h.localCalls, ["connect"]);
+    assert.deepEqual(h.state.relationships[0].source, { resource_type: "process_step", resource_id: "a" });
+    assert.deepEqual(h.state.relationships[0].target, { resource_type: "process_step", resource_id: "b" });
+    assert.equal(p.preview(), null);
+    assert.equal(h.dom.window.document.activeElement, target);
+    await h.key(p.port("Receive", "input"), " ");
+    assert.ok(p.preview());
+    await h.key(p.port("Receive", "input"), "Escape");
+    assert.equal(p.preview(), null);
+    assert.deepEqual(h.localCalls, ["connect"]);
+    assert.deepEqual(h.requests, []);
+    assert.equal(h.busyStates.at(-1), false);
+  } finally { await h.dispose(); }
+});
+
+test("blank, same-Step, same-side and outside-canvas connection drops do not issue commands", async () => {
+  const h = await harness(false, true);
+  try {
+    await h.mount();
+    const p = connectionFixture(h);
+    const outside = p.port("Check", "input").cloneNode(true) as HTMLButtonElement;
+    h.dom.window.document.body.append(outside);
+    const invalidTargets = [null, p.port("Receive", "input"), p.port("Check", "output"), outside];
+    for (const target of invalidTargets) {
+      await h.pointer(p.port("Receive", "output"), "pointerdown", 288, 120);
+      await p.hover(target);
+      assert.ok(p.preview());
+      assert.equal(h.container.querySelector(".is-connection-target"), null);
+      await p.drop(target);
+      assert.equal(p.preview(), null);
+      assert.equal(h.busyStates.at(-1), false);
+    }
+    assert.deepEqual(h.requests.filter((request) => request.method !== "GET"), []);
+    assert.deepEqual(h.state.layout, initialLayout);
+    assert.deepEqual(h.state.relationships, [initialEdge]);
+  } finally { await h.dispose(); }
+});
+
+test("connection cancellation and permission loss discard the preview and prevent later release from saving", async () => {
+  const h = await harness(false, true);
+  try {
+    h.state.relationships = [];
+    h.state.layout.routes = [];
+    await h.mount();
+    const p = connectionFixture(h);
+    for (const cancellation of ["pointercancel", "Escape", "lostpointercapture", "permission"] as const) {
+      const source = p.port("Receive", "output");
+      await h.pointer(source, "pointerdown", 288, 120);
+      await p.hover(p.port("Check", "input"));
+      assert.ok(p.preview());
+      if (cancellation === "Escape") await h.key(source, "Escape");
+      else if (cancellation === "permission") { h.state.canEdit = false; await h.mount(); }
+      else await h.pointer(source, cancellation, 480, 312);
+      assert.equal(p.preview(), null, `${cancellation} must clear the temporary path`);
+      assert.equal(h.container.querySelector(".is-connection-target"), null);
+      await p.drop(p.port("Check", "input"));
+      assert.equal(h.busyStates.at(-1), false);
+      if (cancellation === "permission") {
+        await h.pointer(p.port("Receive", "output"), "pointerdown", 288, 120);
+        await p.drop(p.port("Check", "input"));
+        assert.equal(p.preview(), null, "read-only ports cannot begin a new connection");
+      }
+    }
+    assert.deepEqual(h.requests.filter((request) => request.method !== "GET"), []);
+    assert.deepEqual(h.state.relationships, []);
+    h.state.canEdit = true;
+    await h.mount();
+    assert.equal(p.preview(), null, "restoring permission must not resume the cancelled connection");
+    await p.drop(p.port("Check", "input"));
+    assert.deepEqual(h.requests.filter((request) => request.method !== "GET"), []);
+  } finally { await h.dispose(); }
+});
+
+test("a pending connection blocks overlapping edits and a failed save leaves no edge before retry", async () => {
+  const h = await harness(false, true);
+  let releaseConnection!: (value: Response) => void;
+  try {
+    h.state.relationships = [];
+    h.state.layout.routes = [];
+    await h.mount();
+    const p = connectionFixture(h), layoutBefore = structuredClone(h.state.layout);
+    h.state.customFetch = (request) => request.path.endsWith("/step-relationships") && request.method === "POST" ? new Promise((resolve) => { releaseConnection = resolve; }) : null;
+    await h.pointer(p.port("Receive", "output"), "pointerdown", 288, 120);
+    await p.drop(p.port("Check", "input"));
+    assert.equal(h.busyStates.at(-1), true);
+    assert.equal(p.preview(), null);
+    assert.equal(h.button("Create Step").disabled, true);
+    await h.pointer(p.port("Check", "output"), "pointerdown", 704, 312);
+    await p.drop(p.port("Receive", "input"));
+    await h.pointer(h.button("Move Receive"), "pointerdown", 100, 100);
+    await h.pointer(p.viewport, "pointerup", 148, 132);
+    assert.equal(h.requests.filter((request) => request.method === "POST").length, 1);
+    assert.equal(h.writes().length, 0);
+    await act(async () => releaseConnection(response({ error: "Connection denied" }, 403)));
+    await flush();
+    assert.match(h.container.querySelector('[role="alert"]')?.textContent ?? "", /Connection denied/);
+    assert.equal(h.container.querySelector('[aria-label="Connection from Receive to Check"]'), null);
+    assert.deepEqual(h.state.relationships, []);
+    assert.deepEqual(h.state.layout, layoutBefore);
+    assert.equal(h.busyStates.at(-1), false);
+    h.state.customFetch = null;
+    await h.pointer(p.port("Receive", "output"), "pointerdown", 288, 120);
+    await p.drop(p.port("Check", "input"));
+    assert.equal(h.requests.filter((request) => request.method === "POST").length, 2);
+    assert.equal(h.state.relationships.length, 1);
+    assert.ok(h.container.querySelector('[aria-label="Connection from Receive to Check"]'));
+    assert.equal(h.container.querySelector('[role="alert"]'), null);
+    assert.equal(h.writes().length, 0);
+  } finally { await h.dispose(); }
+});
+
 test("readonly canvas pans on blank space and restores the starting view on pointercancel or Escape without saving", async () => {
   const h = await harness(false, true);
   try {
@@ -441,7 +650,7 @@ test("canvas body dragging uses the current zoom and directional handles keep op
     await h.mount();
     await cameraFixture(h).wheel(-Math.log(1.5) / .002);
     const card = h.container.querySelector<HTMLElement>('[data-step-map-id="a"]')!;
-    assert.deepEqual([...card.querySelectorAll<HTMLElement>("[data-resize-handle]")].map((handle) => handle.dataset.resizeHandle).sort(), ["e", "n", "ne", "nw", "s", "se", "sw", "w"]);
+    assert.deepEqual([...card.querySelectorAll<HTMLElement>("[data-resize-handle]")].map((handle) => handle.dataset.resizeHandle).sort(), ["n", "ne", "nw", "s", "se", "sw"]);
     const body = card.querySelector(".process-step-map__step-label")!;
     await h.pointer(body, "pointerdown", 100, 100);
     await h.pointer(body, "pointermove", 148, 124);
@@ -459,7 +668,7 @@ test("canvas body dragging uses the current zoom and directional handles keep op
     assert.equal(h.writes().length, 2, "a resize must not also start a body drag");
     assert.deepEqual(h.state.layout.steps[0], { process_step_id: "a", x: 96, y: 64, width: 224, height: 128 }, "north ignores horizontal movement and keeps the bottom edge fixed");
 
-    await h.key(h.button("Resize Receive w"), "ArrowLeft");
+    await h.key(h.button("Resize Receive nw"), "ArrowLeft");
     assert.equal(h.writes().length, 3);
     assert.deepEqual(h.state.layout.steps[0], { process_step_id: "a", x: 80, y: 64, width: 240, height: 128 });
 
