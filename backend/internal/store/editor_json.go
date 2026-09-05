@@ -82,6 +82,10 @@ func NormalizeEditorJSONDocumentRef(ref EditorJSONDocumentRef) (EditorJSONDocume
 	}
 	switch ref.ResourceType {
 	case EntityTypeNode, EntityTypeProject, EntityTypeLogicGate, EntityTypeHuddleLogicGate, EntityTypeHuddleNode, EntityTypeKPI:
+	case EntityTypeProcessStep:
+		if cleanUUIDText(ref.ResourceID) == "" || ref.DocumentID != ref.ResourceID {
+			return EditorJSONDocumentRef{}, ErrInvalid
+		}
 	default:
 		return EditorJSONDocumentRef{}, ErrInvalid
 	}

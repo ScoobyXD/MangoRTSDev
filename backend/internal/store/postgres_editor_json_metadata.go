@@ -180,6 +180,8 @@ func postgresEditorResourceExistsTx(ctx context.Context, tx *sql.Tx, ref EditorD
 		table, idColumn = "nodes", "node_id"
 	case EntityTypeLogicGate:
 		table, idColumn = "logic_gates", "logic_gate_id"
+	case EntityTypeProcessStep:
+		table, idColumn = "process_steps", "process_step_id"
 	case EntityTypeProject:
 		table, idColumn = "projects", "project_id"
 	case EntityTypeHuddleLogicGate:

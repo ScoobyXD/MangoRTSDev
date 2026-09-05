@@ -1,12 +1,14 @@
 export const PROCESS_NODE_DRAG = "application/x-mango-process-work-nodes";
 
 import type { Account } from "../accounts/accountsApi.js";
+import type { MangoTiptapDocument } from "../editor/tiptap/mangoTiptapDocument.js";
 
 export type ProcessStep = {
   process_step_id: string;
   logic_gate_id: string;
   name: string;
   position: number;
+  body_json?: MangoTiptapDocument;
 };
 
 export type ProcessStepRelationship = {

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"sort"
 	"strings"
 
@@ -16,6 +17,7 @@ type ProcessStepCreateInput struct {
 	CompanyID          string
 	LogicGateID        string
 	Name               string
+	BodyJSON           json.RawMessage
 	AfterProcessStepID *string
 	ActorUserID        string
 }
@@ -58,6 +60,26 @@ func processWorkChangedEvent(companyID, logicGateID, actorUserID string) DomainE
 }
 
 func validProcessStepName(name string) bool { return strings.TrimSpace(name) != "" && len(name) <= 200 }
+
+func normalizeProcessStepBody(body json.RawMessage) (json.RawMessage, error) {
+	if body == nil {
+		return emptyEditorTextboxBody(), nil
+	}
+	document, annotations, err := decodeEditorTextboxBody(body)
+	if err != nil {
+		return nil, err
+	}
+	body, err = encodeEditorTextboxBody(document, annotations)
+	if err == nil && EditorOwnerTextLimitExceeded(0, int64(len(body))) {
+		return nil, ErrEditorOwnerTextLimit
+	}
+	return body, err
+}
+
+func cloneProcessStep(step domain.ProcessStep) domain.ProcessStep {
+	step.BodyJSON = append(json.RawMessage(nil), step.BodyJSON...)
+	return step
+}
 
 func planProcessStepInsertion(steps []domain.ProcessStep, afterProcessStepID *string) (int, map[string]int, bool) {
 	ordered := append([]domain.ProcessStep(nil), steps...)

@@ -50,7 +50,7 @@
 48. Deleting a Step or connection removes its dependent layout entries and advances the layout revision; surviving resources and geometry remain unchanged.
 49. Process recycle and restore preserve exact surviving Step geometry and routes, and permanent Process deletion removes its layout.
 50. Layout reads and writes require current access to the exact owning Process and reject references to another Process.
-51. SOP text provides written Step explanations; the map introduces no separate instruction fields or inferred Step identities.
+51. Each Step stores its own SOP in `process_steps.body_json`; the map and editor use the same exact Step identity.
 52. Pan, zoom, Board scrolling, and the selected view are local presentation state and never write layout or resource records.
 53. Create Process on the company map opens an unsaved new Process inside the shared map pane.
 54. Save Process requires a nonblank name and an existing destination Folder selected through its breadcrumb path.
@@ -116,10 +116,25 @@
 113. The new Process uses the existing RACI cards and SOP editor without a separate saved draft.
 114. The map omits the persistent unsaved-changes notice.
 115. Save reveals the Process in its expanded Explorer Folder and selects its canonical company-map placement while preserving the previous camera.
+116. The Process editor shows its general overview first and one full-width elevated instruction card for each Step underneath it.
+117. Instruction cards follow saved Board order and show consecutive numbers, the current Step name, and that Step's editable rich text.
+118. Creating, renaming, reordering, or deleting a Step updates its instruction card without copying instructions into the Process overview.
+119. The overview and Step cards share one vertical scroll area and the existing toolbar formats the focused editor.
+120. A new Step starts with an empty valid Mango editor JSON document.
+121. Saved Step instructions use the existing revisioned editor API with `process_step` and the exact Step UUID as both resource and document ID.
+122. Editing a Step's instructions never changes its name, order, flow connections, Node assignments, or owning Process.
+123. Step instruction reads and writes require the existing access rules of the exact owning Process; a read-only editor supplies no formatting or save controls.
+124. Step instructions use the existing editor's autosave, local recovery, stale-revision conflict handling, and rich-text controls.
+125. The shared Process save indicator includes every current Step editor and keeps a save failure visible for the page session while that Step exists.
+126. Flushing a Process waits for its overview and all mounted Step editors to finish saving.
+127. New Process Step instructions stay in memory until the existing atomic Save Process command stores them with the Process.
+128. Process text limits include the overview and every owned Step body; attachments retain the existing Process ownership and do not count as editor text.
+129. Process Save version includes typed Step instruction snapshots; restore updates surviving same-Process Steps without recreating deleted Steps or changing flow.
+130. A saved version includes an empty overview when the Process overview is untouched, so restoring it leaves a usable blank overview editor.
 
 ## Process Story
 
-A user creates a Process, chooses a Folder, and names compact Steps on the map. Output-to-input connections define the flow and its displayed numbering. The user arranges Steps, pans blank space, and zooms with the wheel before saving its RACI, SOP, and Steps together and returning to the previous company map view. In the Process editor, Map opens the same white canvas beside the SOP; its floating controls create Steps or return to the Board's Node columns and status views. Both views use the same saved Steps and connections. Deleting a Step preserves every Node and status.
+A user creates a Process, chooses a Folder, and names Steps on the map. The editor shows the general Process overview above numbered Step instruction cards in Board order. Clicking a card uses the shared toolbar to edit that Step's SOP. Save Process stores new Step instructions with the Process; existing instructions autosave through the normal editor. Board and Map edit those same Steps, and their changes appear in the instruction cards. Deleting a Step preserves every Node and status. Process Save version captures the overview and Step instructions; restore changes surviving text without rebuilding the flow.
 
 ## Main Scenarios
 
@@ -132,3 +147,5 @@ A user creates a Process, chooses a Folder, and names compact Steps on the map. 
 The repository migration is `backend/db/migrations/20260903_process_steps.sql`. A human operator must stop application writers, run this forward-only migration against PostgreSQL 17 or 18, and deploy the matching application before reopening writes. It also corrects the outdated RACI assignment constraint that blocked folder inheritance. It reports the connected version and stops on an unsupported version, incompatible starting schema, or unsupported existing status/resource type. Agents must not apply it to a live database. Disposable integration tests exercise the conversion and lifecycle without using live credentials.
 
 The Step-map addition is `backend/db/migrations/20260904_process_step_map_layouts.sql`, applied after the Step migration by a human operator before deploying this feature. It adds Process-owned layout storage and dependent cleanup; existing Steps need no geometry backfill. No live database is modified by this task.
+
+Step instructions require a human operator to apply `backend/db/migrations/20260905_process_step_sop_bodies.sql` before deploying the matching application. It adds `process_steps.body_json` and `revision`, distinguishes Step and overview history, includes Step bodies in the existing Process text limit, and updates captured recycle payloads to the current shape. Existing Steps start with empty instructions. The script supports PostgreSQL 17 and 18, checks the exact starting Step columns without depending on column order, and runs transactionally. Agents must not apply it to a live database.

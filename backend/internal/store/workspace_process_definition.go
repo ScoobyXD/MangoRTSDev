@@ -17,8 +17,9 @@ type WorkspaceProcessDefinitionInput struct {
 }
 
 type WorkspaceProcessDefinitionStep struct {
-	ProcessStepID string `json:"process_step_id"`
-	Name          string `json:"name"`
+	ProcessStepID string          `json:"process_step_id"`
+	Name          string          `json:"name"`
+	BodyJSON      json.RawMessage `json:"body_json,omitempty"`
 }
 
 type WorkspaceProcessDefinitionRelationship struct {
@@ -74,6 +75,7 @@ func normalizeWorkspaceProcessDefinition(input WorkspaceEntityBatchInput) (Works
 			return input, ErrEditorOwnerTextLimit
 		}
 	}
+	processTextBytes := int64(len(copy.EditorDocument))
 	steps, relationships, pairs := map[string]bool{}, map[string]bool{}, map[[2]string]bool{}
 	for index := range copy.Steps {
 		step := &copy.Steps[index]
@@ -81,6 +83,15 @@ func normalizeWorkspaceProcessDefinition(input WorkspaceEntityBatchInput) (Works
 		if step.ProcessStepID == "" || steps[step.ProcessStepID] || !validProcessStepName(step.Name) {
 			return input, ErrInvalid
 		}
+		var err error
+		step.BodyJSON, err = normalizeProcessStepBody(step.BodyJSON)
+		if err != nil {
+			return input, err
+		}
+		if EditorOwnerTextLimitExceeded(processTextBytes, int64(len(step.BodyJSON))) {
+			return input, ErrEditorOwnerTextLimit
+		}
+		processTextBytes += int64(len(step.BodyJSON))
 		steps[step.ProcessStepID] = true
 	}
 	for index := range copy.Relationships {

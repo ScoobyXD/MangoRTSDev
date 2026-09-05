@@ -26,6 +26,10 @@ import {
   type MangoTiptapSnapshot,
 } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapSync.js";
 import {
+  flushMangoTiptapResource,
+  registerMangoTiptapFlusher,
+} from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapFlushRegistry.js";
+import {
   clearMangoEditorDataFormatCacheForTests,
   loadMangoEditorDataFormat,
 } from "../../../../frontend/src/modules/editor/editorDataFormat.js";
@@ -192,7 +196,7 @@ async function writeRawMangoTiptapPending(record: Record<string, unknown>): Prom
   }
 }
 
-test("KPI and Huddle editor recovery records use the shared Mango pending-document validator", async () => {
+test("Process step, KPI, and Huddle editor recovery records use the shared Mango pending-document validator", async () => {
   const previous = {
     indexedDB: globalThis.indexedDB,
     IDBKeyRange: globalThis.IDBKeyRange,
@@ -200,7 +204,7 @@ test("KPI and Huddle editor recovery records use the shared Mango pending-docume
   Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: fakeIndexedDB });
   Object.defineProperty(globalThis, "IDBKeyRange", { configurable: true, value: IDBKeyRange });
   try {
-    for (const resourceType of ["kpi", "huddle_logic_gate"] as const) {
+    for (const resourceType of ["process_step", "kpi", "huddle_logic_gate"] as const) {
       const storageKey = `company-huddle-recovery:${resourceType}:resource-${resourceType}:document-${resourceType}`;
       await writeRawMangoTiptapPending({
         record_version: 2,
@@ -224,6 +228,48 @@ test("KPI and Huddle editor recovery records use the shared Mango pending-docume
       if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
       else Object.defineProperty(globalThis, key, { configurable: true, value });
     }
+  }
+});
+
+test("saving a Process waits for its step editors and excludes other owners and companies", async () => {
+  const owner = { companyID: "process-flush-company", resourceType: "logic_gate", resourceID: "process-a" };
+  const calls: string[] = [];
+  let releaseStep!: () => void;
+  const stepSave = new Promise<void>((resolveSave) => { releaseStep = resolveSave; });
+  const unregisterOverview = registerMangoTiptapFlusher({ ...owner, documentID: "overview" }, async () => { calls.push("overview"); });
+  const unregisterStep = registerMangoTiptapFlusher(
+    { companyID: owner.companyID, resourceType: "process_step", resourceID: "step-a", documentID: "step-a" },
+    async () => { calls.push("step-a"); await stepSave; },
+    owner,
+  );
+  const unregisterOtherProcess = registerMangoTiptapFlusher(
+    { companyID: owner.companyID, resourceType: "process_step", resourceID: "step-b", documentID: "step-b" },
+    async () => { calls.push("wrong-process"); },
+    { ...owner, resourceID: "process-b" },
+  );
+  const unregisterOtherCompany = registerMangoTiptapFlusher(
+    { companyID: "other-company", resourceType: "process_step", resourceID: "step-a", documentID: "step-a" },
+    async () => { calls.push("wrong-company"); },
+    { ...owner, companyID: "other-company" },
+  );
+  try {
+    let completed = false;
+    const saving = flushMangoTiptapResource(owner).then(() => { completed = true; });
+    await Promise.resolve();
+    assert.deepEqual(calls, ["overview", "step-a"]);
+    assert.equal(completed, false, "Process history must not snapshot while a step save is pending");
+    releaseStep();
+    await saving;
+    assert.equal(completed, true);
+    calls.length = 0;
+    await flushMangoTiptapResource({ companyID: owner.companyID, resourceType: "process_step", resourceID: "step-a" });
+    assert.deepEqual(calls, ["step-a"], "the exact step remains independently flushable");
+  } finally {
+    releaseStep();
+    unregisterOverview();
+    unregisterStep();
+    unregisterOtherProcess();
+    unregisterOtherCompany();
   }
 });
 
@@ -2579,7 +2625,7 @@ test("Node, Project, and Logic Gate editors use revisioned JSON while email stay
   assert.match(extensions, /trailingNode:\s*false/);
   assert.doesNotMatch(extensions, /newState\.doc\.descendants/);
   const editor = read("frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx");
-  assert.match(editor, /data-mango-editor-sync-mode="revisioned-json"/);
+  assert.match(editor, /data-mango-editor-sync-mode=\{saveMode === "local" \? "local" : "revisioned-json"\}/);
   assert.doesNotMatch(editor, /JSON\.stringify/);
   assert.doesNotMatch(editor, /onSaveStateChange\?\.\(\{ status: "pending"/);
   assert.match(editor, /const \[activeEditor, setActiveEditor\] = useState<Editor \| null>\(null\)/);

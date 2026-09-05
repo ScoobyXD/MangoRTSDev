@@ -1,6 +1,7 @@
 package store
 
 import (
+	"maps"
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
@@ -209,42 +210,43 @@ func (r *MemoryRepo) CreateLogicGateEditorSaveVersion(input EditorSaveVersionInp
 	if _, ok := r.logicGates[key(companyID, logicGateID)]; !ok {
 		return domain.EditorSaveVersion{}, ErrNotFound
 	}
-	projections := memoryEditorTextLogicGateProjections(r.logicGateText[key(companyID, logicGateID)])
-	if len(projections) == 0 {
-		return domain.EditorSaveVersion{}, ErrInvalid
-	}
 	saveID := newUUIDv7String()
 	saveKind := normalizeEditorSaveKind(input.SaveKind)
 	if saveKind == editorSaveKindLegacy {
 		saveKind = editorSaveKindManual
 	}
-	items := make([]domain.EditorSaveVersionItem, 0, len(projections))
+	current := []domain.LogicGateInformation{}
 	now := time.Now().UTC()
-	for _, projection := range projections {
-		item := domain.LogicGateInformation{
-			CompanyID:           companyID,
-			InformationID:       newUUIDv7String(),
-			LogicGateID:         logicGateID,
-			Type:                projection.Type,
-			Information:         projection.Information,
-			SaveBatchID:         saveID,
-			SaveKind:            saveKind,
-			SavedByUserID:       strings.TrimSpace(input.ActorUserID),
-			SavedByDisplayName:  strings.TrimSpace(input.ActorDisplayName),
-			SourceInformationID: projection.InformationID,
-			CreatedTimestamp:    now,
-			UpdatedTimestamp:    now,
+	for _, document := range r.editorJSONDocuments {
+		if document.Deleted || document.Ref.CompanyID != companyID || document.Ref.ResourceType != EntityTypeLogicGate || document.Ref.ResourceID != logicGateID {
+			continue
 		}
-		r.logicGateInfo[key(companyID, logicGateID)] = append(r.logicGateInfo[key(companyID, logicGateID)], item)
-		items = append(items, domain.EditorSaveVersionItem{
-			InformationID:       item.InformationID,
-			SourceInformationID: item.SourceInformationID,
-			Type:                item.Type,
-			Information:         item.Information,
-			CreatedTimestamp:    item.CreatedTimestamp,
-			UpdatedTimestamp:    item.UpdatedTimestamp,
-		})
+		body, err := encodeEditorTextboxBody(document.JSONDocument, document.Annotations)
+		if err != nil {
+			return domain.EditorSaveVersion{}, err
+		}
+		current = append(current, domain.LogicGateInformation{Type: "Text box", InformationID: document.Ref.DocumentID, SourceInformationID: document.Ref.DocumentID, Information: string(body)})
 	}
+	sort.Slice(current, func(i, j int) bool { return current[i].InformationID < current[j].InformationID })
+	hasOverview := len(current) > 0
+	for _, step := range r.processStepsLocked(companyID, logicGateID) {
+		current = append(current, domain.LogicGateInformation{Type: EntityTypeProcessStep, InformationID: step.ProcessStepID, SourceInformationID: step.ProcessStepID, Information: string(step.BodyJSON)})
+	}
+	if len(current) == 0 {
+		return domain.EditorSaveVersion{}, ErrInvalid
+	}
+	if !hasOverview {
+		current = append(current, domain.LogicGateInformation{Type: "Text box", InformationID: "logic-gate-overview", SourceInformationID: "logic-gate-overview", Information: string(emptyEditorTextboxBody())})
+	}
+	items := make([]domain.EditorSaveVersionItem, 0, len(current))
+	for index := range current {
+		item := &current[index]
+		item.CompanyID, item.LogicGateID, item.SaveBatchID, item.SaveKind = companyID, logicGateID, saveID, saveKind
+		item.SavedByUserID, item.SavedByDisplayName = strings.TrimSpace(input.ActorUserID), strings.TrimSpace(input.ActorDisplayName)
+		item.CreatedTimestamp, item.UpdatedTimestamp = now, now
+		items = append(items, memoryLogicGateHistoryItem(*item))
+	}
+	r.logicGateInfo[key(companyID, logicGateID)] = append(r.logicGateInfo[key(companyID, logicGateID)], current...)
 	return editorSaveVersionFromItems(companyID, EntityTypeLogicGate, logicGateID, saveID, saveKind, strings.TrimSpace(input.ActorUserID), strings.TrimSpace(input.ActorDisplayName), items), nil
 }
 
@@ -324,9 +326,15 @@ func (r *MemoryRepo) RestoreNodeEditorSaveVersion(input EditorSaveVersionRestore
 	}
 	return version, nil
 }
-func (r *MemoryRepo) RestoreLogicGateEditorSaveVersion(input EditorSaveVersionRestoreInput) (domain.EditorSaveVersion, error) {
+func (r *MemoryRepo) RestoreLogicGateEditorSaveVersion(input EditorSaveVersionRestoreInput) (version domain.EditorSaveVersion, err error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	deleted := false
+	defer func() {
+		r.mu.Unlock()
+		if err == nil && deleted && input.AfterDeleteCommit != nil {
+			input.AfterDeleteCommit()
+		}
+	}()
 	companyID := strings.TrimSpace(input.CompanyID)
 	logicGateID := strings.TrimSpace(input.ResourceID)
 	saveID := strings.TrimSpace(input.SaveID)
@@ -337,42 +345,86 @@ func (r *MemoryRepo) RestoreLogicGateEditorSaveVersion(input EditorSaveVersionRe
 	if !ok {
 		return domain.EditorSaveVersion{}, ErrNotFound
 	}
-	now := time.Now().UTC()
-	desired := map[string]domain.EditorSaveVersionItem{}
+	type replacement struct {
+		input      EditorJSONCommitInput
+		sizeChange int
+	}
+	replacements := make([]replacement, 0, len(version.Items))
+	desiredOverview := map[string]bool{}
 	for _, item := range version.Items {
-		sourceID := strings.TrimSpace(item.SourceInformationID)
-		if sourceID == "" {
-			sourceID = strings.TrimSpace(item.InformationID)
+		ref := EditorJSONDocumentRef{CompanyID: companyID, ResourceType: EntityTypeLogicGate, ResourceID: logicGateID, DocumentID: item.SourceInformationID}
+		if item.ProcessStepID != nil {
+			step, exists := r.processSteps[key(companyID, *item.ProcessStepID)]
+			if !exists || step.LogicGateID != logicGateID {
+				continue
+			}
+			ref.ResourceType, ref.ResourceID, ref.DocumentID = EntityTypeProcessStep, step.ProcessStepID, step.ProcessStepID
+		} else {
+			desiredOverview[ref.DocumentID] = true
 		}
-		if sourceID != "" {
-			desired[sourceID] = item
+		document, annotations, err := decodeEditorTextboxBody([]byte(item.Information))
+		if err != nil {
+			return domain.EditorSaveVersion{}, err
 		}
+		current, _, err := r.editorJSONDocumentLocked(ref)
+		if err != nil {
+			return domain.EditorSaveVersion{}, err
+		}
+		commit, err := NormalizeEditorJSONCommit(EditorJSONCommitInput{Document: ref, OperationID: newUUIDv7String(), ClientID: "manual-history-restore", ActorUserID: input.ActorUserID, BaseRevision: current.Revision, SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: document, Annotations: annotations})
+		if err != nil {
+			return domain.EditorSaveVersion{}, err
+		}
+		replacements = append(replacements, replacement{input: commit, sizeChange: len(document) - len(current.JSONDocument)})
 	}
-	for sourceID, existing := range r.logicGateText[key(companyID, logicGateID)] {
-		if !isEditorTextBoxType(existing.Type) || existing.IsDeleted {
+	deletions := []EditorJSONDeleteInput{}
+	for _, document := range r.editorJSONDocuments {
+		if document.Deleted || document.Ref.CompanyID != companyID || document.Ref.ResourceType != EntityTypeLogicGate || document.Ref.ResourceID != logicGateID || desiredOverview[document.Ref.DocumentID] {
 			continue
 		}
-		if _, keep := desired[sourceID]; keep {
-			continue
-		}
-		r.deleteEditorProjectionLocked(EditorDocumentRef{CompanyID: companyID, ResourceType: EntityTypeLogicGate, ResourceID: logicGateID, DocumentID: sourceID})
+		deletions = append(deletions, EditorJSONDeleteInput{Document: document.Ref, OperationID: newUUIDv7String(), ClientID: "manual-history-restore", ActorUserID: input.ActorUserID, BaseRevision: document.Revision})
 	}
-	for sourceID, item := range desired {
-		projection := r.logicGateText[key(companyID, logicGateID)][sourceID]
-		created := projection.CreatedTimestamp
-		if created.IsZero() {
-			created = now
+	beforeDocuments, beforeSteps := maps.Clone(r.editorJSONDocuments), maps.Clone(r.processSteps)
+	beforeOperations, beforeVersions := maps.Clone(r.editorJSONOperations), maps.Clone(r.editorJSONVersions)
+	beforeOutbox, beforeSequence := maps.Clone(r.realtimeOutbox), r.realtimeOutboxSequence
+	beforeProjections := maps.Clone(r.logicGateText[key(companyID, logicGateID)])
+	defer func() {
+		if err != nil {
+			r.editorJSONDocuments, r.processSteps = beforeDocuments, beforeSteps
+			r.editorJSONOperations, r.editorJSONVersions = beforeOperations, beforeVersions
+			r.realtimeOutbox, r.realtimeOutboxSequence = beforeOutbox, beforeSequence
+			r.logicGateText[key(companyID, logicGateID)] = beforeProjections
 		}
-		projection.CompanyID, projection.LogicGateID, projection.InformationID = companyID, logicGateID, sourceID
-		projection.Type, projection.Information, projection.IsDeleted = "Text box", item.Information, false
-		projection.Revision++
-		if projection.Revision < 1 {
-			projection.Revision = 1
+	}()
+	sort.SliceStable(replacements, func(i, j int) bool { return replacements[i].sizeChange < replacements[j].sizeChange })
+	for _, deletion := range deletions {
+		if _, err := r.deleteEditorJSONDocumentLocked(deletion); err != nil {
+			return domain.EditorSaveVersion{}, err
 		}
-		projection.CreatedTimestamp, projection.UpdatedTimestamp = created, now
-		r.logicGateText[key(companyID, logicGateID)][sourceID] = projection
 	}
+	for _, replacement := range replacements {
+		if replacement.input.Document.ResourceType == EntityTypeLogicGate {
+			documentKey := editorJSONMemoryKey(replacement.input.Document)
+			if current, exists := r.editorJSONDocuments[documentKey]; exists && current.Deleted {
+				current.Deleted = false
+				r.editorJSONDocuments[documentKey] = current
+			}
+		}
+		if _, err := r.commitEditorJSONDocumentLocked(replacement.input); err != nil {
+			return domain.EditorSaveVersion{}, err
+		}
+	}
+	deleted = len(deletions) > 0
 	return version, nil
+}
+
+func memoryLogicGateHistoryItem(item domain.LogicGateInformation) domain.EditorSaveVersionItem {
+	result := domain.EditorSaveVersionItem{InformationID: item.InformationID, SourceInformationID: item.SourceInformationID,
+		Type: "Text box", Information: item.Information, CreatedTimestamp: item.CreatedTimestamp, UpdatedTimestamp: item.UpdatedTimestamp}
+	if item.Type == EntityTypeProcessStep {
+		stepID := item.SourceInformationID
+		result.ProcessStepID = &stepID
+	}
+	return result
 }
 func memoryEditorTextNodeProjections(items map[string]domain.NodeProjection) []domain.NodeProjection {
 	out := make([]domain.NodeProjection, 0)
@@ -387,17 +439,6 @@ func memoryEditorTextNodeProjections(items map[string]domain.NodeProjection) []d
 		}
 		return out[i].InformationID < out[j].InformationID
 	})
-	return out
-}
-
-func memoryEditorTextLogicGateProjections(items map[string]domain.LogicGateProjection) []domain.LogicGateProjection {
-	out := make([]domain.LogicGateProjection, 0)
-	latestTextKey := newestLogicGateTextProjectionKey(items)
-	for keyValue, item := range items {
-		if isEditorTextBoxType(item.Type) && !item.IsDeleted && keyValue == latestTextKey {
-			out = append(out, item)
-		}
-	}
 	return out
 }
 
@@ -439,14 +480,7 @@ func memoryLogicGateSaveVersions(companyID, logicGateID string, items []domain.L
 		}
 		saveID := strings.TrimSpace(item.SaveBatchID)
 		metaByID[saveID] = item
-		versionsByID[saveID] = append(versionsByID[saveID], domain.EditorSaveVersionItem{
-			InformationID:       item.InformationID,
-			SourceInformationID: item.SourceInformationID,
-			Type:                item.Type,
-			Information:         item.Information,
-			CreatedTimestamp:    item.CreatedTimestamp,
-			UpdatedTimestamp:    item.UpdatedTimestamp,
-		})
+		versionsByID[saveID] = append(versionsByID[saveID], memoryLogicGateHistoryItem(item))
 	}
 	out := make([]domain.EditorSaveVersion, 0, len(versionsByID))
 	for saveID, versionItems := range versionsByID {

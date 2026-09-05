@@ -796,6 +796,7 @@ type UserPinGroupResult struct {
 type LogicGateWorkRepository interface {
 	GetProcessStepMap(companyID, logicGateID string) (domain.ProcessStepMapLayout, error)
 	PutProcessStepMap(input ProcessStepMapPutInput) (ProcessStepMapMutationResult, error)
+	GetProcessStep(companyID, processStepID string) (domain.ProcessStep, error)
 	CreateProcessStep(input ProcessStepCreateInput) (ProcessStepMutationResult, error)
 	UpdateProcessStep(input ProcessStepUpdateInput) (ProcessStepMutationResult, error)
 	DeleteProcessStep(input ProcessStepDeleteInput) (ProcessStepMutationResult, error)
@@ -1507,6 +1508,7 @@ const CommunicationsTriageBatchMaxItems = 50
 const (
 	EntityTypeNode                  = "node"
 	EntityTypeLogicGate             = "logic_gate"
+	EntityTypeProcessStep           = "process_step"
 	EntityTypeHuddleLogicGate       = "huddle_logic_gate"
 	EntityTypeHuddleNode            = "huddle_node"
 	EntityTypeKPI                   = "kpi"

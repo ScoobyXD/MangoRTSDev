@@ -38,6 +38,7 @@ test("Process Map reuses inherited typed RACI, the saved policy command, permiss
       return response(policy);
     }
     if (url.pathname.endsWith("/view")) return response({ can_edit: !url.pathname.includes("readonly"), logic_gate: { logic_gate_id: "saved-process", header: "Procedure" }, information: [], projections: [{ information_id: "existing-sop", type: "Text box", information: "", updated_timestamp: "2026-09-05" }] });
+    if (url.pathname.endsWith("/work")) return response({ logic_gate: { logic_gate_id: url.pathname.split("/")[3], header: "Procedure" }, permissions: { can_edit: !url.pathname.includes("readonly"), can_resolve_requests: false }, steps: [], relationships: [], nodes: [] });
     assert.fail(`Unexpected request ${method} ${url.pathname}`);
   });
   const [{ createRoot }, { ProcessMapDetails }, { EDITOR_TEXT_BLOCK_TYPE }] = await Promise.all([
@@ -88,6 +89,8 @@ test("Process Map reuses inherited typed RACI, the saved policy command, permiss
     const toggle = dom.window.document.querySelector<HTMLButtonElement>(".process-map-details__toggle")!;
     await act(async () => toggle.click());
     await settle(() => Boolean(dom.window.document.querySelector('[data-process-sop-document-id="existing-sop"]')));
+    await settle(() => requests.some((request) => request.path.endsWith("/saved-process/work")) && !dom.window.document.body.textContent?.includes("Loading steps…"));
+    assert.doesNotMatch(dom.window.document.body.textContent ?? "", /Could not load the Process steps/);
     const editor = dom.window.document.querySelector('[data-process-sop-document-id="existing-sop"]');
     group.principal_name = "Renamed Review Team";
     const policyReads = requests.filter((request) => request.path.endsWith("/gvic")).length;

@@ -64,9 +64,9 @@ func (r *PostgresRepo) createWorkspaceProcessDefinitionTx(ctx context.Context, t
 	result.ProcessSteps = make([]domain.ProcessStep, 0, len(definition.Steps))
 	result.StepRelationships = make([]domain.ResourceOperationalRelationship, 0, len(definition.Relationships))
 	for index, source := range definition.Steps {
-		step, err := scanProcessStep(tx.QueryRowContext(ctx, `insert into process_steps(company_id,process_step_id,logic_gate_id,name,position) values($1::uuid,$2::uuid,$3::uuid,$4,$5) returning `+processStepSelectColumns, input.CompanyID, source.ProcessStepID, definition.LogicGateID, source.Name, (index+1)*processStepPositionStride))
+		step, err := scanProcessStep(tx.QueryRowContext(ctx, `insert into process_steps(company_id,process_step_id,logic_gate_id,name,position,body_json) values($1::uuid,$2::uuid,$3::uuid,$4,$5,$6::jsonb) returning `+processStepSelectColumns, input.CompanyID, source.ProcessStepID, definition.LogicGateID, source.Name, (index+1)*processStepPositionStride, source.BodyJSON))
 		if err != nil {
-			return err
+			return mapEditorOwnerTextLimitError(err)
 		}
 		result.ProcessSteps = append(result.ProcessSteps, step)
 	}

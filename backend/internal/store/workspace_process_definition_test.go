@@ -41,6 +41,7 @@ func assertProcessStepMapAuthoredBatch(t *testing.T, repo Repository) {
 		t.Fatal(err)
 	}
 	input := authoredProcessBatch(company.CompanyID, folder.FolderID)
+	input.ProcessDefinition.Steps[0].BodyJSON = processStepSOPBody
 	definition := input.ProcessDefinition
 	saved, err := repo.CreateWorkspaceEntityBatch(input)
 	if err != nil {
@@ -55,6 +56,9 @@ func assertProcessStepMapAuthoredBatch(t *testing.T, repo Repository) {
 	}
 	if len(work.Nodes) != 0 || len(work.Steps) != 2 || work.Steps[0].ProcessStepID != definition.Steps[0].ProcessStepID || work.Steps[1].ProcessStepID != definition.Steps[1].ProcessStepID || work.Steps[0].Position != 1000 || work.Steps[1].Position != 2000 {
 		t.Fatalf("creation order or runtime separation lost: %+v", work)
+	}
+	if !editorJSONValuesEqual(work.Steps[0].BodyJSON, processStepSOPBody) || !editorJSONValuesEqual(work.Steps[1].BodyJSON, emptyEditorTextboxBody()) {
+		t.Fatalf("authored Process lost step SOPs: %+v", work.Steps)
 	}
 	if saved.StepRelationships[0].ResourceOperationalRelationshipID != definition.Relationships[0].ResourceOperationalRelationshipID || saved.StepRelationships[0].Source != definition.Relationships[0].Source || saved.StepRelationships[0].Target != definition.Relationships[0].Target {
 		t.Fatalf("operational identity changed: %+v", saved.StepRelationships)

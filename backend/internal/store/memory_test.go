@@ -419,99 +419,37 @@ func TestMemoryRepo_AddLogicGateInformation_ProjectionKeyStaysStableAndHistoryAp
 	}
 }
 
-func TestMemoryRepo_LogicGateProjectionAutosaveDoesNotAppendInformationAndSaveVersionRestoresProjection(t *testing.T) {
+func TestMemoryRepo_LogicGateJSONAutosaveDoesNotAppendInformationAndSaveVersionRestoresDocument(t *testing.T) {
 	repo := NewMemoryRepo()
-	companyID := "11111111-1111-1111-1111-111111111111"
-	actorID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-	const informationID = "44444444-4444-4444-8444-444444444444"
-
-	logicGate, err := repo.CreateLogicGate(companyID, "Projection-only autosave gate")
+	const companyID = "11111111-1111-1111-1111-111111111111"
+	logicGate, err := repo.CreateLogicGate(companyID, "JSON autosave gate")
 	if err != nil {
-		t.Fatalf("CreateLogicGate failed: %v", err)
+		t.Fatal(err)
 	}
-	if _, err := repo.UpsertLogicGateProjection(LogicGateProjectionInput{
-		CompanyID:        companyID,
-		LogicGateID:      logicGate.LogicGateID,
-		Type:             "Text box",
-		Information:      "<p>alpha</p>",
-		InformationID:    informationID,
-		ActorUserID:      actorID,
-		ActorDisplayName: "Ada Lovelace",
-		ExpectedRevision: memoryRevision(0),
-	}); err != nil {
-		t.Fatalf("initial UpsertLogicGateProjection failed: %v", err)
-	}
-	if _, err := repo.UpsertLogicGateProjection(LogicGateProjectionInput{
-		CompanyID:        companyID,
-		LogicGateID:      logicGate.LogicGateID,
-		Type:             "Text box",
-		Information:      "<p>beta</p>",
-		InformationID:    informationID,
-		ActorUserID:      actorID,
-		ActorDisplayName: "Ada Lovelace",
-		ExpectedRevision: memoryRevision(1),
-	}); err != nil {
-		t.Fatalf("second UpsertLogicGateProjection failed: %v", err)
-	}
-
+	ref := EditorJSONDocumentRef{CompanyID: companyID, ResourceType: EntityTypeLogicGate, ResourceID: logicGate.LogicGateID, DocumentID: "logic-gate-overview"}
+	saveProcessHistoryDocument(t, repo, ref, "alpha")
+	saveProcessHistoryDocument(t, repo, ref, "beta")
 	details, err := repo.GetLogicGateDetails(companyID, logicGate.LogicGateID)
-	if err != nil {
-		t.Fatalf("GetLogicGateDetails failed: %v", err)
+	if err != nil || len(details.Information) != 0 {
+		t.Fatalf("autosave history=%+v err=%v", details.Information, err)
 	}
-	if len(details.Information) != 0 {
-		t.Fatalf("projection autosaves appended %d logic gate information rows, want 0", len(details.Information))
+	version, err := repo.CreateLogicGateEditorSaveVersion(EditorSaveVersionInput{CompanyID: companyID, ResourceID: logicGate.LogicGateID, SaveKind: "auto"})
+	if err != nil || version.SaveKind != "auto" || version.ItemCount != 1 {
+		t.Fatalf("history=%+v err=%v", version, err)
 	}
-
-	version, err := repo.CreateLogicGateEditorSaveVersion(EditorSaveVersionInput{
-		CompanyID:        companyID,
-		ResourceID:       logicGate.LogicGateID,
-		SaveKind:         "auto",
-		ActorUserID:      actorID,
-		ActorDisplayName: "Ada Lovelace",
-	})
-	if err != nil {
-		t.Fatalf("CreateLogicGateEditorSaveVersion failed: %v", err)
+	saveProcessHistoryDocument(t, repo, ref, "gamma")
+	if _, err := repo.RestoreLogicGateEditorSaveVersion(EditorSaveVersionRestoreInput{CompanyID: companyID, ResourceID: logicGate.LogicGateID, SaveID: version.SaveID}); err != nil {
+		t.Fatal(err)
 	}
-	if version.SaveKind != "auto" || version.ItemCount != 1 || version.Items[0].Information != "<p>beta</p>" {
-		t.Fatalf("save version = %+v, want one auto beta snapshot", version)
+	snapshot, err := repo.GetEditorJSONSnapshot(ref)
+	if err != nil || !editorJSONValuesEqual(snapshot.JSONDocument, processHistoryDocument("beta")) || snapshot.Revision != 4 {
+		t.Fatalf("restored snapshot=%+v err=%v", snapshot, err)
 	}
-
-	if _, err := repo.UpsertLogicGateProjection(LogicGateProjectionInput{
-		CompanyID:        companyID,
-		LogicGateID:      logicGate.LogicGateID,
-		Type:             "Text box",
-		Information:      "<p>gamma</p>",
-		InformationID:    informationID,
-		ActorUserID:      actorID,
-		ExpectedRevision: memoryRevision(2),
-	}); err != nil {
-		t.Fatalf("third UpsertLogicGateProjection failed: %v", err)
-	}
-	if _, err := repo.RestoreLogicGateEditorSaveVersion(EditorSaveVersionRestoreInput{
-		CompanyID:   companyID,
-		ResourceID:  logicGate.LogicGateID,
-		SaveID:      version.SaveID,
-		ActorUserID: actorID,
-	}); err != nil {
-		t.Fatalf("RestoreLogicGateEditorSaveVersion failed: %v", err)
-	}
-	projections, err := repo.ListLogicGateProjections(companyID, logicGate.LogicGateID)
-	if err != nil {
-		t.Fatalf("ListLogicGateProjections failed: %v", err)
-	}
-	if len(projections) != 1 || projections[0].InformationID != informationID || projections[0].Information != "<p>beta</p>" {
-		t.Fatalf("restored logic gate projections = %+v, want beta projection restored at stable ID", projections)
-	}
-
 	details, err = repo.GetLogicGateDetails(companyID, logicGate.LogicGateID)
-	if err != nil {
-		t.Fatalf("GetLogicGateDetails after save failed: %v", err)
-	}
-	if len(details.Information) != 1 || details.Information[0].SaveBatchID != version.SaveID {
-		t.Fatalf("saved logic gate information rows = %+v, want exactly one saved-version row", details.Information)
+	if err != nil || len(details.Information) != 1 || details.Information[0].SaveBatchID != version.SaveID {
+		t.Fatalf("saved history=%+v err=%v", details.Information, err)
 	}
 }
-
 func TestMemoryRepo_AddLogicGateInformation_TextBoxProjectionCollapsesToOneCurrentDocument(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-1111-1111-111111111111"

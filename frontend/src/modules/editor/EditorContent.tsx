@@ -28,8 +28,7 @@ import {
 import { EditorLinkedDocumentPanels, RACIAssignmentBoard } from "./EditorLinkedDocumentPanels";
 import { formatNodeDueDateForEditor, normalizeNodeDueDateDraft } from "./editorDates";
 import { EditorTabBar } from "./EditorTabBar";
-import { editorSaveNeedsFailureAttention } from "./EditorSaveStatusIcon.js";
-import { mangoTiptapPendingStorageKey } from "./tiptap/mangoTiptapSync.js";
+import { editorSaveNeedsFailureAttention, type EditorSaveState } from "./EditorSaveStatusIcon.js";
 import { flushMangoTiptapResource } from "./tiptap/mangoTiptapFlushRegistry.js";
 import {
   markEditorHistoryChanged,
@@ -154,6 +153,7 @@ type EditorNodeBatchResponse = {
 const LOGIC_GATE_OVERVIEW_DOCUMENT_ID = "logic-gate-overview";
 
 type EditorSaveVersionItem = {
+  process_step_id?: string;
   information_id: string;
   source_information_id: string;
   type: string;
@@ -222,7 +222,7 @@ function editorSaveVersionPreview(version: EditorSaveVersion | null): string {
   const items = version.items ?? [];
   if (items.length === 0) return "";
   return items.map((item, index) => {
-    const label = items.length > 1 ? `Text box ${index + 1}` : item.type || "Text box";
+    const label = item.process_step_id ? "Step instructions" : items.length > 1 ? `Text box ${index + 1}` : item.type || "Text box";
     return `${label}\n${editorSaveVersionDocumentText(item.information) || "Empty text box"}`;
   }).join("\n\n");
 }
@@ -554,7 +554,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [saveVersionSaving, setSaveVersionSaving] = useState(false);
   const [saveVersionRestoring, setSaveVersionRestoring] = useState(false);
   const [saveVersionStatus, setSaveVersionStatus] = useState("");
-  const [logicGateSaveFailed, setLogicGateSaveFailed] = useState(false);
+  const [logicGateSaveState, setLogicGateSaveState] = useState<EditorSaveState>({ status: "saved" });
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(outlineStyleStorageKey);
   const [documentFontSize, setDocumentFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
   const [selectionFontSize, setSelectionFontSize] = useState(EDITOR_DOCUMENT_FONT_SIZE_PX);
@@ -1814,7 +1814,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     try {
       setError("");
       const selectedVersion = saveVersions.find((version) => version.save_id === cleanSaveID);
-      const jsonItems = (selectedVersion?.items ?? []).map((item) => {
+      const jsonItems = (resourceType === "node" ? selectedVersion?.items ?? [] : []).map((item) => {
         const content = parseEditorTextBlockContent(item.information);
         try {
           const document = JSON.parse(content.document);
@@ -1823,14 +1823,12 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           return null;
         }
       });
-      const canRestoreJSON = jsonItems.length > 0
+      const canRestoreJSON = resourceType === "node" && jsonItems.length > 0
         && jsonItems.every((item) => item?.document?.format === "mango-tiptap-json");
       if (canRestoreJSON) {
         const desiredItems = jsonItems.filter((item): item is NonNullable<typeof item> => item !== null);
         const desiredIDs = new Set(desiredItems.map(({ item }) => item.source_information_id || item.information_id));
-        const currentIDs = resourceType === "node"
-          ? nodeWorkspaceProjectionsRef.current.filter((item) => item.type === EDITOR_TEXT_BLOCK_TYPE).map((item) => item.information_id)
-          : [documentInformationIDRef.current].filter(Boolean);
+        const currentIDs = nodeWorkspaceProjectionsRef.current.filter((item) => item.type === EDITOR_TEXT_BLOCK_TYPE).map((item) => item.information_id);
         for (const documentID of currentIDs) {
           if (desiredIDs.has(documentID)) continue;
           const path = `/v1/editor-json/${resourceType}/${resourceID}/documents/${documentID}?company_id=${encodeURIComponent(companyID)}`;
@@ -2365,7 +2363,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onSaveCurrentVersion={linkedEntityCanEdit ? () => { void saveCurrentEditorVersion(); } : undefined}
             saveCurrentVersionDisabled={saveVersionRestoring}
             saveCurrentVersionBusy={saveVersionSaving}
-            saveStateStorageKey={linkedEntityKind === "logic_gate" && documentInformationID ? mangoTiptapPendingStorageKey({ companyID, resourceType: "logic_gate", resourceID: linkedNodeID, documentID: documentInformationID }) : undefined}
+            saveState={linkedEntityKind === "logic_gate" && documentInformationID ? logicGateSaveState : undefined}
             secondaryActions={linkedEntityKind === "logic_gate" && gvicPolicyHasDescendants ? [{
               id: "apply-gvic-to-inherited-descendants",
               label: logicGateRACIApplyToAssignedNodesBusy ? "Applying" : "Apply to non-customized descendants",
@@ -2577,14 +2575,15 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         {hasLinkedDocument && linkedEntityKind === "logic_gate" && documentInformationID && (
           <React.Suspense fallback={<div aria-label="Loading JSON editor" style={{ position: "absolute", top: documentTopPx, right: 0, bottom: 0, left: 0 }} />}>
             <LogicGateTiptapEditorSurface
+              apiBase={apiBase}
               key={`${companyID}:logic_gate:${linkedNodeID}:${documentInformationID}`}
-              className={logicGateSaveFailed ? "mango-editor-save-failed-frame" : undefined}
+              className={editorSaveNeedsFailureAttention(logicGateSaveState) ? "mango-editor-save-failed-frame" : undefined}
               dataAttributes={{ "data-logic-gate-information-id": documentInformationID }}
               value={documentDraftRef.current}
               leadingContent={logicGateScrollableMetadata}
               editable={editorWriteEnabled}
               outlineStyle={outlineStyle}
-              style={{ position: "absolute", top: documentTopPx, right: 0, bottom: 0, left: 0, overflowY: "auto", color: editorPrimaryText, fontFamily: documentFontFamily, fontSize: documentFontSize, lineHeight: EDITOR_DOCUMENT_LINE_HEIGHT }}
+              style={{ position: "absolute", top: documentTopPx, right: 0, bottom: 0, left: 0, overflowY: "auto", color: editorPrimaryText, fontFamily: documentFontFamily, fontSize: documentFontSize, lineHeight: EDITOR_DOCUMENT_LINE_HEIGHT, "--mango-process-step-surface": panelBackground, "--mango-process-step-border": strokeColor } as React.CSSProperties}
               companyID={companyID}
               resourceID={linkedNodeID}
               documentID={documentInformationID}
@@ -2595,7 +2594,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               formattingControllerRef={logicFormattingControllerRef}
               onEntityLink={linkLogicGateEntityFromEditor}
               onError={setError}
-              onSaveStateChange={(state) => setLogicGateSaveFailed((current) => { const failed = editorSaveNeedsFailureAttention(state); return current === failed ? current : failed; })}
+              onSaveStateChange={setLogicGateSaveState}
               onRecoveryStorageError={setError}
               onRecoveryStorageRecovered={() => setError("")}
               onSelectionFontSizeChange={updateSelectionFontSize}

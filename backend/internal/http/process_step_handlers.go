@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
@@ -11,10 +12,11 @@ import (
 func (s *Server) handleProcessSteps(w http.ResponseWriter, r *http.Request, logicGateID, stepID string) {
 	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 	var payload struct {
-		CompanyID          string  `json:"company_id"`
-		Name               *string `json:"name"`
-		Position           *int    `json:"position"`
-		AfterProcessStepID *string `json:"after_process_step_id"`
+		CompanyID          string          `json:"company_id"`
+		Name               *string         `json:"name"`
+		BodyJSON           json.RawMessage `json:"body_json"`
+		Position           *int            `json:"position"`
+		AfterProcessStepID *string         `json:"after_process_step_id"`
 	}
 	if r.Method == http.MethodPost || r.Method == http.MethodPatch {
 		decoder := json.NewDecoder(r.Body)
@@ -44,9 +46,9 @@ func (s *Server) handleProcessSteps(w http.ResponseWriter, r *http.Request, logi
 			writeError(w, http.StatusBadRequest, "name_required")
 			return
 		}
-		result, err = s.repo.CreateProcessStep(store.ProcessStepCreateInput{CompanyID: companyID, LogicGateID: logicGateID, Name: *payload.Name, AfterProcessStepID: payload.AfterProcessStepID, ActorUserID: actorID})
+		result, err = s.repo.CreateProcessStep(store.ProcessStepCreateInput{CompanyID: companyID, LogicGateID: logicGateID, Name: *payload.Name, BodyJSON: payload.BodyJSON, AfterProcessStepID: payload.AfterProcessStepID, ActorUserID: actorID})
 	case r.Method == http.MethodPatch && stepID != "":
-		if payload.Name == nil && payload.Position == nil || payload.AfterProcessStepID != nil {
+		if payload.Name == nil && payload.Position == nil || payload.AfterProcessStepID != nil || payload.BodyJSON != nil {
 			writeError(w, http.StatusBadRequest, "invalid_process_step_update")
 			return
 		}
@@ -55,6 +57,10 @@ func (s *Server) handleProcessSteps(w http.ResponseWriter, r *http.Request, logi
 		result, err = s.repo.DeleteProcessStep(store.ProcessStepDeleteInput{CompanyID: companyID, LogicGateID: logicGateID, ProcessStepID: stepID, ActorUserID: actorID})
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	if errors.Is(err, store.ErrEditorOwnerTextLimit) {
+		writeEditorJSONStoreError(w, err)
 		return
 	}
 	if !writeLogicGateWorkMutationError(w, err, "failed_to_change_process_step") {

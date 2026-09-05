@@ -364,7 +364,7 @@ func TestProcessStepsReorderPreservesRequester(t *testing.T) {
 
 func TestProcessStepsRecycleProcessRestoresExactFlow(t *testing.T) {
 	r, company, gate, node := processStepsFixture(t)
-	first, err := r.CreateProcessStep(ProcessStepCreateInput{CompanyID: company, LogicGateID: gate.LogicGateID, Name: "Prepare"})
+	first, err := r.CreateProcessStep(ProcessStepCreateInput{CompanyID: company, LogicGateID: gate.LogicGateID, Name: "Prepare", BodyJSON: processStepSOPBody})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,5 +393,11 @@ func TestProcessStepsRecycleProcessRestoresExactFlow(t *testing.T) {
 	}
 	if len(work.Steps) != 2 || len(work.Relationships) != 1 || work.Relationships[0].ResourceOperationalRelationshipID != second.Relationship.ResourceOperationalRelationshipID || len(work.Nodes) != 1 || work.Nodes[0].ProcessStepID == nil || *work.Nodes[0].ProcessStepID != second.Step.ProcessStepID {
 		t.Fatalf("Restore must preserve exact flow and assignment: %+v", work)
+	}
+	if !editorJSONValuesEqual(work.Steps[0].BodyJSON, processStepSOPBody) {
+		t.Fatal("Process recycle/restore lost the step SOP")
+	}
+	if work.Steps[0].Revision <= first.Step.Revision {
+		t.Fatal("Process restore must advance the step editor revision")
 	}
 }

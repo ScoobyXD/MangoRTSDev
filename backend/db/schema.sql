@@ -301,6 +301,11 @@ begin
      and textbox.logic_gate_id=new.logic_gate_id
      and textbox.deleted_timestamp is null
      and textbox.textbox_id<>new.textbox_id;
+  total_bytes := total_bytes + (
+    select coalesce(sum(octet_length(step.body_json::text)),0)
+    from process_steps step
+    where step.company_id=new.company_id and step.logic_gate_id=new.logic_gate_id
+  );
   if new.deleted_timestamp is null then
     total_bytes := total_bytes + octet_length(new.body_json::text);
   end if;
@@ -4364,12 +4369,14 @@ CREATE TABLE public.logic_gate_textboxes_history (
     company_id uuid NOT NULL,
     logic_gate_id uuid NOT NULL,
     textbox_id text NOT NULL,
+    resource_type text DEFAULT 'logic_gate'::text NOT NULL,
     batch_id uuid NOT NULL,
     body_json jsonb NOT NULL,
     saved_by_user_id uuid,
     saved_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT logic_gate_textboxes_history_body_json_chk CHECK ((((body_json ->> 'format'::text) = 'mango-tiptap-json'::text) AND ((body_json ->> 'schema_version'::text) = '1'::text) AND (((body_json -> 'document'::text) ->> 'type'::text) = 'doc'::text) AND (jsonb_typeof((body_json -> 'annotations'::text)) = 'array'::text))),
-    CONSTRAINT logic_gate_textboxes_history_id_chk CHECK ((btrim(textbox_id) <> ''::text))
+    CONSTRAINT logic_gate_textboxes_history_id_chk CHECK ((btrim(textbox_id) <> ''::text)),
+    CONSTRAINT logic_gate_textboxes_history_resource_type_chk CHECK (resource_type IN ('logic_gate','process_step'))
 );
 
 
@@ -5792,7 +5799,7 @@ ALTER TABLE ONLY public.scorecards
 --
 
 ALTER TABLE ONLY public.logic_gate_textboxes_history
-    ADD CONSTRAINT logic_gate_textboxes_history_pkey PRIMARY KEY (company_id, logic_gate_id, batch_id, textbox_id);
+    ADD CONSTRAINT logic_gate_textboxes_history_pkey PRIMARY KEY (company_id, logic_gate_id, batch_id, resource_type, textbox_id);
 
 
 --
@@ -9312,6 +9319,8 @@ CREATE TABLE public.process_steps (
     logic_gate_id uuid NOT NULL,
     name text NOT NULL,
     position integer NOT NULL,
+    body_json jsonb DEFAULT '{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph"}]},"annotations":[]}'::jsonb NOT NULL,
+    revision bigint DEFAULT 0 NOT NULL,
     created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT process_steps_pkey PRIMARY KEY (company_id, process_step_id),
@@ -9319,10 +9328,49 @@ CREATE TABLE public.process_steps (
     CONSTRAINT process_steps_owner_fkey FOREIGN KEY (company_id, logic_gate_id) REFERENCES public.logic_gates(company_id, logic_gate_id) ON DELETE CASCADE,
     CONSTRAINT process_steps_name_chk CHECK (length(btrim(name)) BETWEEN 1 AND 500),
     CONSTRAINT process_steps_position_chk CHECK (position >= 0),
+    CONSTRAINT process_steps_revision_chk CHECK (revision >= 0),
+    CONSTRAINT process_steps_body_json_chk CHECK ((
+      body_json->>'format' = 'mango-tiptap-json'
+      AND body_json->>'schema_version' = '1'
+      AND body_json->'document'->>'type' = 'doc'
+      AND jsonb_typeof(body_json->'annotations') = 'array'
+    ) IS TRUE),
     CONSTRAINT process_steps_timestamps_chk CHECK (updated_timestamp >= created_timestamp)
 );
 
 CREATE INDEX idx_process_steps_owner_position ON public.process_steps (company_id, logic_gate_id, position, process_step_id);
+
+CREATE FUNCTION public.mangorts_enforce_process_step_editor_text_limit() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+declare
+  total_bytes bigint;
+begin
+  perform pg_advisory_xact_lock(hashtextextended(
+    'editor-owner-text:' || new.company_id::text || ':logic_gate:' || new.logic_gate_id::text, 0
+  ));
+  select coalesce(sum(octet_length(step.body_json::text)),0)
+    into total_bytes
+    from process_steps step
+   where step.company_id=new.company_id and step.logic_gate_id=new.logic_gate_id
+     and step.process_step_id<>new.process_step_id;
+  total_bytes := total_bytes + octet_length(new.body_json::text) + (
+    select coalesce(sum(octet_length(textbox.body_json::text)),0)
+    from logic_gate_textboxes textbox
+    where textbox.company_id=new.company_id and textbox.logic_gate_id=new.logic_gate_id
+      and textbox.deleted_timestamp is null
+  );
+  if total_bytes > 1073741824 then
+    raise exception 'editor_owner_text_limit_exceeded'
+      using errcode='P0001',
+            detail='The one-GiB limit counts current editor text documents only; attachment object bytes are excluded.';
+  end if;
+  return new;
+end;
+$$;
+
+CREATE TRIGGER trg_process_step_editor_text_limit BEFORE INSERT OR UPDATE OF body_json ON public.process_steps
+  FOR EACH ROW EXECUTE FUNCTION public.mangorts_enforce_process_step_editor_text_limit();
 CREATE INDEX idx_node_logic_gate_assignments_logic_gate_position ON public.node_logic_gate_assignments (company_id, logic_gate_id, process_step_id, position, node_id);
 ALTER TABLE public.node_logic_gate_assignments ADD CONSTRAINT node_logic_gate_assignments_step_fkey
   FOREIGN KEY (company_id, logic_gate_id, process_step_id)
