@@ -31,13 +31,19 @@ A foreground Send captures the existing inspection events under its authenticate
 16. Step and edge deletion prune their dependent layout entries in the same transaction; Process deletion cascades its layout, and recycle/restore preserves exact surviving references in dependency order.
 17. Creating a Process in a chosen Folder checks current destination Edit access inside the same transaction that creates its one Explorer placement.
 18. A Process AI write or move requires the exact expected Process, Step, Node status, and assignment version inside the mutation transaction; a mismatch changes neither text nor placement.
-19. Saving a new Process map draft atomically creates its exact Process, chosen Explorer Folder placement, Steps, directed Step edges, layout, and committed events through the existing workspace batch command.
-20. A draft save accepts only one new Process in an existing editable Folder and only Step endpoints listed in that draft.
-21. A draft allocates each Process, Step, and edge UUID once; an existing identity rejects the entire save without updating records or creating another Process.
+19. Save Process atomically creates its exact Process, chosen Explorer Folder placement, company-map placement, Steps, directed Step edges, layout, chosen RACI assignments, SOP document, and committed events through the existing workspace batch command.
+20. Process creation accepts only one new Process in an existing editable Folder and only Step endpoints listed in that creation request.
+21. Process creation allocates each Process, Step, and edge UUID once; an existing identity rejects the entire save without updating records or creating another Process.
+22. New Process RACI uses only the existing typed policy settings and assignments.
+23. Omitted new Process assignments or assignments equal to the current Folder policy keep live inheritance.
+24. New Process assignments that differ from the current Folder policy customize that exact Process.
+25. A new Process SOP uses the existing canonical `logic-gate-overview` editor document under that exact Process ID and the normal editor JSON validation rules.
+26. No new Process, policy, editor document, placement, Step, or edge is stored before Save Process.
+27. Leaving Process creation discards its unsaved contents.
 
 ## Process Step Relationship Story
 
-A user starts a Process draft from the company map, chooses its Folder through the destination path, and arranges its Steps before Save. One transaction stores the exact Process, Steps, connections, layout, and Explorer placement. Board and Map then edit those same records. Deleting a Step removes its incident edges and geometry while Nodes retain their Process and status; restore puts exact Steps and edges back before their layout.
+A user starts creating a Process from the company map, chooses its Folder, arranges its Steps, sets RACI, and writes its SOP before Save Process. One transaction stores the exact Process, Steps, connections, layout, Explorer and company-map placements, policy, and canonical editor document. Untouched RACI follows the Folder live. Board, Editor, and Map then edit those same records. Leaving before Save stores nothing. Deleting a Step removes its incident edges and geometry while Nodes retain their Process and status; restore puts exact Steps and edges back before their layout.
 
 # Current Huddle Relationship Business Logic Laws
 

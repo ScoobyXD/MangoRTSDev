@@ -330,6 +330,9 @@ export function AppSidebar({
   const [pinDropSuccess, setPinDropSuccess] = useState("");
   const [mailUnreadCounts, setMailUnreadCounts] = useState({ myTriage: 0, sharedTriage: 0 });
   const [explorerSearchQuery, setExplorerSearchQuery] = useExplorerSearchQuery(companyID);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const explorerSearchRef = useRef<HTMLDivElement>(null);
+  const explorerSectionRef = useRef<HTMLElement>(null);
   const [nodeEditorFullscreenChromeActive, setNodeEditorFullscreenChromeActiveState] = useState(readNodeEditorFullscreenChromeActive);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedCreateNameInputRef = useRef<HTMLInputElement | null>(null);
@@ -1212,14 +1215,14 @@ export function AppSidebar({
   const explorerSearchActive = !explorerSearchHidden && explorerSearchQuery.trim().length > 0;
 
   return (
-    <aside className="company-explorer-scroll" data-app-sidebar="primary" style={appSidebarStyle}>
+    <aside ref={sidebarRef} className="company-explorer-scroll" data-app-sidebar="primary" style={appSidebarStyle}>
       <div style={appSidebarBrandStyle} aria-label="MangoRTS">
         <MangoWordmark size={22} weight={600} />
         {accountChrome && <div style={appSidebarAccountChromeStyle}>{accountChrome}</div>}
       </div>
 
       {!explorerSearchHidden && (
-        <div data-frame-interactive="true" style={appSidebarExplorerSearchContainerStyle}>
+        <div ref={explorerSearchRef} data-frame-interactive="true" style={appSidebarExplorerSearchContainerStyle}>
           <CompanyExplorerSearchBox
             value={explorerSearchQuery}
             onChange={setExplorerSearchQuery}
@@ -1384,7 +1387,17 @@ export function AppSidebar({
           onPointerEnter={preloadProcessMapSurface}
           onFocus={preloadProcessMapSurface}
           onPointerDown={preloadProcessMapSurface}
-          onClick={() => onPageSelect("process-map")}
+          onClick={() => {
+            onPageSelect("process-map");
+            const sidebar = sidebarRef.current;
+            const explorer = explorerSectionRef.current;
+            if (!sidebar || !explorer) return;
+            const searchHeight = explorerSearchRef.current?.getBoundingClientRect().height ?? 0;
+            sidebar.scrollTo({
+              top: sidebar.scrollTop + explorer.getBoundingClientRect().top - sidebar.getBoundingClientRect().top - searchHeight - 18,
+              behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+            });
+          }}
         />
         <AppSidebarButton
           label="Entities"
@@ -1431,6 +1444,7 @@ export function AppSidebar({
       )}
 
       <AppSidebarCompanyExplorerSection
+        sectionRef={explorerSectionRef}
         selectionTargetFrameIDs={explorerSelectionTargetFrameIDs}
         explorerSearchQuery={explorerSearchQuery}
         explorerSearchActive={explorerSearchActive}
@@ -1626,6 +1640,7 @@ function AppSidebarSectionHeader({ label, icon }: { label: string; icon?: React.
 }
 
 function AppSidebarCompanyExplorerSection({
+  sectionRef,
   selectionTargetFrameIDs,
   explorerSearchQuery,
   explorerSearchActive,
@@ -1633,6 +1648,7 @@ function AppSidebarCompanyExplorerSection({
   onTriageMessagesDrop,
   dropSuccess,
 }: {
+  sectionRef: React.RefObject<HTMLElement>;
   selectionTargetFrameIDs: string[];
   explorerSearchQuery: string;
   explorerSearchActive: boolean;
@@ -1641,8 +1657,8 @@ function AppSidebarCompanyExplorerSection({
   dropSuccess: string;
 }): React.ReactElement {
   return (
-    <section style={appSidebarCompanyExplorerSectionStyle(explorerSearchActive)} aria-label="Company Explorer">
-      {!explorerSearchActive && <AppSidebarSectionHeader label="Explorer" icon={<HeaderExplorerIcon color="#f97316" />} />}
+    <section ref={sectionRef} style={appSidebarCompanyExplorerSectionStyle(explorerSearchActive)} aria-label="Company Explorer" data-sidebar-explorer-surface="elevated">
+      {!explorerSearchActive && <AppSidebarSectionHeader label="Explore" icon={<HeaderExplorerIcon color="#f97316" />} />}
       {dropSuccess && (
         <div role="status" style={appSidebarExplorerSuccessStyle}>
           {dropSuccess}
@@ -1656,7 +1672,7 @@ function AppSidebarCompanyExplorerSection({
           useParentScroll
           selectionTargetFrameIDs={selectionTargetFrameIDs}
           externalSearchQuery={explorerSearchQuery}
-          hideTopControls={explorerSearchActive}
+          hideTopControls
           onSearchResultSelect={() => {
             onExplorerSearchQueryChange("");
           }}
@@ -2473,13 +2489,18 @@ const appSidebarSectionHeaderLineStyle: React.CSSProperties = {
 function appSidebarCompanyExplorerSectionStyle(searchActive: boolean): React.CSSProperties {
   return {
     flex: searchActive ? "1 1 auto" : "0 0 auto",
-    minHeight: searchActive ? 0 : undefined,
+    minHeight: searchActive ? 0 : "calc(100% - 54px)",
     minWidth: 0,
     display: "grid",
     position: "relative",
-    alignContent: searchActive ? "stretch" : undefined,
+    alignContent: searchActive ? "stretch" : "start",
     gap: searchActive ? 0 : 6,
-    padding: searchActive ? "0" : "0 0 10px",
+    boxSizing: "border-box",
+    padding: searchActive ? "0" : "9px 2px 10px",
+    border: "1px solid rgba(148, 163, 184, 0.24)",
+    borderRadius: 11,
+    background: "linear-gradient(145deg, rgba(255,255,255,.92), rgba(248,250,252,.78))",
+    boxShadow: "4px 5px 14px rgba(148, 163, 184, 0.2), -3px -3px 10px rgba(255, 255, 255, 0.82), inset 1px 1px 0 rgba(255, 255, 255, 0.76)",
   };
 }
 

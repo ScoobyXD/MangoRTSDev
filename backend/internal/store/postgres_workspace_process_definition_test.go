@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"miraeopus/backend/internal/domain"
 	"reflect"
 	"testing"
 )
@@ -9,6 +10,11 @@ import (
 func TestPostgresProcessStepMapAuthoredBatch(t *testing.T) {
 	_, repo := openPostgresProcessMapIntegration(t)
 	assertProcessStepMapAuthoredBatch(t, repo)
+}
+
+func TestPostgresProcessCreationRACIAndEditor(t *testing.T) {
+	_, repo := openPostgresProcessMapIntegration(t)
+	assertProcessCreationRACIAndEditor(t, repo)
 }
 
 func TestPostgresProcessStepMapAuthoredBatchEventFailureIsAtomic(t *testing.T) {
@@ -21,6 +27,10 @@ func TestPostgresProcessStepMapAuthoredBatchEventFailureIsAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	group, err := repo.CreateCompanyUserGroup(company.CompanyID, "", "Owners")
+	if err != nil {
+		t.Fatal(err)
+	}
 	beforePlacements := postgresAutomaticTestPlacements(t, db, company.CompanyID)
 	var beforeEvents, beforeOutbox int
 	if err := db.QueryRow(`select (select count(*) from domain_events),(select count(*) from realtime_outbox)`).Scan(&beforeEvents, &beforeOutbox); err != nil {
@@ -29,6 +39,8 @@ func TestPostgresProcessStepMapAuthoredBatchEventFailureIsAtomic(t *testing.T) {
 	installRealtimeOutboxFailureTrigger(t, db)
 	forceRealtimeOutboxEvent(t, db, ProcessWorkChangedEventType, true)
 	input := authoredProcessBatch(company.CompanyID, folder.FolderID)
+	input.ProcessDefinition.EditorDocument = authoredProcessEditorDocument()
+	input.ProcessDefinition.RACIAssignments = []ResourceRACIAssignmentInput{{Role: domain.RACIRoleResponsible, PrincipalType: EntityPermissionSubjectGroup, PrincipalID: group.GroupID}}
 	if _, err := repo.CreateWorkspaceEntityBatch(input); err == nil {
 		t.Fatal("authored save succeeded despite failed work outbox")
 	}
@@ -38,17 +50,19 @@ func TestPostgresProcessStepMapAuthoredBatchEventFailureIsAtomic(t *testing.T) {
 	if after := postgresAutomaticTestPlacements(t, db, company.CompanyID); !reflect.DeepEqual(beforePlacements, after) {
 		t.Fatal("failed authored save changed company map")
 	}
-	var steps, edges, layouts, items, policies, events, outbox int
+	var steps, edges, layouts, items, policies, raci, documents, events, outbox int
 	if err := db.QueryRow(`select
  (select count(*) from process_steps where logic_gate_id=$1::uuid),
  (select count(*) from resource_operational_relationships where source_resource_id=$2::uuid),
  (select count(*) from process_step_map_layouts where logic_gate_id=$1::uuid),
  (select count(*) from company_explorer_items where target_type='logic_gate' and target_id=$1::uuid),
  (select count(*) from resource_permission_settings where resource_type='logic_gate' and resource_id=$1::uuid),
- (select count(*) from domain_events),(select count(*) from realtime_outbox)`, input.ProcessDefinition.LogicGateID, input.ProcessDefinition.Steps[0].ProcessStepID).Scan(&steps, &edges, &layouts, &items, &policies, &events, &outbox); err != nil {
+ (select count(*) from resource_gvic_assignments where resource_type='logic_gate' and resource_id=$1::uuid),
+ (select count(*) from logic_gate_textboxes where logic_gate_id=$1::uuid),
+ (select count(*) from domain_events),(select count(*) from realtime_outbox)`, input.ProcessDefinition.LogicGateID, input.ProcessDefinition.Steps[0].ProcessStepID).Scan(&steps, &edges, &layouts, &items, &policies, &raci, &documents, &events, &outbox); err != nil {
 		t.Fatal(err)
 	}
-	if steps+edges+layouts+items+policies != 0 || events != beforeEvents || outbox != beforeOutbox {
-		t.Fatalf("failed save leaked rows: steps=%d edges=%d layouts=%d items=%d policies=%d events=%d/%d outbox=%d/%d", steps, edges, layouts, items, policies, events, beforeEvents, outbox, beforeOutbox)
+	if steps+edges+layouts+items+policies+raci+documents != 0 || events != beforeEvents || outbox != beforeOutbox {
+		t.Fatalf("failed save leaked rows: steps=%d edges=%d layouts=%d items=%d policies=%d raci=%d documents=%d events=%d/%d outbox=%d/%d", steps, edges, layouts, items, policies, raci, documents, events, beforeEvents, outbox, beforeOutbox)
 	}
 }

@@ -33,6 +33,13 @@ export type CompanyExplorerWorkspaceEntityBatchResponse = {
   folder_items?: CompanyExplorerFolderItem[];
 };
 
+export type CompanyExplorerProcessCreatedDetail = {
+  companyID: string;
+  processID: string;
+  folderPathIDs: string[];
+  response?: CompanyExplorerWorkspaceEntityBatchResponse;
+};
+
 export type CompanyExplorerDeleteBatchResponse = {
   status?: string;
   targets?: Array<{ kind: string; id: string }>;

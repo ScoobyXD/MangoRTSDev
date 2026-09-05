@@ -41,7 +41,7 @@
 39. Every accessible Folder perimeter and Process card MUST keep one thin type outline matching Company Explorer: orange for a Folder and green for a Process; selection MUST preserve that type outline, Folder surfaces MUST remain interaction-transparent, and the map MUST show the current source name in readable dark text without a redundant `Folder` or `Process` caption.
 40. A single click on an accessible Folder MUST select that Folder; a single click on an accessible Process MUST select that Process and pin its Process data card immediately to its right. Shift-dragging from empty canvas MUST draw one noninteractive selection rectangle and, in either drag direction, select every accessible Folder and Process whose full bounds including edges are enclosed; partial intersections and restricted placeholders MUST remain unselected, and the resulting selection MUST NOT invent bulk movement or deletion. Completing a placement drag or connection gesture MUST perform only that gesture and MUST NOT be treated as a click or open, close, pin, or unpin a data card.
 41. A double click on an accessible Folder MAY fit the one existing camera to that Folder fence and MUST NOT navigate, change browser history, or open another semantic map.
-42. A Process MUST remain a leaf on Process Map and MUST NOT open a Process Map child layer; double-clicking it, or pressing Enter or Space on the focused canvas while it is selected, MUST instead open that exact Process's canonical Logic Gate editor and Kanban page in the shared blocking overlay; a keyboard event from the Hover mode control, scorecard, or other interactive canvas descendant MUST retain its native control behavior and MUST NOT become a canvas command.
+42. A Process remains a leaf in the company map; double-clicking it or pressing Enter or Space on its selected canvas opens its focused Step map with the same RACI and SOP records. Interactive descendants retain their native behavior.
 43. Panning or zooming MUST change only the current map viewport and MUST NOT enter or leave a Folder or change saved placement coordinates.
 44. Process Map MUST have one stable company canvas URL, `/process-map`, and MUST NOT expose Folder-layer Process Map routes.
 45. Zooming, panning, camera fitting, selecting, crossing a detail threshold, or opening the Process Logic Gate overlay MUST remain within the one company canvas and MUST NOT add browser history.
@@ -120,7 +120,7 @@
 118. Automatic insertion MUST follow existing sibling order by saved Y, saved X, resource type, and resource ID, preserving saved positions and dimensions unless fitting the changed contents into their parent requires a proportional group transform.
 119. Process Map MUST omit the former left placement tray and its collapsed preference, branch reads, candidate state, cards, and controls.
 120. Every visible saved or pending trace MUST remain static; saved traces and connection previews MUST use the same orthogonal cyan-to-blue direction treatment, and Process Map MUST NOT create a moving flow marker, animation timer, phase state, or second trace presentation.
-121. The company overview, new Process draft, and saved focused Process MUST fill the route area with one edge-to-edge white map pane without outer panels, middle panels, a dedicated title row, or a separate creation form.
+121. The company overview, new Process, and saved focused Process MUST fill the route area with one edge-to-edge white map pane without outer panels, middle panels, a dedicated title row, or a separate creation form.
 122. Accessible placement anchors and resize grips MUST be invisible and noninteractive by default; at every display detail where an accessible Folder or Process name is shown, hovering or selecting it MUST reveal its left input, right output, and four corner resize grips, and each corner MUST use its correct diagonal resize cursor instead of a hand cursor. Starting from the output MUST retain that source output and reveal only distinct name-visible eligible target inputs; leaving the placement, anchors, and grips MUST hide hover-only controls, and completion, invalid drop, cancellation, camera change, or permission change MUST clear temporary controls and connection state.
 123. One **Hover mode** checkbox MUST remain below the creation actions in the common top-right card; on the company canvas it controls only transient Process data cards, MUST NOT control placement-anchor discovery, and changing it MUST NOT change selection, a pinned card, placement, operational relationships, traces, or saved Process Map state.
 124. When Hover mode is checked, hovering an accessible Process MUST show its transient data card immediately to the Process's right and leaving both the Process and card MUST remove it; unchecked hover MUST show no data card.
@@ -183,7 +183,7 @@
 181. Interactive reset MUST retain and apply the exact reviewed preview token automatically and MUST stop without retrying when that preview becomes stale.
 182. Double-clicking a Kanban Node inside the Process popup MUST open that Node above the Process popup and allow interaction with both the Node and its parent Process.
 183. A Kanban refresh MUST preserve the Process popup's open Node until the user closes it or selects another Node.
-184. Escape MUST close the innermost open popup first; closing a Node MUST leave its Process popup open, and closing the Process MUST return to the unchanged Process Map URL and canvas.
+184. Escape closes the innermost open popup first; closing a Node preserves its Process popup, and closing the Board / SOP popup returns to the underlying focused Process map.
 185. Ordinary hover and single-Process drag overlay preparation MUST look up only the selected or hovered placements and MUST NOT scan every loaded placement on each pointer update.
 186. Pointer movement that leaves the snapped drag delta or waypoint unchanged MUST preserve the current visual state and MUST NOT turn a completed drag into a click.
 187. Selection or edit-mask changes MUST retain cached sublayers for unrelated tiles while updating every affected cross-tile fragment.
@@ -198,35 +198,35 @@
 196. Ordinary local and remote refresh requests MUST coalesce while preserving a queued refresh for changes arriving during an active read.
 197. One elevated translucent card inside the map's top-right corner MUST retain vertically stacked Create Folder, Create Process, and Create Step actions in that order during company browsing, Process creation, and Step creation.
 198. A context creation action on an accessible Folder MUST carry that exact Folder as its proposed destination.
-199. Create Process MUST open a full-canvas local draft inside the shared map pane without opening the Board or SOP split.
-200. Create Step without an open Process MUST start a new Process draft containing one Step; Steps MUST remain owned by a Process.
-201. Save Process MUST create the Process, Steps, connections, geometry, and chosen Explorer placement atomically through the existing workspace batch command.
+199. Create Process opens an unsaved new Process in the shared map pane without creating a saved draft.
+200. Create Step without an open Process starts a new Process containing one Step.
+201. Save Process atomically creates the Process, chosen Explorer placement, Steps, connections, geometry, chosen RACI, and SOP through the existing workspace batch command.
 202. Create Folder MUST use the canonical Explorer Folder command with the chosen parent and MUST create no separate map resource.
 203. Returning from the focused Process canvas MUST preserve the mounted company canvas and its camera.
 204. An initially empty scene MUST remain eligible to fit the first nonempty company bounds; ordinary later refreshes MUST preserve the camera.
 205. An empty company scene MUST show an explanatory status with read-only Retry inside the map and MUST NOT silently reset or backfill saved map geometry.
-206. Create Step with a focused draft or saved Process MUST add the Step to that exact Process.
-207. A focused Process MUST show its Folder and file breadcrumb inline along the top of the map, with the draft name edited as a compact filename instead of a separate Process name field.
+206. Create Step in a focused new or saved Process adds to that exact Process.
+207. A focused Process shows its Folder path and compact filename at the top, with editable naming for a new Process.
 208. Folder selection and Folder creation MUST use compact elevated surfaces inside the shared map pane.
 209. Save Process and its save status MUST appear in the common top-right card instead of a separate header or button row.
 210. The company map's blank-canvas context menu MUST offer Create Folder, Create Process, and Create Step.
 211. Hover mode MUST retain its checked state when entering or leaving a focused Process.
-212. Opening a new Process draft MUST animate entering its work area while the creation card and breadcrumb stay fixed.
+212. Opening a new Process animates its work area while the creation card and breadcrumb stay fixed.
 213. A focused Process MUST immediately show a labeled rectangular outline around its Step canvas, including when it has no Steps.
-214. A new Process outline MUST start at the existing top and left inset and fill the available work area at 100% zoom.
+214. A focused Process starts at at most 85% zoom with space around its outline and its initial map viewport below the RACI controls and left of the action card.
 215. A reduced-motion preference MUST skip Process entrance and exit animations.
 216. The Process outline MUST expand as needed to contain all authored Step and route geometry.
 217. Process outline sizing MUST remain local presentation without rewriting authored geometry or creating another resource or layout record.
 218. Panning or zooming a focused Process MUST move or scale its outline, Steps, and routes together without changing the outline's world dimensions.
 219. Dragging blank space in a focused Process MUST pan its camera.
 220. Wheel zoom in a focused Process MUST preserve the world point beneath the pointer within a 50% to 800% zoom range.
-221. Focused Process drafts and saved maps MUST omit zoom buttons and Fit.
+221. New and saved Process maps omit zoom buttons and Fit.
 222. Focused Process controls and the breadcrumb MUST stay fixed while its camera moves.
 223. A read-only focused Process MUST allow camera navigation.
 224. The focused Process camera MUST remain fixed during a Step, route, or connection editing gesture.
 225. Deferred breadcrumb focus restoration MUST preserve any newer focus choice made by the user.
-226. Focused Process drafts and saved maps MUST omit Step and connection inspectors.
-227. Create Folder and Create Process MUST remain visible and disabled inside focused Process drafts and saved maps.
+226. New and saved Process maps omit Step and connection inspectors.
+227. Create Folder and Create Process remain visible and disabled inside focused Processes.
 228. Focused Step title editing MUST show borderless text with the entire name selected when editing begins.
 229. Folder breadcrumb controls and Folder picker choices MUST use an orange gradient.
 230. The creation card MUST sit 56 pixels below the map's top edge, or 52 pixels on viewports at most 700 pixels wide.
@@ -238,23 +238,34 @@
 236. Focused Step numbering MUST start at 1 on the leftmost Step and follow the fewest directed connections to each reachable Step.
 237. Unreachable Steps MUST remain unnumbered.
 238. Displayed Step numbers MUST NOT change saved Step order, names, geometry, or relationships.
-239. Confirmed draft discard and leaving a saved Process MUST retain the outgoing Process during an outward zoom-and-fade transition back to the company canvas.
+239. Confirmed departure from an unsaved Process and leaving a saved Process retain the outgoing canvas through the existing outward zoom and fade.
 240. Both canvases MUST remain noninteractive until the focused Process exit finishes.
 241. A Process exit MUST finish on its own exit animation end or after a 440-millisecond cleanup timeout.
 242. Child and unrelated animation events MUST NOT finish a Process exit.
-243. Saving a Process draft MUST keep the saved Process focused.
-244. Enabling reduced motion or hiding the Page MUST immediately finish any pending Process exit.
+243. Successful Save Process uses the Company map exit animation and returns to the previous company camera.
+244. Reduced motion or hiding the page immediately finishes a pending Process exit.
 245. Step traces and connection previews MUST use the Node icon's light cyan-to-blue gradient without arrowheads.
 246. Hovering or selecting a Step trace MUST preserve its gradient while making the trace more visible.
 247. The Process editor's right-hand Map pane MUST use the same white Process canvas, green outline, and pan-and-zoom interactions as the company Process Map's focused Process.
 248. Create Step and Board / Map controls in the Process editor's Map pane MUST float inside the canvas without reducing its layout area.
 249. Process Step canvases MUST omit scrollbars, dots, separate toolbars, persistent help text, zoom buttons, and Fit.
 250. Tile reads MUST skip inherited Responsible and Accountable assignment resolution for restricted placements, Folders, and Processes below the tile's editing-detail threshold.
+251. The focused map shows the shared RACI role cards immediately below its path.
+252. The Editor disclosure below RACI opens the existing SOP editor at the same width and a bounded height.
+253. Changing a new Process destination expands its exact Folder path in Company Explorer.
+254. Successful creation refreshes the existing map and selects the exact committed Process without moving an established camera.
+255. Successful creation reveals and selects the Process in its expanded Explorer Folder without opening the Board.
+256. Going back from an unsaved Process requires an “Are you sure?” confirmation in the top-left corner.
+257. Keeping editing in that confirmation preserves all unsaved Process contents without writing them.
+258. Leaving the page retains no saved or resumable Process draft.
+259. The map shows no persistent bottom-left unsaved-changes message.
+260. Refreshing or editing a Process never resets a camera the user has already moved.
+261. An existing Process exposes Open Board / SOP through its canonical blocking overlay.
 Last updated: 2026-09-05
 
 # Process Story: One company canvas moves from overview to Process work
 
-An authorized user opens `/process-map` on one white map pane, creates a Process, chooses its Folder, and names and connects Steps inside the green outline. Displayed numbering follows the flow from the leftmost Step. Blank-space dragging pans and the wheel zooms while controls stay fixed. Save commits the draft to Explorer and keeps it focused; returning restores the unchanged company camera. The Process editor's right-hand Map uses this same canvas beside the SOP, with floating Create Step and Board / Map controls.
+An authorized user creates a Process, chooses its Folder, assigns RACI, writes its SOP, and arranges Steps on the same map. Save commits those records together and returns through the existing animation to the previous company view, with the Process selected and its Explorer Folder expanded. Going back before Save asks for confirmation and discards the unfinished Process only when confirmed. Opening an existing Process uses those same RACI, SOP, and Step records, with Board / SOP available in its existing popup.
 
 ## Scenario: Fit nested Folders within the existing world
 

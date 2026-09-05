@@ -1,3 +1,56 @@
+# Current RACI Business Logic Laws
+
+1. RACI supports Responsible, Accountable, Consulted, and Informed roles and normalizes input before validation.
+2. Responsible, Accountable, Consulted, and Informed each accept multiple users or groups.
+3. One direct source principal can have only one RACI role in one customized resource policy.
+4. Canonical RACI resource types are node, logic_gate, huddle_logic_gate, huddle_node, project, company_explorer_folder, shared_inbox_folder, and shared_inbox. `shared_triage_folder` is rejected after cutover.
+5. `resource_gvic_settings` stores mode and sequences; `resource_gvic_assignments` stores only the complete customized graph. No effective, revision, snapshot, or projection table is policy authority.
+6. Every root is customized, including an empty policy. A non-root resource starts inherited unless its creation workflow explicitly customizes it.
+7. An inherited resource stores no RACI edges. Its effective policy is the nearest active customized resource in its live parent chain.
+8. Customizing copies the current effective policy once, applies the requested complete replacement, and allocates a new customized sequence in one transaction.
+9. Returning to inherited deletes the resource's customized edges and customized sequence, then immediately exposes its current effective ancestor.
+10. An ordinary policy save changes only that resource. It does not rewrite descendants.
+11. Apply to non-customized descendants saves the selected policy if needed and writes no descendant policy state. Inherited branches already resolve it live, and active customized boundaries remain protected.
+12. Apply to every descendant records one ancestor reset sequence that also supersedes older active customized policies below that resource. The UI requires a separate confirmation.
+13. A customization made after a reset becomes active again because its customized sequence is newer.
+14. A parent relationship created or changed receives a new parent-link sequence for both policy domains. A link newer than a reset blocks that older reset from crossing the moved edge.
+15. Moving an inherited resource changes its effective policy immediately; moving a customized resource preserves that customization. Descendants are not rewritten.
+16. A Node assigned to a Logic Gate uses that Logic Gate as its immediate parent. Detaching an inherited Node materializes its current effective RACI as a customized Node policy in the same transaction. Huddle Node ownership and Huddle Explorer placement do not create RACI parentage.
+17. A creator rule, including an email-derived Responsible assignment, first copies the final effective parent policy and then changes the new resource to customized.
+18. Group assignments remain group pointers. Current nested membership expands at read time, and cycles are rejected.
+19. Group membership, parent-group, and deletion changes affect effective RACI immediately without rewriting resource policies. Deleting a group removes its direct policy edges.
+20. If one user reaches several roles, the deterministic order is Responsible, Accountable, Consulted, then Informed; direct and shallower sources break equal-role ties.
+21. RACI never grants Edit access. Authorization reads only the separate permission policy.
+22. A RACI inbox includes a resource only when the actor has both effective RACI and effective Edit permission, resolved from the four canonical tables, live hierarchy, and live groups.
+23. Notification routing resolves the current effective RACI of the exact target resource. Parent or neighboring resource RACI never substitutes.
+24. Assignment notifications are sent only for newly effective users or effective role changes; unchanged users, removals, unrelated users, and the actor receive none.
+25. RACI event payloads identify policy type, action, descendant action, allocated sequence, mode, and changed recipients.
+26. Reads explain the stored mode, effective mode, source resource, active reset, and an inactive stored customization superseded by force overwrite.
+27. The frontend shows Inherited or Customized as a non-clickable status, keeps authorized assignment inputs editable in either state, provides both exact descendant actions only when descendants exist, protects stale writes, invalidates affected workspace reads, and performs no optimistic descendant materialization.
+28. Fingerprints include effective source identity and sequence, eligible reset identity and sequence, the parent-link boundary, live group-membership version, and actor-specific edit result where exposed.
+29. Point reads, My Work R/A/C/I reads, notification decisions, and cache validation derive current policy state at read time; canonical policy rows stay constant-size with descendant count and no sidebar projection copies effective users.
+30. Resource deletion deletes its settings row and cascades its RACI edges. No missing resource, user, or group identity can remain.
+31. Shared inbox folder and shared inbox RACI use their exact canonical resource identities and remain separate from permissions and mailbox credentials.
+32. Process work exposes `permissions.can_resolve_requests` for every reader with effective Responsible RACI, including group and inherited assignments; that flag never grants resource access.
+33. Email-derived and workspace-created resources apply creator rules only after their final parent placement so copied policy comes from the correct source.
+34. Stale in-flight reads cannot overwrite a newer committed policy response; ETags and policy fingerprints track the resolved V2 state.
+35. Canonical RACI policy readers and writers use only `resource_gvic_settings` and `resource_gvic_assignments`. Temporarily retained legacy tables are frozen rollback evidence, and no sidebar-only RACI copy is read or written.
+36. All RACI changes and their settings, graph edges, events, and read-version effects commit atomically.
+37. The editor keeps the four role columns compact, shows one neutral Inherited/Customized status, does not show raw policy-source UUIDs or customization warnings, and does not require a separate mode action before an inherited assignment can be edited.
+38. A cross-Logic-Gate Node move reads and authorizes the actual canonical one-per-Node assignment. A caller-supplied source Logic Gate is only a hint and cannot select relationship authority or cause a valid move to fail when stale. The move changes the canonical Logic Gate assignment and its projections; it neither requires nor rewrites optional email or attachment relationships owned by the same Node.
+39. After any successful RACI policy write, cached Node and Logic Gate records are invalidated. A descendant view must refetch its live effective policy instead of displaying a stale record cache; Apply to non-customized descendants still writes no descendant policy rows, and Apply to every descendant still uses one reset sequence instead of materializing descendants.
+40. The editor presents RACI as Responsible (Kanban In Progress orange #f08a24), Accountable (Kanban Done green #19c879), Consulted (Kanban Review teal-blue #19a8ff), and Informed (Kanban Backlog purple #8b5cf6), in that order. Each card keeps a pale layered treatment: a 14%/8% radial highlight, a 12%/7%/6% fill, a 34%/22%/12% edge gradient, and a 6% role-colored glow. The stronger Kanban column surface opacity is not used on RACI cards.
+41. Every shared role card uses a plus-only button in its top-right heading row with an accessible role-specific Add label. Zero assignments renders one unwrapped `No assignments` row; otherwise each direct person or group keeps its readable name and existing removal control.
+42. Replacing a V2 policy notifies a non-actor user when that user's highest effective RACI role changes, even when the user was already effective before the write.
+43. Accountable is the green second role and uses the A inbox. The obsolete Verifier role, V inbox, and CVI notification surface are rejected after cutover; migration converts stored Verified or Verifier values to Accountable and CVI notifications to ACI.
+44. The RACI forward migration uses only live V2 policy, notification, and Recycle Bin storage. Notification event-name conversion uses `notifications.notification_type`; the migration must not reference a nonexistent `notifications.event_type` column or read, lock, update, or recreate the retired `gvic_matrix_projection_table`.
+45. GVIC policy equality compares the unordered raw assignment set keyed by role, principal type, and principal ID. A group stays one pointer. Expanded effective users, labels, timestamps, and array order do not affect equality.
+46. The frontend uses its loaded parent policy for immediate status, while the backend re-resolves the live parent and stores the authoritative mode inside the same write transaction. Roots remain customized because they have no parent.
+47. Huddle Logic Gates and Huddle Nodes use direct RACI policies under the exact resource types `huddle_logic_gate` and `huddle_node`. Their RACI surfaces do not expose either descendant action.
+48. Tower exposes no Responsible, Accountable, Consulted, or Informed navigation trees. My Work keeps its R/A/C/I selectors and resolves them directly from canonical current RACI without a copied sidebar table or realtime scope.
+49. Process Map uses the shared RACI cards and existing revision-checked Process policy command, including current Edit permission and exact user/group principals.
+50. A new Process displays its chosen Folder's inherited raw assignments until the user changes them; changing Folder preserves explicit choices, and Save compares those choices with the live destination policy in the creation transaction.
+
 # Process Story: GVIC inheritance is automatic and remains a raw pointer policy
 
 An editor changes a direct Responsible, Accountable, Consulted, or Informed user/group assignment
@@ -20,7 +73,7 @@ A user opens a Node or Logic Gate with Responsible, Accountable, Consulted, and 
 ↓
 The four role cards reuse the Kanban In Progress orange, Done green, Review teal-blue, and Backlog purple in a deliberately pale layered gradient
 ↓
-Each card keeps its Add action in the top-right heading row so the assignment area receives the full card width
+Each card keeps one accessible plus button in the top-right heading row so the assignment area receives the full card width
 ↓
 Every direct person and group occupies its own single-line name row, so one entry never becomes a two-line pill and five entries remain visible as five rows
 ↓
@@ -63,59 +116,6 @@ Last updated: 2026-08-06
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
 - Business Logic Covered By Automated Tests: backend, HTTP, frontend contract, disposable PostgreSQL, scale, and regression coverage for V2 role validation, inherited/customized resolution, force resets, moves, detach, group changes, RACI inboxes, notifications, and fingerprints. Rule ID mapping remains partial.
-
-## Business Logic
-
-RACI1 - RACI supports Responsible, Accountable, Consulted, and Informed roles and normalizes input before validation.
-RACI2 - Responsible, Accountable, Consulted, and Informed each accept multiple users or groups.
-RACI3 - One direct source principal can have only one RACI role in one customized resource policy.
-RACI4 - Canonical RACI resource types are node, logic_gate, huddle_logic_gate, huddle_node, project, company_explorer_folder, shared_inbox_folder, and shared_inbox. `shared_triage_folder` is rejected after cutover.
-RACI5 - `resource_gvic_settings` stores mode and sequences; `resource_gvic_assignments` stores only the complete customized graph. No effective, revision, snapshot, or projection table is policy authority.
-RACI6 - Every root is customized, including an empty policy. A non-root resource starts inherited unless its creation workflow explicitly customizes it.
-RACI7 - An inherited resource stores no RACI edges. Its effective policy is the nearest active customized resource in its live parent chain.
-RACI8 - Customizing copies the current effective policy once, applies the requested complete replacement, and allocates a new customized sequence in one transaction.
-RACI9 - Returning to inherited deletes the resource's customized edges and customized sequence, then immediately exposes its current effective ancestor.
-RACI10 - An ordinary policy save changes only that resource. It does not rewrite descendants.
-RACI11 - Apply to non-customized descendants saves the selected policy if needed and writes no descendant policy state. Inherited branches already resolve it live, and active customized boundaries remain protected.
-RACI12 - Apply to every descendant records one ancestor reset sequence that also supersedes older active customized policies below that resource. The UI requires a separate confirmation.
-RACI13 - A customization made after a reset becomes active again because its customized sequence is newer.
-RACI14 - A parent relationship created or changed receives a new parent-link sequence for both policy domains. A link newer than a reset blocks that older reset from crossing the moved edge.
-RACI15 - Moving an inherited resource changes its effective policy immediately; moving a customized resource preserves that customization. Descendants are not rewritten.
-RACI16 - A Node assigned to a Logic Gate uses that Logic Gate as its immediate parent. Detaching an inherited Node materializes its current effective RACI as a customized Node policy in the same transaction. Huddle Node ownership and Huddle Explorer placement do not create RACI parentage.
-RACI17 - A creator rule, including an email-derived Responsible assignment, first copies the final effective parent policy and then changes the new resource to customized.
-RACI18 - Group assignments remain group pointers. Current nested membership expands at read time, and cycles are rejected.
-RACI19 - Group membership, parent-group, and deletion changes affect effective RACI immediately without rewriting resource policies. Deleting a group removes its direct policy edges.
-RACI20 - If one user reaches several roles, the deterministic order is Responsible, Accountable, Consulted, then Informed; direct and shallower sources break equal-role ties.
-RACI21 - RACI never grants Edit access. Authorization reads only the separate permission policy.
-RACI22 - A RACI inbox includes a resource only when the actor has both effective RACI and effective Edit permission, resolved from the four canonical tables, live hierarchy, and live groups.
-RACI23 - Notification routing resolves the current effective RACI of the exact target resource. Parent or neighboring resource RACI never substitutes.
-RACI24 - Assignment notifications are sent only for newly effective users or effective role changes; unchanged users, removals, unrelated users, and the actor receive none.
-RACI25 - RACI event payloads identify policy type, action, descendant action, allocated sequence, mode, and changed recipients.
-RACI26 - Reads explain the stored mode, effective mode, source resource, active reset, and an inactive stored customization superseded by force overwrite.
-RACI27 - The frontend shows Inherited or Customized as a non-clickable status, keeps authorized assignment inputs editable in either state, provides both exact descendant actions only when descendants exist, protects stale writes, invalidates affected workspace reads, and performs no optimistic descendant materialization.
-RACI28 - Fingerprints include effective source identity and sequence, eligible reset identity and sequence, the parent-link boundary, live group-membership version, and actor-specific edit result where exposed.
-RACI29 - Point reads, My Work R/A/C/I reads, notification decisions, and cache validation derive current policy state at read time; canonical policy rows stay constant-size with descendant count and no sidebar projection copies effective users.
-RACI30 - Resource deletion deletes its settings row and cascades its RACI edges. No missing resource, user, or group identity can remain.
-RACI31 - Shared inbox folder and shared inbox RACI use their exact canonical resource identities and remain separate from permissions and mailbox credentials.
-RACI32 - Process work exposes `permissions.can_resolve_requests` for every reader with effective Responsible RACI, including group and inherited assignments; that flag never grants resource access.
-RACI33 - Email-derived and workspace-created resources apply creator rules only after their final parent placement so copied policy comes from the correct source.
-RACI34 - Stale in-flight reads cannot overwrite a newer committed policy response; ETags and policy fingerprints track the resolved V2 state.
-RACI35 - Canonical RACI policy readers and writers use only `resource_gvic_settings` and `resource_gvic_assignments`. Temporarily retained legacy tables are frozen rollback evidence, and no sidebar-only RACI copy is read or written.
-RACI36 - All RACI changes and their settings, graph edges, events, and read-version effects commit atomically.
-RACI37 - The editor keeps the four role columns compact, shows one neutral Inherited/Customized status, does not show raw policy-source UUIDs or customization warnings, and does not require a separate mode action before an inherited assignment can be edited.
-RACI38 - A cross-Logic-Gate Node move reads and authorizes the actual canonical one-per-Node assignment. A caller-supplied source Logic Gate is only a hint and cannot select relationship authority or cause a valid move to fail when stale. The move changes the canonical Logic Gate assignment and its projections; it neither requires nor rewrites optional email or attachment relationships owned by the same Node.
-RACI39 - After any successful RACI policy write, cached Node and Logic Gate records are invalidated. A descendant view must refetch its live effective policy instead of displaying a stale record cache; Apply to non-customized descendants still writes no descendant policy rows, and Apply to every descendant still uses one reset sequence instead of materializing descendants.
-
-RACI45 - GVIC policy equality compares the unordered raw assignment set keyed by role, principal type, and principal ID. A group stays one pointer. Expanded effective users, labels, timestamps, and array order do not affect equality.
-
-RACI46 - The frontend uses its loaded parent policy for immediate status, while the backend re-resolves the live parent and stores the authoritative mode inside the same write transaction. Roots remain customized because they have no parent.
-RACI47 - Huddle Logic Gates and Huddle Nodes use direct RACI policies under the exact resource types `huddle_logic_gate` and `huddle_node`. Their RACI surfaces do not expose either descendant action.
-RACI40 - The editor presents RACI as Responsible (Kanban In Progress orange #f08a24), Accountable (Kanban Done green #19c879), Consulted (Kanban Review teal-blue #19a8ff), and Informed (Kanban Backlog purple #8b5cf6), in that order. Each card keeps a pale layered treatment: a 14%/8% radial highlight, a 12%/7%/6% fill, a 34%/22%/12% edge gradient, and a 6% role-colored glow. The stronger Kanban column surface opacity is not used on RACI cards.
-RACI41 - Each role card keeps Add in its top-right heading row and gives the assignment surface the full card width. Zero assignments renders one unwrapped `No assignments` row; otherwise every direct person or group renders as its own unwrapped name row, all rows remain visible as the card grows, and a group name continues to represent its live nested membership.
-RACI42 - Replacing a V2 policy notifies a non-actor user when that user's highest effective RACI role changes, even when the user was already effective before the write.
-RACI43 - Accountable is the green second role and uses the A inbox. The obsolete Verifier role, V inbox, and CVI notification surface are rejected after cutover; migration converts stored Verified or Verifier values to Accountable and CVI notifications to ACI.
-RACI44 - The RACI forward migration uses only live V2 policy, notification, and Recycle Bin storage. Notification event-name conversion uses `notifications.notification_type`; the migration must not reference a nonexistent `notifications.event_type` column or read, lock, update, or recreate the retired `gvic_matrix_projection_table`.
-RACI48 - Tower exposes no Responsible, Accountable, Consulted, or Informed navigation trees. My Work keeps its R/A/C/I selectors and resolves them directly from canonical current RACI without a copied sidebar table or realtime scope.
 
 ## Scenarios
 

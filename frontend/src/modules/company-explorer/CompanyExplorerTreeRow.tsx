@@ -418,7 +418,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
         fontSize: 12,
         cursor: isFolder && isExpandable ? "pointer" : "default",
         opacity: isDragging ? 0.55 : 1,
-        ["--company-explorer-hover-bg" as string]: isDarkTheme ? "rgba(255,255,255,0.07)" : "rgba(71, 85, 105, 0.12)",
+        ["--company-explorer-hover-bg" as string]: isDarkTheme ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.76)",
         ["--company-explorer-selected-bg" as string]: selectedRowBackground,
         background: rowBackground,
         border: "1px solid transparent",

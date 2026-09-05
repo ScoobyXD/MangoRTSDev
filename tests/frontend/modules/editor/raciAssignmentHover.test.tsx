@@ -128,6 +128,8 @@ test("RACI cards resolve directory names, place two assignments per row, and pre
     const informedCard = container.querySelector<HTMLElement>('[data-raci-role-card="informed"]');
     const addButton = informedCard?.querySelector<HTMLButtonElement>('button[data-raci-add-principal="informed"]');
     assert.ok(informedCard && addButton);
+    assert.equal(addButton.textContent?.trim(), "+", "all shared RACI cards keep only the plus sign visible");
+    assert.equal(addButton.getAttribute("aria-label"), "Add Informed user or team");
     assert.equal(addButton.parentElement?.style.gridRow, "1", "Add stays in the top role-heading row");
     assert.equal(assignmentButton.parentElement?.style.gridRow, "2", "the name surface receives the full second row");
     assert.match(informedCard.getAttribute("style") ?? "", /radial-gradient/, "role cards use a layered Kanban-color gradient");

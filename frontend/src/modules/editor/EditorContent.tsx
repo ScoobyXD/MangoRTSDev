@@ -80,7 +80,7 @@ import { durableEditorAttachmentInformationID } from "./editorAttachmentPreparat
 import { createEditorDocumentUndoHistory, resetEditorDocumentUndoHistory } from "./editorUndoHistory";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { fetchCurrentUser } from "../../auth/cognitoAuth";
-import { invalidateResourcePolicyDependentCaches } from "../permissions/resourcePolicyCaches";
+import { saveEditorResourceRACI, toResourceRACIAssignmentInput, type EditorRACIAssignmentInput } from "./resourceRACI.js";
 import { subscribeRealtimeScope } from "../realtime/realtimeWebSocket";
 import { assignNodeToLogicGateStatus, moveLogicGateAssignment } from "../kanban/kanbanApi";
 import { EntityPermissionsPanel } from "../permissions/EntityPermissionsDialog";
@@ -237,26 +237,6 @@ function logicGateRACIAssignmentPrincipalID(assignment: LogicGateRACIAssignment)
   const userID = assignment.user_id?.trim() || "";
   if (principalType === "user") return principalID || userID;
   return principalID;
-}
-
-type EditorRACIAssignmentInput = {
-  role: LogicGateRACIRole;
-  principal_type?: LogicGateRACIPrincipalType;
-  principal_id?: string;
-  user_id?: string;
-};
-
-function toResourceRACIAssignmentInput(assignment: EditorRACIAssignmentInput): {
-  role: LogicGateRACIRole;
-  principal_type: LogicGateRACIPrincipalType;
-  principal_id: string;
-} {
-  const principalType = assignment.principal_type?.trim() === "group" ? "group" : "user";
-  return {
-    role: assignment.role,
-    principal_type: principalType,
-    principal_id: (assignment.principal_id ?? assignment.user_id ?? "").trim(),
-  };
 }
 
 function normalizeLogicGateRACIAssignments(assignments: LogicGateRACIAssignment[], logicGateID: string): LogicGateRACIAssignment[] {
@@ -1377,19 +1357,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   ) => {
     const cleanResourceID = resourceID.trim();
     if (!cleanResourceID) return null;
-    const payload = await requestJSON<LogicGateResourceRACIPayload>(`/v1/resources/${resourceType}/${cleanResourceID}/gvic`, {
-      method: "PUT",
-      headers: gvicPolicyRevision ? { "If-Match": gvicPolicyRevision } : undefined,
-      body: JSON.stringify({
-        company_id: companyID,
-        assignment_mode: assignmentMode,
-        ...(assignmentMode === "customized" && nextAssignments !== undefined
-          ? { gvic_assignments: nextAssignments.map(toResourceRACIAssignmentInput) }
-          : {}),
-        descendant_action: descendantAction,
-      }),
+    const payload = await saveEditorResourceRACI({
+      apiBase, companyID, resourceType, resourceID: cleanResourceID, assignments: nextAssignments,
+      assignmentMode, revision: gvicPolicyRevision, descendantAction, requestJSON,
     });
-    invalidateResourcePolicyDependentCaches(apiBase, companyID);
     setRACIPolicyMode(payload.effective_assignment_mode);
     setRACIPolicyHasDescendants(payload.has_descendants === true);
     setRACIPolicyOverwrittenByAncestor(payload.overwritten_by_ancestor ?? null);

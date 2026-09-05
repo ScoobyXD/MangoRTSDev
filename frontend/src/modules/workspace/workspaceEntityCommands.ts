@@ -1,5 +1,7 @@
 import type { ProcessStepMapLayout } from "../kanban/processStepMapGeometry.js";
 import type { ProcessStepRelationship } from "../kanban/processWork.js";
+import type { MangoTiptapDocument } from "../editor/tiptap/mangoTiptapDocument.js";
+import type { LogicGateRACIPrincipalType, LogicGateRACIRole } from "../logic-gates/types.js";
 
 export type WorkspaceEntityCommandRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 
@@ -8,10 +10,12 @@ export type WorkspaceProcessDefinition = {
   steps: Array<{ process_step_id: string; name: string }>;
   relationships: ProcessStepRelationship[];
   layout: Omit<ProcessStepMapLayout, "revision">;
+  gvic_assignments?: Array<{ role: LogicGateRACIRole; principal_type: LogicGateRACIPrincipalType; principal_id: string }>;
+  editor_document?: MangoTiptapDocument;
 };
 
 export type WorkspaceEntityBatchKind = "node" | "logic_gate";
-export type WorkspaceEntityBatchCreatorLogicGateRACIRole = "responsible" | "accountable" | "consulted" | "informed";
+export type WorkspaceEntityBatchCreatorLogicGateRACIRole = LogicGateRACIRole;
 export type WorkspaceEntityBatchMutationOrigin = "company_explorer" | "matrix" | "kanban" | "editor";
 
 export type WorkspaceEntityBatchItem = {

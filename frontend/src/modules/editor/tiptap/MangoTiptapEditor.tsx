@@ -165,6 +165,7 @@ type MangoTiptapTableResizeDrag = {
 
 export type MangoTiptapEditorProps = {
   value?: string;
+  saveMode?: "server" | "local";
   editable?: boolean;
   outlineStyle?: EditorOutlineStyleID;
   ariaLabel: string;
@@ -804,6 +805,7 @@ function attachmentNodeViewExtension(
 
 export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   value,
+  saveMode = "server",
   editable = true,
   outlineStyle = DEFAULT_EDITOR_OUTLINE_STYLE,
   ariaLabel,
@@ -925,11 +927,11 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     onSelectionChatRequest, onLifecycleChange, onAnnotationsChange,
     onTargetHandled,
   };
-  attachmentContextRef.current = attachmentContext;
-  imageActionsRef.current = { onImageChatRequest, onImageNodeRequest };
+  attachmentContextRef.current = saveMode === "local" ? undefined : attachmentContext;
+  imageActionsRef.current = saveMode === "local" ? { onImageChatRequest: undefined, onImageNodeRequest: undefined } : { onImageChatRequest, onImageNodeRequest };
   formattingControllerActiveRef.current = formattingControllerActive;
   ownerAnnotationsRef.current = annotations;
-  entityLinkActionRef.current = onEntityLink;
+  entityLinkActionRef.current = saveMode === "local" ? undefined : onEntityLink;
   outlineStyleRef.current = outlineStyle;
 
   useLayoutEffect(() => {
@@ -1089,6 +1091,11 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
 
   const prepare = useCallback((): Promise<void> => {
     if (syncPreparationRef.current) return syncPreparationRef.current;
+    if (saveMode === "local") {
+      syncPreparationRef.current = Promise.resolve();
+      lifecycleRef.current.finishPreparation();
+      return syncPreparationRef.current;
+    }
     const preparation = (async () => {
       syncStartedRef.current = true;
       const sync = new MangoTiptapSync({
@@ -1191,7 +1198,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     })();
     syncPreparationRef.current = preparation;
     return preparation;
-  }, [attachmentContext?.apiBase, companyID, deactivate, documentID, publishAnnotationPositions, requestJSON, resourceID, resourceType, subscribeToCanonicalChange, traceContext]);
+  }, [attachmentContext?.apiBase, companyID, deactivate, documentID, publishAnnotationPositions, requestJSON, resourceID, resourceType, saveMode, subscribeToCanonicalChange, traceContext]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -1248,9 +1255,9 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     const state = lifecycleRef.current.getSnapshot().state;
     if (state === "sleeping" || state === "safely-inactive" || state === "preparing") {
       await prepare();
-      if (syncStartedRef.current) lifecycleRef.current.activate();
+      if (saveMode === "local" || syncStartedRef.current) lifecycleRef.current.activate();
     }
-  }, [prepare]);
+  }, [prepare, saveMode]);
 
   const activateFromPointer = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -1309,12 +1316,13 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     void activate();
   }, [activate]);
 
-  useEffect(() => registerMangoTiptapFlusher({
-    companyID, resourceType, resourceID, documentID,
-  }, async () => {
-    await prepare();
-    await syncRef.current?.flush();
-  }), [companyID, documentID, prepare, resourceID, resourceType]);
+  useEffect(() => {
+    if (saveMode === "local") return;
+    return registerMangoTiptapFlusher({ companyID, resourceType, resourceID, documentID }, async () => {
+      await prepare();
+      await syncRef.current?.flush();
+    });
+  }, [companyID, documentID, prepare, resourceID, resourceType, saveMode]);
 
   const attachmentExtension = useMemo(
     () => attachmentNodeViewExtension(attachmentContextRef, imageActionsRef),
@@ -1409,7 +1417,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     });
     return true;
   }, []);
-  const hasAttachmentContext = Boolean(attachmentContext);
+  const hasAttachmentContext = saveMode !== "local" && Boolean(attachmentContext);
   const openEntityLink = useCallback((entity: EditorEntityLink, anchor?: ReturnType<typeof editorEntityLinkAnchorBounds>) => {
     openEditorEntityLink(entity, { onOpen: onEntityOpen }, anchor);
   }, [onEntityOpen]);
@@ -1449,7 +1457,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     universalPickerDraftRef.current = draft;
     setUniversalPickerDraft(draft);
   }, []);
-  const linkTargetTypes = !onEntityLink
+  const linkTargetTypes = saveMode === "local" || !onEntityLink
     ? EMPTY_LINK_TARGET_TYPES
     : resourceType === "node"
       ? NODE_LINK_TARGET_TYPES
@@ -1728,6 +1736,12 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         "tiptap.on_update",
         "tiptap.callback",
         () => {
+          if (saveMode === "local") {
+            const snapshot = compactMangoTiptapDocument({ format: "mango-tiptap-json", schema_version: 1, document: activeEditor.getJSON() }, activeEditor.schema);
+            currentDocumentRef.current = snapshot;
+            callbacksRef.current.onDocumentSnapshotChange?.(snapshot);
+            return;
+          }
           lifecycleRef.current.markDirty();
           if (resourceType === "node" || resourceType === "project" || resourceType === "logic_gate") {
             markEditorHistoryChanged({ companyID, resourceType, resourceID });
@@ -1835,7 +1849,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       releaseActive();
     };
   }, [
-    ariaLabel, editable, extensions, formattingControllerRef, handleRichClipboardPaste, isActive, openEntityLink, placeholder, updateSelectionState,
+    ariaLabel, editable, extensions, formattingControllerRef, handleRichClipboardPaste, isActive, openEntityLink, placeholder, saveMode, updateSelectionState,
   ]);
 
 
@@ -2128,7 +2142,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       data-mango-outline-style={outlineStyle}
       data-mango-editor-state={lifecycleRef.current.getSnapshot().state}
       data-mango-editor-pinned={lifecycleRef.current.getSnapshot().pinned || undefined}
-      data-mango-editor-sync-mode="revisioned-json"
+      data-mango-editor-sync-mode={saveMode === "local" ? "local" : "revisioned-json"}
       data-mango-tiptap-live-ready={isActive && activeEditor && liveSurfaceReady ? "true" : undefined}
       onPointerDown={!isActive ? activateFromPointer : undefined}
       onFocusCapture={!isActive ? activateFromNonLeadingContent : undefined}
@@ -2253,7 +2267,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           />
         </>
       )}
-      {isActive && editable && selectionAction && (
+      {isActive && editable && saveMode !== "local" && selectionAction && (
         <div
           role="toolbar"
           aria-label="Highlighted text actions"

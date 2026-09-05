@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { APIHTTPError, isAbortError } from "../../modules/api/requestJSON.js";
 import { ProcessStepMap, type ProcessStepMapEditorProps } from "../../modules/kanban/ProcessStepMap.js";
 import { clearProcessWorkCache, getCachedProcessWork, getProcessWorkSingleFlight, invalidateLogicGateArenaViewCache, PROCESS_WORK_UPDATED_EVENT } from "../../modules/kanban/kanbanApi.js";
@@ -13,18 +13,20 @@ export type ProcessMapSavedProcessProps = {
   onBusyChange?: (busy: boolean) => void;
   hoverModeEnabled?: boolean;
   renderActions?: ProcessStepMapEditorProps["renderActions"];
+  renderDetails?: (canEdit: boolean, refreshVersion: number) => ReactNode;
 };
 
 export function ProcessMapSavedProcess(props: ProcessMapSavedProcessProps) {
   return <SavedProcess key={`${props.apiBase}:${props.companyID}:${props.processID}`} {...props} />;
 }
 
-function SavedProcess({ apiBase, companyID, processID, onBusyChange, hoverModeEnabled, renderActions }: ProcessMapSavedProcessProps) {
+function SavedProcess({ apiBase, companyID, processID, onBusyChange, hoverModeEnabled, renderActions, renderDetails }: ProcessMapSavedProcessProps) {
   const [snapshot, setSnapshot] = useState<ProcessWorkSnapshot | null>(() => getCachedProcessWork(apiBase, companyID, processID)?.contents ?? null);
   const [loading, setLoading] = useState(true);
   const [mapBusy, setMapBusy] = useState(false);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const refreshRef = useRef<() => void>(() => undefined);
   const busyCallback = useRef(onBusyChange);
   busyCallback.current = onBusyChange;
@@ -40,6 +42,7 @@ function SavedProcess({ apiBase, companyID, processID, onBusyChange, hoverModeEn
       const next = await getProcessWorkSingleFlight(apiBase, companyID, processID, controller.signal);
       if (!live) return;
       setSnapshot(next);
+      setRefreshVersion((version) => version + 1);
       setError("");
       setLoading(false);
     }, (cause) => {
@@ -87,6 +90,7 @@ function SavedProcess({ apiBase, companyID, processID, onBusyChange, hoverModeEn
   }, [apiBase, companyID, processID, retry]);
 
   return <section aria-label="Saved Process map" className="process-map-saved-process">
+    {snapshot && renderDetails?.(!loading && !error && snapshot.permissions.can_edit, refreshVersion)}
     {loading && <div role="status" className="process-map-authoring-notice">Loading Process…</div>}
     {error && <div role="alert" className="process-map-authoring-error">{error} <button type="button" onClick={() => setRetry((value) => value + 1)}>Retry</button></div>}
     {!snapshot && renderActions?.({ createStep: () => {}, disabled: true, busy: loading })}

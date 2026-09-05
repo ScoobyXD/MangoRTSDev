@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"miraeopus/backend/internal/domain"
 	"reflect"
@@ -11,7 +12,7 @@ func authoredProcessBatch(companyID, folderID string) WorkspaceEntityBatchInput 
 	first, second, edge := newUUIDv7String(), newUUIDv7String(), newUUIDv7String()
 	return WorkspaceEntityBatchInput{
 		CompanyID: companyID, EntityKind: EntityTypeLogicGate, FolderID: folderID, MutationOrigin: MutationOriginCompanyExplorer,
-		Items: []WorkspaceEntityBatchItemInput{{ClientID: "draft", Title: "Authored Process"}},
+		Items: []WorkspaceEntityBatchItemInput{{ClientID: "new-process", Title: "Authored Process"}},
 		ProcessDefinition: &WorkspaceProcessDefinitionInput{
 			LogicGateID:   newUUIDv7String(),
 			Steps:         []WorkspaceProcessDefinitionStep{{ProcessStepID: first, Name: "Prepare"}, {ProcessStepID: second, Name: "Approve"}},
@@ -53,7 +54,7 @@ func assertProcessStepMapAuthoredBatch(t *testing.T, repo Repository) {
 		t.Fatal(err)
 	}
 	if len(work.Nodes) != 0 || len(work.Steps) != 2 || work.Steps[0].ProcessStepID != definition.Steps[0].ProcessStepID || work.Steps[1].ProcessStepID != definition.Steps[1].ProcessStepID || work.Steps[0].Position != 1000 || work.Steps[1].Position != 2000 {
-		t.Fatalf("draft order or runtime separation lost: %+v", work)
+		t.Fatalf("creation order or runtime separation lost: %+v", work)
 	}
 	if saved.StepRelationships[0].ResourceOperationalRelationshipID != definition.Relationships[0].ResourceOperationalRelationshipID || saved.StepRelationships[0].Source != definition.Relationships[0].Source || saved.StepRelationships[0].Target != definition.Relationships[0].Target {
 		t.Fatalf("operational identity changed: %+v", saved.StepRelationships)
@@ -96,7 +97,7 @@ func assertProcessStepMapAuthoredBatch(t *testing.T, repo Repository) {
 	empty.ProcessDefinition.Layout = &WorkspaceProcessDefinitionLayout{Steps: []domain.ProcessStepMapRectangle{}, Routes: []domain.ProcessStepMapRoute{}}
 	emptySaved, err := repo.CreateWorkspaceEntityBatch(empty)
 	if err != nil || emptySaved.StepMap == nil || emptySaved.StepMap.Revision <= 0 {
-		t.Fatalf("empty draft save: %+v %v", emptySaved, err)
+		t.Fatalf("empty Process save: %+v %v", emptySaved, err)
 	}
 	if _, err := repo.CreateWorkspaceEntityBatch(empty); !errors.Is(err, ErrConflict) {
 		t.Fatalf("empty retry: %v", err)
@@ -144,6 +145,7 @@ func TestMemoryProcessStepMapAuthoredBatchEventFailureIsAtomic(t *testing.T) {
 	company, _ := repo.CreateCompany("Atomic authored Process")
 	folder, _ := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "folder", "Destination")
 	input := authoredProcessBatch(company.CompanyID, folder.FolderID)
+	input.ProcessDefinition.EditorDocument = authoredProcessEditorDocument()
 	before := repo.snapshotProcessMapMutationLocked()
 	repo.realtimeOutboxErr = errors.New("forced outbox failure")
 	if _, err := repo.CreateWorkspaceEntityBatch(input); !errors.Is(err, repo.realtimeOutboxErr) {
@@ -152,7 +154,142 @@ func TestMemoryProcessStepMapAuthoredBatchEventFailureIsAtomic(t *testing.T) {
 	if after := repo.snapshotProcessMapMutationLocked(); !reflect.DeepEqual(before, after) {
 		t.Fatal("failed authored save changed Process, Explorer, map, policies, or events")
 	}
-	if len(repo.processSteps) != 0 || len(repo.processStepMaps) != 0 {
-		t.Fatal("failed authored save leaked Steps or layout")
+	if len(repo.processSteps) != 0 || len(repo.processStepMaps) != 0 || len(repo.editorJSONDocuments) != 0 {
+		t.Fatal("failed authored save leaked Steps, layout, or SOP")
+	}
+}
+
+func authoredProcessEditorDocument() json.RawMessage {
+	return json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","attrs":{"blockId":"sop-introduction"},"content":[{"type":"text","text":"Check the order before approval."}]}]}}`)
+}
+
+func TestMemoryProcessCreationRACIAndEditor(t *testing.T) {
+	assertProcessCreationRACIAndEditor(t, NewMemoryRepo())
+}
+
+func assertProcessCreationRACIAndEditor(t *testing.T, repo Repository) {
+	t.Helper()
+	company, err := repo.CreateCompany("Process details")
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "folder", "Operations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	group, err := repo.CreateCompanyUserGroup(company.CompanyID, "", "Operations team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := "process-author-" + newUUIDv7String()
+	user, err := repo.UpsertAuthUser(subject, subject+"@example.com", "Author")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(subject, company.CompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	parentAssignments := []ResourceRACIAssignmentInput{{Role: domain.RACIRoleConsulted, PrincipalType: EntityPermissionSubjectGroup, PrincipalID: group.GroupID}}
+	putParent := func(assignments []ResourceRACIAssignmentInput) {
+		t.Helper()
+		if _, _, err := repo.PutResourceRACIPolicy(ResourceRACIPolicyUpdateInput{CompanyID: company.CompanyID, ResourceType: EntityTypeCompanyExplorerFolder, ResourceID: folder.FolderID, AssignmentMode: PolicyModeCustomized, DescendantAction: PolicyDescendantActionInheritedOnly, Assignments: assignments}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	putParent(parentAssignments)
+	created := map[string]string{}
+	for _, scenario := range []string{"untouched", "same as parent", "customized", "cleared"} {
+		input := authoredProcessBatch(company.CompanyID, folder.FolderID)
+		input.CreatorUserID = user.UserID
+		input.ProcessDefinition.EditorDocument = authoredProcessEditorDocument()
+		switch scenario {
+		case "same as parent":
+			input.ProcessDefinition.RACIAssignments = parentAssignments
+		case "customized":
+			input.ProcessDefinition.RACIAssignments = []ResourceRACIAssignmentInput{
+				{Role: domain.RACIRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: user.UserID},
+				{Role: domain.RACIRoleAccountable, PrincipalType: EntityPermissionSubjectGroup, PrincipalID: group.GroupID},
+			}
+		case "cleared":
+			input.ProcessDefinition.RACIAssignments = []ResourceRACIAssignmentInput{}
+		}
+		if _, err := repo.CreateWorkspaceEntityBatch(input); err != nil {
+			t.Fatalf("%s: %v", scenario, err)
+		}
+		processID := input.ProcessDefinition.LogicGateID
+		created[scenario] = processID
+		policy, err := repo.GetResourceRACIPolicy(company.CompanyID, EntityTypeLogicGate, processID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantMode, wantDirect := PolicyModeInherited, 0
+		if scenario == "customized" {
+			wantMode, wantDirect = PolicyModeCustomized, 2
+		} else if scenario == "cleared" {
+			wantMode = PolicyModeCustomized
+		}
+		if policy.AssignmentMode != wantMode || len(policy.RACIAssignments) != wantDirect {
+			t.Fatalf("%s policy = %+v", scenario, policy)
+		}
+		if scenario == "customized" {
+			normalized, _ := normalizeResourceRACIAssignmentInputs(input.ProcessDefinition.RACIAssignments)
+			if !normalizedRACIAssignmentsMatch(normalized, policy.RACIAssignments) {
+				t.Fatalf("typed assignment identities changed: %+v", policy.RACIAssignments)
+			}
+		}
+		ref := EditorJSONDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeLogicGate, ResourceID: processID, DocumentID: "logic-gate-overview"}
+		snapshot, err := repo.GetEditorJSONSnapshot(ref)
+		if err != nil || snapshot.Revision != 1 || !editorJSONValuesEqual(snapshot.JSONDocument, input.ProcessDefinition.EditorDocument) {
+			t.Fatalf("%s canonical SOP = %+v, %v", scenario, snapshot, err)
+		}
+		input.Items[0].Title = "Do not replace"
+		input.ProcessDefinition.EditorDocument = append(json.RawMessage{}, emptyMangoTiptapDocument...)
+		if _, err := repo.CreateWorkspaceEntityBatch(input); !errors.Is(err, ErrConflict) {
+			t.Fatalf("retry accepted: %v", err)
+		}
+		after, err := repo.GetEditorJSONSnapshot(ref)
+		if err != nil || !editorJSONValuesEqual(after.JSONDocument, snapshot.JSONDocument) || after.Revision != 1 {
+			t.Fatalf("retry changed SOP: %+v %v", after, err)
+		}
+	}
+	putParent([]ResourceRACIAssignmentInput{})
+	for scenario, processID := range created {
+		assignments, err := repo.ListResourceRACIAssignments(company.CompanyID, EntityTypeLogicGate, processID)
+		wantCount := 0
+		if scenario == "customized" {
+			wantCount = 2
+		}
+		if err != nil || len(assignments) != wantCount {
+			t.Fatalf("%s did not keep correct live policy: %+v %v", scenario, assignments, err)
+		}
+	}
+	empty := authoredProcessBatch(company.CompanyID, folder.FolderID)
+	empty.ProcessDefinition.RACIAssignments = []ResourceRACIAssignmentInput{}
+	if _, err := repo.CreateWorkspaceEntityBatch(empty); err != nil {
+		t.Fatal(err)
+	}
+	policy, err := repo.GetResourceRACIPolicy(company.CompanyID, EntityTypeLogicGate, empty.ProcessDefinition.LogicGateID)
+	if err != nil || policy.AssignmentMode != PolicyModeInherited {
+		t.Fatalf("empty parent match must inherit: %+v %v", policy, err)
+	}
+	for _, scenario := range []string{"foreign principal", "conflicting roles", "invalid SOP", "duplicate block IDs"} {
+		input := authoredProcessBatch(company.CompanyID, folder.FolderID)
+		input.ProcessDefinition.EditorDocument = authoredProcessEditorDocument()
+		switch scenario {
+		case "foreign principal":
+			input.ProcessDefinition.RACIAssignments = []ResourceRACIAssignmentInput{{Role: domain.RACIRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: newUUIDv7String()}}
+		case "conflicting roles":
+			input.ProcessDefinition.RACIAssignments = []ResourceRACIAssignmentInput{{Role: domain.RACIRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: user.UserID}, {Role: domain.RACIRoleAccountable, PrincipalType: EntityPermissionSubjectUser, PrincipalID: user.UserID}}
+		case "invalid SOP":
+			input.ProcessDefinition.EditorDocument = json.RawMessage(`{"text":"not an editor document"}`)
+		case "duplicate block IDs":
+			input.ProcessDefinition.EditorDocument = json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","attrs":{"blockId":"same"}},{"type":"paragraph","attrs":{"blockId":"same"}}]}}`)
+		}
+		if _, err := repo.CreateWorkspaceEntityBatch(input); err == nil {
+			t.Fatalf("%s saved", scenario)
+		}
+		if _, err := repo.GetLogicGate(company.CompanyID, input.ProcessDefinition.LogicGateID); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("%s leaked Process: %v", scenario, err)
+		}
 	}
 }

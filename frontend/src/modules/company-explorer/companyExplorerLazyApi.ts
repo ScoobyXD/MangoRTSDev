@@ -54,10 +54,12 @@ function lazyScopeQuery(companyID: string): string {
 
 const lazyReadInflight = new Map<string, Promise<CompanyExplorerSnapshotPayload>>();
 
-function fetchLazyRows(apiBase: string, path: string): Promise<CompanyExplorerSnapshotPayload> {
+function fetchLazyRows(apiBase: string, path: string, afterPending = false): Promise<CompanyExplorerSnapshotPayload> {
   const key = `${getAuthSessionCacheGeneration()}\u0000${apiBase}\u0000${path}`;
   const existing = lazyReadInflight.get(key);
-  if (existing) return existing;
+  // A committed create must not accept a read that started before the write.
+  // Wait for that read before requesting the new rows, keeping one request in flight.
+  if (existing) return afterPending ? existing.catch(() => undefined).then(() => fetchLazyRows(apiBase, path)) : existing;
   const request = requestJSON<CompanyExplorerSnapshotPayload>(apiBase, path).finally(() => {
     if (lazyReadInflight.get(key) === request) lazyReadInflight.delete(key);
   });
@@ -79,9 +81,10 @@ export function fetchCompanyExplorerChildren(
   companyID: string,
   scope: CompanyExplorerLazyScope,
   parentEntityID: string,
+  afterPending = false,
 ): Promise<CompanyExplorerSnapshotPayload> {
   void scope;
-  return fetchLazyRows(apiBase, `/v1/company-explorer/children?${lazyScopeQuery(companyID)}&parent_id=${encodeURIComponent(parentEntityID)}`);
+  return fetchLazyRows(apiBase, `/v1/company-explorer/children?${lazyScopeQuery(companyID)}&parent_id=${encodeURIComponent(parentEntityID)}`, afterPending);
 }
 
 export async function fetchCompanyExplorerBranchResourceIDs(

@@ -138,7 +138,7 @@ test("Board and the named Process canvas share inline Step edits, block switchin
     Object.defineProperties(viewport, { clientWidth: { value: 800 }, clientHeight: { value: 600 } });
     viewport.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600, toJSON() {} });
     const dataBefore = structuredClone(snapshots.get(processA)), layoutBefore = structuredClone(layouts.get(processA));
-    await act(async () => viewport.dispatchEvent(new dom.window.WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: 224, clientY: 230, deltaY: -Math.log(1.5) / .002 })));
+    await act(async () => viewport.dispatchEvent(new dom.window.WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: 224, clientY: 230, deltaY: -Math.log(1.5 / .85) / .002 })));
     await pointer(viewport, "pointerdown", 400, 300);
     await pointer(viewport, "pointermove", 448, 332);
     await pointer(viewport, "pointerup", 448, 332);

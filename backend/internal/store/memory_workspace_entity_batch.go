@@ -109,6 +109,7 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 					delete(r.processSteps, key(input.CompanyID, step.ProcessStepID))
 				}
 				delete(r.processStepMaps, key(input.CompanyID, definition.LogicGateID))
+				delete(r.editorJSONDocuments, editorJSONMemoryKey(EditorJSONDocumentRef{CompanyID: input.CompanyID, ResourceType: EntityTypeLogicGate, ResourceID: definition.LogicGateID, DocumentID: "logic-gate-overview"}))
 			}
 		}()
 	}
@@ -269,6 +270,38 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 	}
 
 	if definition := input.ProcessDefinition; definition != nil {
+		if !r.ensureV2PolicySettingsLocked(input.CompanyID, EntityTypeLogicGate, definition.LogicGateID) {
+			return WorkspaceEntityBatchResult{}, ErrNotFound
+		}
+		policy := r.memoryV2RACIPolicyLocked(input.CompanyID, EntityTypeLogicGate, definition.LogicGateID)
+		if definition.RACIAssignments != nil {
+			normalized, err := normalizeResourceRACIAssignmentInputs(definition.RACIAssignments)
+			if err != nil {
+				return WorkspaceEntityBatchResult{}, err
+			}
+			for _, assignment := range normalized {
+				if err := r.validateRACIPrincipalLocked(input.CompanyID, assignment.principalType, assignment.principalID); err != nil {
+					return WorkspaceEntityBatchResult{}, err
+				}
+			}
+			if policy.ParentPolicy == nil || !normalizedRACIAssignmentsMatch(normalized, policy.ParentPolicy.Assignments) {
+				settingKey := resourcePolicyKey(input.CompanyID, EntityTypeLogicGate, definition.LogicGateID)
+				setting := r.gvicV2Settings[settingKey]
+				setting.Mode, setting.CustomizedSequence = PolicyModeCustomized, r.nextRACIV2SequenceLocked()
+				r.gvicV2Settings[settingKey] = setting
+				edges := make([]domain.ResourceRACIAssignment, 0, len(normalized))
+				for _, assignment := range normalized {
+					edges = append(edges, domain.ResourceRACIAssignment{Role: assignment.role, PrincipalType: assignment.principalType, PrincipalID: assignment.principalID})
+				}
+				r.replaceMemoryRACIEdgesLocked(input.CompanyID, EntityTypeLogicGate, definition.LogicGateID, edges)
+				policy = r.memoryV2RACIPolicyLocked(input.CompanyID, EntityTypeLogicGate, definition.LogicGateID)
+			}
+		}
+		result.LogicGates[0].RACIAssignments = logicGateRACIAssignmentsFromResources(policy.RACIAssignments)
+		if definition.EditorDocument != nil {
+			ref := EditorJSONDocumentRef{CompanyID: input.CompanyID, ResourceType: EntityTypeLogicGate, ResourceID: definition.LogicGateID, DocumentID: "logic-gate-overview"}
+			r.editorJSONDocuments[editorJSONMemoryKey(ref)] = memoryEditorJSONDocument{Ref: ref, Revision: 1, SchemaVersion: MangoTiptapSchemaVersion, CollaborationEpoch: newUUIDv7String(), JSONDocument: definition.EditorDocument, Annotations: []EditorJSONAnnotation{}, UpdatedTimestamp: now}
+		}
 		result.ProcessSteps = make([]domain.ProcessStep, 0, len(definition.Steps))
 		result.StepRelationships = make([]domain.ResourceOperationalRelationship, 0, len(definition.Relationships))
 		for index, source := range definition.Steps {

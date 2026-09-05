@@ -33,7 +33,7 @@ export type ProcessStepMapEditorProps = {
   commands: ProcessStepMapCommands;
   onChanged?: () => void;
   onBusyChange?: (busy: boolean) => void;
-  saveMode?: "saved" | "draft";
+  saveMode?: "saved" | "new";
   processName?: string;
   initialEditingStepID?: string;
   hoverModeEnabled?: boolean;
@@ -129,8 +129,6 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
   current.current = { steps, relationships, canEdit, onChanged, commands, onBusyChange };
   layoutRef.current = layout;
   const traceGradientID = `step-map-trace-${useId().replace(/:/g, "")}`;
-  const camera = useProcessStepMapCamera(viewport, () => gesture.current !== null);
-  const zoom = camera.zoom;
   useAppFloatingMenuDismissal(deleteRequested, deleteConfirm, () => { setDeleteRequested(false); viewport.current?.focus({ preventScroll: true }); });
 
   const load = useCallback(async () => {
@@ -187,6 +185,8 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
   }), [relationships, boxes, display.routes]);
   const currentBounds = useMemo(() => stepMapBounds({ ...display, routes: routes.map(({ edge, points }) => ({ resource_operational_relationship_id: edge.resource_operational_relationship_id, points })) }), [display, routes]);
   const bounds = gesture.current?.bounds ?? currentBounds;
+  const camera = useProcessStepMapCamera(viewport, () => gesture.current !== null, loading ? null : bounds);
+  const zoom = camera.zoom;
   const selectedStep = selection?.kind === "step" ? stepByID.get(selection.id) : undefined;
   const selectedRoute = selection?.kind === "route" ? routes.find(({ edge }) => edge.resource_operational_relationship_id === selection.id) : undefined;
   const disabled = !canEdit || busy || loading || !layout || gestureActive;
@@ -213,7 +213,7 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
     setBusy(true);
     setError("");
     setConflict(false);
-    setNotice(saveMode === "draft" ? "Updating draft…" : "Saving…");
+    setNotice(saveMode === "new" ? "" : "Saving…");
     return true;
   };
   const finishMutation = () => {
@@ -230,7 +230,7 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
       if (!mounted.current) return;
       layoutRef.current = saved;
       setLayout(saved);
-      setNotice(saveMode === "draft" ? "Unsaved changes kept until you save the Process." : "Map saved.");
+      setNotice(saveMode === "new" ? "" : "Map saved.");
       current.current.onChanged?.();
     } catch (cause) {
       if (!mounted.current) return;
@@ -240,7 +240,7 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
         refreshPending.current = true;
       } else {
         setError(message(cause));
-        setNotice(saveMode === "draft" ? "Your move was not kept. The previous draft layout is shown." : "Your move was not saved. The last saved layout is shown.");
+        setNotice(saveMode === "new" ? "Your move was not kept. The previous layout is shown." : "Your move was not saved. The last saved layout is shown.");
       }
     } finally {
       if (mounted.current) setPreview(null);
@@ -253,7 +253,7 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
     try {
       await command();
       if (!mounted.current) return;
-      setNotice(saveMode === "draft" ? "Unsaved changes kept until you save the Process." : success);
+      setNotice(saveMode === "new" ? "" : success);
       setDeleteRequested(false);
       current.current.onChanged?.();
     } catch (cause) { if (mounted.current) { setError(message(cause)); setNotice(""); } }
@@ -424,8 +424,8 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
 
   return <section className="process-step-map process-step-map--canvas" aria-label="Process Step map">
     {renderActions?.({ createStep: () => void createStep(), disabled, busy: busy || loading || gestureActive })}
-    {error && <div className="process-step-map__error" role="alert">{error} <button type="button" disabled={busy} onClick={() => void load()}>{saveMode === "draft" ? "Reload draft" : "Reload map"}</button></div>}
-    <div className={`process-step-map__status${!loading && saveMode === "saved" && !conflict ? " is-hidden" : ""}`} role="status" aria-live="polite">{loading ? "Loading map…" : notice || (saveMode === "draft" ? "Unsaved changes stay here until you save the Process." : "")}</div>
+    {error && <div className="process-step-map__error" role="alert">{error} <button type="button" disabled={busy} onClick={() => void load()}>Reload map</button></div>}
+    <div className={`process-step-map__status${!loading && !conflict ? " is-hidden" : ""}`} role="status" aria-live="polite">{loading ? "Loading map…" : notice}</div>
     <div ref={viewport} tabIndex={0} aria-label="Process canvas. Drag blank space to pan; scroll to zoom." className={`process-step-map__viewport${camera.panning ? " is-panning" : ""}${connectionPreview ? " is-connecting" : ""}`} onPointerDown={camera.startPan} onPointerMove={(event) => { camera.movePan(event); moveGesture(event); }} onPointerUp={(event) => { camera.endPan(event); endGesture(event); }} onPointerCancel={() => { camera.cancelPan(); cancelGesture(); }} onLostPointerCapture={() => { camera.cancelPan(); if (gesture.current?.kind === "connect") cancelGesture(); }} onKeyDown={(event) => {
       if (event.defaultPrevented || (event.target as Element).closest("input, textarea, select, [contenteditable='true']")) return;
       if (event.key === "Escape") { camera.cancelPan(); cancelGesture(); return; }
@@ -474,7 +474,7 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
                 event.stopPropagation();
                 if (event.key === "Enter" || event.key === "Escape") { event.preventDefault(); finishRename(event.key === "Escape"); event.currentTarget.closest<HTMLElement>("article")?.focus(); }
               }} /> : <button className="process-step-map__step-title" type="button" title="Drag to move. Double-click or press F2 to name. Arrow keys move one grid square; Shift moves four." aria-label={`Move ${step.name}`} aria-disabled={disabled} onFocus={() => setSelection({ kind: "step", id: step.process_step_id })} onClick={() => { if (!disabled) setSelection({ kind: "step", id: step.process_step_id }); }} onKeyDown={(event) => { if (event.key === "F2") { event.preventDefault(); startRename(step); } else keyMove(event, box); }}>{step.name}</button>}
-              <span className="process-step-map__step-label">{saveMode === "draft" ? "Unsaved Step" : "Step"}</span>
+              <span className="process-step-map__step-label">Step</span>
               {resizeHandles.map((handle) => <button key={handle} type="button" className="process-step-map__resize" data-resize-handle={handle} aria-label={`Resize ${step.name}${handle === "se" ? "" : ` ${handle}`}`} title="Drag to resize, or use arrow keys." aria-disabled={disabled} onFocus={() => setSelection({ kind: "step", id: step.process_step_id })} onPointerDown={(event) => startGesture(event, "resize", step.process_step_id, 0, handle)} onKeyDown={(event) => keyMove(event, box, handle)} />)}
               {hovered && <div className="process-step-map__hover-preview" role="tooltip">{step.name}<span>{canEdit ? "Double-click to name this Step." : "Step connections are highlighted."}</span></div>}
             </article>;
@@ -488,13 +488,13 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
             const points = delta ? selectedRoute.points.map((item, i) => i === index ? { x: snapStepMapCoordinate(item.x + delta.x), y: snapStepMapCoordinate(item.y + delta.y) } : item) : selectedRoute.points.filter((_, i) => i !== index);
             void saveLayout(withRoutePoints(display, selectedRoute.edge.resource_operational_relationship_id, points));
           }} />)}
-          {steps.length === 0 && saveMode === "draft" && <p className="process-step-map__empty">Create your first Step to start this Process.</p>}
+          {steps.length === 0 && saveMode === "new" && <p className="process-step-map__empty">Create your first Step to start this Process.</p>}
           </>}
         </div>
       </div>
     </div>
     {deleteRequested && selectedStep && <div ref={deleteConfirm} role="alertdialog" aria-label="Delete Step confirmation" className="process-step-map__confirm">
-      <span>Delete “{selectedStep.name}”? {saveMode === "draft" ? "It will be removed from this draft." : "Its Nodes keep their Process and status."}</span>
+      <span>Delete “{selectedStep.name}”? {saveMode === "new" ? "It will be removed from this Process." : "Its Nodes keep their Process and status."}</span>
       <button type="button" className="process-step-map__danger" disabled={disabled} onClick={() => void changeDefinition(() => current.current.commands.deleteStep(selectedStep.process_step_id), "Step deleted. Its Nodes are preserved.")}>Confirm delete Step</button>
       <button type="button" autoFocus onClick={() => { setDeleteRequested(false); viewport.current?.focus({ preventScroll: true }); }}>Cancel</button>
     </div>}
