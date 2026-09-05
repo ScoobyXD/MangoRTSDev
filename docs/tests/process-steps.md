@@ -70,6 +70,7 @@
 68. Save Process and its save status stay inside the common top-right card.
 69. Hover mode on the focused map previews the hovered Step's name and highlights its connections without changing selection or pending edits.
 70. Closing Step or connection details returns keyboard focus to that exact map item.
+71. The focused draft and saved map show a labeled Process outline derived from their existing canvas bounds without changing Step geometry or Board layout.
 
 ## Process Story
 

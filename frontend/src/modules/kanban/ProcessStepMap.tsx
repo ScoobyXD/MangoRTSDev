@@ -35,6 +35,7 @@ export type ProcessStepMapEditorProps = {
   isDark?: boolean;
   saveMode?: "saved" | "draft";
   presentation?: "board" | "canvas";
+  processName?: string;
   hoverModeEnabled?: boolean;
   renderActions?: (actions: ProcessStepMapActions) => React.ReactNode;
 };
@@ -75,7 +76,7 @@ export function ProcessStepMap(props: ProcessStepMapProps) {
   return <ProcessStepMapEditor key={`${apiBase}:${companyID}:${processID}`} {...editorProps} commands={commands} />;
 }
 
-export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, onChanged, onBusyChange, onCreateFolder, onCreateProcess, isDark = false, saveMode = "saved", presentation = "board", hoverModeEnabled = false, renderActions }: ProcessStepMapEditorProps) {
+export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, onChanged, onBusyChange, onCreateFolder, onCreateProcess, isDark = false, saveMode = "saved", presentation = "board", processName = "", hoverModeEnabled = false, renderActions }: ProcessStepMapEditorProps) {
   const [layout, setLayout] = useState<ProcessStepMapLayout | null>(null);
   const [preview, setPreview] = useState<ProcessStepMapLayout | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
@@ -301,8 +302,10 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
       event.stopPropagation();
       setContextMenu({ x: event.clientX, y: event.clientY });
     }}>
-      {layout && <div style={{ width: bounds.width * zoom, height: bounds.height * zoom }}>
+      {(layout || isCanvas) && <div className="process-step-map__extent" style={{ width: bounds.width * zoom, height: bounds.height * zoom }}>
         <div className="process-step-map__canvas" style={{ width: bounds.width, height: bounds.height, transform: `scale(${zoom})` }}>
+          {isCanvas && <div className="process-step-map__process-outline" role="img" aria-label={`Process outline: ${processName.trim() || "Untitled Process"}`}><span aria-hidden="true">Process · {processName.trim() || "Untitled Process"}</span></div>}
+          {layout && <>
           <svg className="process-step-map__edges" width={bounds.width} height={bounds.height} viewBox={`${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`} aria-label="Step connections">
             <defs><marker id={arrowID} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" /></marker></defs>
             {routes.map(({ edge, source, target, points }) => {
@@ -334,6 +337,7 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
             void saveLayout(withRoutePoints(display, selectedRoute.edge.resource_operational_relationship_id, points));
           }} />)}
           {steps.length === 0 && <p className="process-step-map__empty">Create your first Step, then connect the stages of this Process.</p>}
+          </>}
         </div>
       </div>}
     </div>

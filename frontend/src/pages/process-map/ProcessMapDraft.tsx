@@ -123,7 +123,7 @@ export function ProcessMapDraft({ apiBase, companyID, processID, firstStep, init
       if (mounted.current) setSaving(false);
     }
   };
-  return <section className="process-map-workspace" aria-label="New Process map" aria-busy={saving}>
+  return <section className="process-map-workspace process-map-workspace--draft" aria-label="New Process map" aria-busy={saving}>
     <div className="process-map-workspace__path" aria-label="Process location">
       <button type="button" disabled={saving || editorBusy} onClick={onBack}>← Company map</button>
       <span aria-hidden="true">/</span>
@@ -134,7 +134,7 @@ export function ProcessMapDraft({ apiBase, companyID, processID, firstStep, init
       }} /> : <button ref={filenameRef} type="button" className="process-map-workspace__filename" aria-label="Name Process" title="Rename Process" disabled={saving} onClick={() => setEditingName(true)}>{name.trim() || "Untitled Process"}<span aria-hidden="true"> ✎</span></button>}
     </div>
     {error && <div role="alert" className="process-map-authoring-error">{error} Your draft has been kept. If Save already completed, you can open that saved version; later draft edits will be left behind. <button type="button" disabled={saving || editorBusy} onClick={() => { void openSavedVersion(); }}>Open saved version</button></div>}
-    <ProcessStepMapEditor steps={contents.steps} relationships={contents.relationships} canEdit={active && !saving} commands={commands} onBusyChange={setEditorBusy} saveMode="draft" presentation="canvas" hoverModeEnabled={hoverModeEnabled}
+    <ProcessStepMapEditor steps={contents.steps} relationships={contents.relationships} canEdit={active && !saving} commands={commands} onBusyChange={setEditorBusy} saveMode="draft" presentation="canvas" processName={name} hoverModeEnabled={hoverModeEnabled}
       onCreateFolder={() => onCreateFolder(folderID || undefined)} onCreateProcess={() => onCreateProcess(folderID || undefined)}
       renderActions={({ createStep, disabled, busy }) => <ProcessMapActions onCreateFolder={() => onCreateFolder(folderID || undefined)} onCreateProcess={() => onCreateProcess(folderID || undefined)} onCreateStep={createStep} disabled={saving || busy || !active} stepDisabled={disabled} hoverModeEnabled={hoverModeEnabled} onHoverModeChange={onHoverModeChange}>
         <span className="process-map-workspace__status">Unsaved draft</span>

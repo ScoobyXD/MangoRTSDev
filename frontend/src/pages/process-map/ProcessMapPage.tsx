@@ -61,7 +61,7 @@ function ProcessMapCompanyPage({ apiBase, companyID, onOpenLogicGate, onDraftSta
   };
   return <main className="process-map-page" aria-label="Process Map">
     <div className="process-map-page__canvas">
-      <div className="process-map-company-canvas" style={workspace ? { visibility: "hidden", pointerEvents: "none" } : undefined} aria-hidden={workspace ? true : undefined} ref={(element) => element?.toggleAttribute("inert", Boolean(workspace))}>
+      <div className={`process-map-company-canvas${workspace ? " is-focused" : ""}`} aria-hidden={workspace ? true : undefined} ref={(element) => element?.toggleAttribute("inert", Boolean(workspace))}>
         <ProcessMapSurface apiBase={apiBase} companyID={companyID} hoverModeEnabled={hoverModeEnabled} onOpenLogicGate={onOpenLogicGate} onCreateFolder={createFolder} onCreateProcess={(parentID) => createProcess(parentID)} onCreateStep={(parentID) => createProcess(parentID, true)} />
       </div>
       {!workspace && <ProcessMapActions onCreateFolder={() => createFolder()} onCreateProcess={() => createProcess()} onCreateStep={() => createProcess(undefined, true)} hoverModeEnabled={hoverModeEnabled} onHoverModeChange={setHoverModeEnabled} />}

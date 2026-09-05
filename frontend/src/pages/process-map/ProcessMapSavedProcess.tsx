@@ -94,7 +94,7 @@ function SavedProcess({ apiBase, companyID, processID, onBusyChange, onCreateFol
     {error && <div role="alert" className="process-map-authoring-error">{error} <button type="button" onClick={() => setRetry((value) => value + 1)}>Retry</button></div>}
     {!snapshot && renderActions?.({ createStep: () => {}, disabled: true, busy: loading })}
     {snapshot && <ProcessStepMap apiBase={apiBase} companyID={companyID} processID={processID}
-      steps={snapshot.steps} relationships={snapshot.relationships} canEdit={!loading && !error && snapshot.permissions.can_edit}
+      steps={snapshot.steps} relationships={snapshot.relationships} canEdit={!loading && !error && snapshot.permissions.can_edit} processName={snapshot.logic_gate.header}
       onChanged={() => refreshRef.current()} onBusyChange={setMapBusy} onCreateFolder={onCreateFolder} onCreateProcess={onCreateProcess} isDark={isDark} presentation="canvas" hoverModeEnabled={hoverModeEnabled} renderActions={renderActions} />}
   </section>;
 }

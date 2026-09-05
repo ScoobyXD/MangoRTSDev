@@ -1,4 +1,5 @@
 .process-map-company-canvas { position: absolute; inset: 0; }
+.process-map-company-canvas.is-focused { opacity: 0; transform: scale(1.08); visibility: hidden; pointer-events: none; transition: opacity 440ms ease, transform 440ms ease, visibility 0s 440ms; }
 .process-map-page__actions { position: absolute; top: 16px; right: 16px; z-index: 20; display: flex; flex-direction: column; gap: 4px; width: 176px; max-width: calc(100% - 32px); box-sizing: border-box; padding: 8px; border: 1px solid #e2e8f099; border-radius: 14px; background: #ffffffe0; box-shadow: 0 6px 28px #26344914; backdrop-filter: blur(16px); }
 .process-map-page__actions .process-map-page__hover-mode { margin: 4px 0 0; padding: 9px 8px; font-weight: 500; }
 .process-map-page__actions button, .process-map-workspace__path button, .process-map-confirm button, .process-map-authoring-notice button, .process-map-authoring-error button, .process-map-folder-dialog button, .process-map-workspace .process-step-map__inspector button { border: 1px solid #dbe3ed; background: #fff; color: #334155; border-radius: 9px; padding: 8px 12px; font: inherit; font-size: 13px; cursor: pointer; }
@@ -8,6 +9,15 @@
 .process-map-page button:disabled, .process-map-folder-dialog button:disabled { opacity: .5; cursor: default; }
 .process-map-page button.process-map-primary { color: #fff; border-color: #6550b7; background: #6550b7; font-weight: 650; }
 .process-map-workspace, .process-map-saved-process { position: absolute; inset: 0; min-height: 0; background: #fff; overflow: hidden; }
+.process-map-workspace--draft, .process-map-workspace--draft > .process-step-map, .process-map-workspace--draft .process-step-map__viewport { background: transparent; }
+.process-map-workspace--draft::before { content: ""; position: absolute; inset: 0; background: #fff; animation: process-map-enter-background 440ms ease-out; }
+.process-map-workspace--draft .process-step-map__extent { transform-origin: 50% 40%; animation: process-map-enter-room 440ms cubic-bezier(.2,.7,.2,1); }
+@keyframes process-map-enter-background { from { opacity: 0; } to { opacity: 1; } }
+@keyframes process-map-enter-room { from { opacity: .35; transform: scale(.88); pointer-events: none; } to { opacity: 1; transform: scale(1); pointer-events: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .process-map-company-canvas, .process-map-company-canvas.is-focused { transition: none; transform: none; }
+  .process-map-workspace--draft::before, .process-map-workspace--draft .process-step-map__extent { animation: none; }
+}
 .process-map-workspace__path { position: absolute; top: 16px; left: 16px; z-index: 25; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; max-width: calc(100% - 224px); padding: 4px 6px; color: #64748b; font-size: 13px; border-radius: 10px; background: #ffffffde; box-shadow: 0 3px 16px #2634490a; backdrop-filter: blur(16px); }
 .process-map-workspace__path > button { background: transparent; border-color: transparent; padding: 5px 7px; }
 .process-map-workspace__filename, .process-map-workspace__saved-name { max-width: min(280px, 100%); box-sizing: border-box; color: #334155; font: inherit; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
