@@ -373,6 +373,7 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		s.wakeAttachmentDeletionCleanup()
 		s.wakeRealtimeSpine()
 		writeJSON(w, http.StatusOK, map[string]any{
 			"operation_id": commit.OperationID,

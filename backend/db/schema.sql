@@ -6348,6 +6348,13 @@ CREATE INDEX idx_attachments_company_created ON public.attachments USING btree (
 
 
 --
+-- Name: idx_attachments_pending_deletion; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_attachments_pending_deletion ON public.attachments USING btree (company_id, attachment_id) WHERE (deleted_timestamp IS NOT NULL);
+
+
+--
 -- Name: idx_attachments_company_sha256; Type: INDEX; Schema: public; Owner: -
 --
 

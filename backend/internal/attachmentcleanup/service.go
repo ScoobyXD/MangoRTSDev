@@ -32,10 +32,17 @@ type WorkItem struct {
 }
 
 type Repository interface {
-	ListWork(ctx context.Context, companyID string, limit int) ([]WorkItem, error)
+	WithItemLock(ctx context.Context, item WorkItem, run func(Repository) ItemResult) ItemResult
+	ListWork(ctx context.Context, companyID, afterAttachmentID string, limit int) ([]WorkItem, error)
+	LoadObjects(ctx context.Context, item WorkItem) ([]ObjectRef, error)
 	Eligible(ctx context.Context, item WorkItem) (bool, error)
 	SharedWithRetained(ctx context.Context, item WorkItem, object ObjectRef) (bool, error)
 	Finalize(ctx context.Context, item WorkItem) error
+}
+
+type PendingRepository interface {
+	Repository
+	ListPendingAttachmentDeletionCompanyIDs(ctx context.Context) ([]string, error)
 }
 
 type Storage interface {
@@ -51,6 +58,7 @@ type Options struct {
 
 type ItemResult struct {
 	Kind             WorkKind
+	CompanyID        string
 	AttachmentID     string
 	FailureStage     string
 	ObjectCount      int
@@ -99,7 +107,7 @@ func (s Service) Run(ctx context.Context, options Options) (Result, error) {
 	if options.Limit <= 0 {
 		return Result{}, errors.New("cleanup limit must be positive")
 	}
-	work, err := s.Repository.ListWork(ctx, companyID, options.Limit)
+	work, err := s.Repository.ListWork(ctx, companyID, "", options.Limit)
 	if err != nil {
 		return Result{}, fmt.Errorf("list cleanup work: %w", err)
 	}
@@ -108,6 +116,7 @@ func (s Service) Run(ctx context.Context, options Options) (Result, error) {
 		if strings.TrimSpace(item.CompanyID) != companyID {
 			result.Items = append(result.Items, ItemResult{
 				Kind:         item.Kind,
+				CompanyID:    strings.TrimSpace(item.CompanyID),
 				AttachmentID: strings.TrimSpace(item.AttachmentID),
 				FailureStage: "company_scope",
 				Err:          errors.New("repository returned cleanup work for another company"),
@@ -122,13 +131,20 @@ func (s Service) Run(ctx context.Context, options Options) (Result, error) {
 func (s Service) RunItem(ctx context.Context, item WorkItem, apply bool) ItemResult {
 	item.CompanyID = strings.TrimSpace(item.CompanyID)
 	item.AttachmentID = strings.TrimSpace(item.AttachmentID)
-	current := ItemResult{Kind: item.Kind, AttachmentID: item.AttachmentID, ObjectCount: len(item.Objects)}
+	current := ItemResult{Kind: item.Kind, CompanyID: item.CompanyID, AttachmentID: item.AttachmentID}
 	if ctx == nil || s.Repository == nil || s.Storage == nil || item.CompanyID == "" ||
 		item.AttachmentID == "" || item.Kind != WorkOrphanAttachment {
 		current.FailureStage = "validate_work_item"
 		current.Err = errors.New("invalid cleanup work item")
 		return current
 	}
+	return s.Repository.WithItemLock(ctx, item, func(repository Repository) ItemResult {
+		return (Service{Repository: repository, Storage: s.Storage}).runLockedItem(ctx, item, apply)
+	})
+}
+
+func (s Service) runLockedItem(ctx context.Context, item WorkItem, apply bool) ItemResult {
+	current := ItemResult{Kind: item.Kind, CompanyID: item.CompanyID, AttachmentID: item.AttachmentID}
 	eligible, eligibleErr := s.Repository.Eligible(ctx, item)
 	if eligibleErr != nil {
 		current.FailureStage = "recheck_eligibility"
@@ -140,7 +156,13 @@ func (s Service) RunItem(ctx context.Context, item WorkItem, apply bool) ItemRes
 		return current
 	}
 
-	objects := deduplicateObjects(item.Objects)
+	objects, err := s.Repository.LoadObjects(ctx, item)
+	if err != nil {
+		current.FailureStage = "load_storage_objects"
+		current.Err = fmt.Errorf("load attachment storage objects: %w", err)
+		return current
+	}
+	objects = deduplicateObjects(objects)
 	current.ObjectCount = len(objects)
 	readyToFinalize := true
 	for _, object := range objects {
@@ -170,6 +192,18 @@ func (s Service) RunItem(ctx context.Context, item WorkItem, apply bool) ItemRes
 			readyToFinalize = false
 			break
 		}
+		// A batch may wait behind slow storage calls. Check the current owner and
+		// recycle state immediately before each destructive request as well.
+		eligible, err := s.Repository.Eligible(ctx, item)
+		if err != nil {
+			current.FailureStage = "recheck_eligibility"
+			current.Err = fmt.Errorf("recheck cleanup eligibility: %w", err)
+			return current
+		}
+		if !eligible {
+			current.Skipped = true
+			return current
+		}
 		deleteErr := s.Storage.DeleteObject(ctx, object.Key)
 		switch {
 		case deleteErr == nil:
@@ -186,7 +220,9 @@ func (s Service) RunItem(ctx context.Context, item WorkItem, apply bool) ItemRes
 		}
 	}
 	if apply && readyToFinalize {
-		if finalizeErr := s.Repository.Finalize(ctx, item); finalizeErr != nil {
+		if finalizeErr := s.Repository.Finalize(ctx, item); errors.Is(finalizeErr, ErrStillOwned) {
+			current.Skipped = true
+		} else if finalizeErr != nil {
 			current.FailureStage = "finalize_database"
 			current.Err = fmt.Errorf("finalize database cleanup: %w", finalizeErr)
 		} else {

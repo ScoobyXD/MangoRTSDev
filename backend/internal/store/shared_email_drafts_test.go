@@ -155,7 +155,7 @@ func TestMemoryResourceSharedEmailDraftIdentityRevisionAuthorizationAndParity(t 
 		t.Fatalf("delete last-owner/multi-owner attachment state=%+v/%+v", repo.attachments[attachmentKey(companyID, attachmentIDs[0])], repo.attachments[attachmentKey(companyID, attachmentIDs[1])])
 	}
 	cleanupItem := attachmentcleanup.WorkItem{Kind: WorkKindOrphanAttachment(), CompanyID: companyID, AttachmentID: attachmentIDs[0]}
-	work, err := repo.ListWork(context.Background(), companyID, 100)
+	work, err := repo.ListWork(context.Background(), companyID, "", 100)
 	if err != nil || len(work) != 0 {
 		t.Fatalf("recyclable attachment exposed to cleanup work=%+v err=%v", work, err)
 	}

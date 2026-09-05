@@ -268,7 +268,13 @@ func (r *MemoryRepo) ListLogicGateEditorSaveVersions(companyID, logicGateID stri
 
 func (r *MemoryRepo) RestoreNodeEditorSaveVersion(input EditorSaveVersionRestoreInput) (domain.EditorSaveVersion, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	deleted := false
+	defer func() {
+		r.mu.Unlock()
+		if deleted && input.AfterDeleteCommit != nil {
+			input.AfterDeleteCommit()
+		}
+	}()
 	companyID := strings.TrimSpace(input.CompanyID)
 	nodeID := strings.TrimSpace(input.ResourceID)
 	saveID := strings.TrimSpace(input.SaveID)
@@ -299,6 +305,7 @@ func (r *MemoryRepo) RestoreNodeEditorSaveVersion(input EditorSaveVersionRestore
 			continue
 		}
 		r.deleteEditorProjectionLocked(EditorDocumentRef{CompanyID: companyID, ResourceType: EntityTypeNode, ResourceID: nodeID, DocumentID: sourceID})
+		deleted = true
 	}
 	for sourceID, item := range desired {
 		projection := r.nodeText[key(companyID, nodeID)][sourceID]

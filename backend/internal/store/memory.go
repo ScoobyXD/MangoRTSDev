@@ -7,6 +7,7 @@ import (
 )
 
 type MemoryRepo struct {
+	attachmentStorageMu              sync.Mutex
 	mu                               sync.RWMutex
 	nodes                            map[string]domain.Node
 	nodeInfo                         map[string][]domain.NodeInformation

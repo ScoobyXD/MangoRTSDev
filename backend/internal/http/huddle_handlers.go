@@ -256,6 +256,7 @@ func (s *Server) handleHuddleLogicGateByID(w http.ResponseWriter, r *http.Reques
 			writeHuddleError(w, err)
 			return
 		}
+		s.wakeAttachmentDeletionCleanup()
 		writeJSON(w, http.StatusOK, map[string]any{"status": "deleted"})
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -365,6 +366,7 @@ func (s *Server) handleHuddleNodeByID(w http.ResponseWriter, r *http.Request) {
 			writeHuddleError(w, err)
 			return
 		}
+		s.wakeAttachmentDeletionCleanup()
 		writeJSON(w, http.StatusOK, map[string]any{"status": "deleted"})
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")

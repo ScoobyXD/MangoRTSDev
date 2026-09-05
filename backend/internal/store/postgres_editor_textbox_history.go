@@ -247,6 +247,9 @@ func restorePostgresEditorTextboxHistory(r *PostgresRepo, input EditorSaveVersio
 		if err != nil {
 			return domain.EditorSaveVersion{}, err
 		}
+		if input.AfterDeleteCommit != nil {
+			input.AfterDeleteCommit()
+		}
 	}
 	ids = ids[:0]
 	for id := range desired {

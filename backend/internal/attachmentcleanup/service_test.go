@@ -14,8 +14,16 @@ type fakeRepository struct {
 	finalizeError error
 }
 
-func (f *fakeRepository) ListWork(context.Context, string, int) ([]WorkItem, error) {
+func (f *fakeRepository) WithItemLock(_ context.Context, _ WorkItem, run func(Repository) ItemResult) ItemResult {
+	return run(f)
+}
+
+func (f *fakeRepository) ListWork(context.Context, string, string, int) ([]WorkItem, error) {
 	return append([]WorkItem(nil), f.work...), nil
+}
+
+func (f *fakeRepository) LoadObjects(_ context.Context, item WorkItem) ([]ObjectRef, error) {
+	return item.Objects, nil
 }
 
 func (f *fakeRepository) Eligible(_ context.Context, item WorkItem) (bool, error) {

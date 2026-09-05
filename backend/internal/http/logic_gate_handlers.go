@@ -163,6 +163,7 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			writeHuddleError(w, err)
 			return
 		}
+		s.wakeAttachmentDeletionCleanup()
 		s.wakeRealtimeSpine()
 		writeJSON(w, http.StatusOK, item)
 		return
@@ -282,6 +283,7 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 				writeError(w, http.StatusInternalServerError, "failed_to_delete_logic_gate")
 				return
 			}
+			s.wakeAttachmentDeletionCleanup()
 			s.publishCommittedWorkspaceEvents(result.Events)
 			writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "targets": result.Targets})
 			return

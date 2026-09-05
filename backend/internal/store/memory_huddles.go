@@ -65,6 +65,7 @@ func (r *MemoryRepo) ConvertLogicGateToHuddle(companyID, logicGateID, actorID st
 	item := domain.HuddleExplorerItem{CompanyID: companyID, ItemID: newUUIDv7String(), ResourceType: EntityTypeHuddleLogicGate, ResourceID: logicGateID, Name: gate.Header, CreatedTimestamp: now, UpdatedTimestamp: now}
 	r.huddleExplorerItems[key(companyID, item.ItemID)] = item
 	r.deleteProcessMapResourceLocked(companyID, domain.ProcessMapResourceTypeProcess, logicGateID)
+	r.retireMemoryAttachmentOwnerLocked(companyID, EntityTypeLogicGate, logicGateID, now)
 	r.clearEntityResourceFieldsForResourceLocked(companyID, EntityTypeLogicGate, logicGateID)
 	delete(r.logicGates, key(companyID, logicGateID))
 	delete(r.processStepMaps, key(companyID, logicGateID))

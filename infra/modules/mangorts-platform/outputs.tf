@@ -142,3 +142,16 @@ output "github_deploy_role_name" {
   description = "IAM role name for environment-owned deploy-policy attachments."
   value       = aws_iam_role.github_deploy.name
 }
+output "attachment_maintenance" {
+  description = "Daily attachment recovery task and failure reporting; null when no non-production attachment backend is configured."
+  value = local.attachment_maintenance_enabled ? {
+    task_definition_arn = aws_ecs_task_definition.attachment_maintenance[0].arn
+    rule_name           = aws_cloudwatch_event_rule.attachment_maintenance[0].name
+    failure_log_group   = aws_cloudwatch_log_group.attachment_maintenance_failures[0].name
+    alarm_names = [
+      aws_cloudwatch_metric_alarm.attachment_maintenance_delivery_failed[0].alarm_name,
+      aws_cloudwatch_metric_alarm.attachment_maintenance_failed[0].alarm_name,
+      aws_cloudwatch_metric_alarm.attachment_maintenance_overdue[0].alarm_name,
+    ]
+  } : null
+}

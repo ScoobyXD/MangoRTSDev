@@ -65,6 +65,9 @@ func (c *finalizePreparedConn) ExecContext(_ context.Context, query string, _ []
 	if strings.Contains(withoutTrailingSemicolon, ";") {
 		return nil, errors.New("cannot insert multiple commands into a prepared statement")
 	}
+	if strings.Contains(query, "pg_advisory_xact_lock") {
+		return driver.RowsAffected(1), nil
+	}
 	c.state.statements = append(c.state.statements, normalizeFinalizeTestSQL(query))
 	return driver.RowsAffected(1), nil
 }

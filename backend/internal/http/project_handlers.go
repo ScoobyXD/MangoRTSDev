@@ -310,6 +310,7 @@ func (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request, proje
 			s.writeProjectMutationError(w, err, "failed_to_delete_project")
 			return
 		}
+		s.wakeAttachmentDeletionCleanup()
 		s.publishCommittedWorkspaceEvents(result.Events)
 		writeJSON(w, http.StatusOK, map[string]any{"deleted_project_id": projectID, "targets": result.Targets})
 	default:
@@ -430,6 +431,7 @@ func (s *Server) handleProjectProjectionByID(w http.ResponseWriter, r *http.Requ
 		s.writeProjectMutationError(w, err, "failed_to_delete_project_projection")
 		return
 	}
+	s.wakeAttachmentDeletionCleanup()
 	s.publishWorkspaceEvent(companyID, "project_information_deleted", map[string]any{"project_id": projectID, "information_id": informationID})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

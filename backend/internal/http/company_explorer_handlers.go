@@ -774,6 +774,7 @@ func (s *Server) handleCompanyExplorerDeleteTargets(w http.ResponseWriter, r *ht
 		return
 	}
 
+	s.wakeAttachmentDeletionCleanup()
 	s.publishCommittedWorkspaceEvents(result.Events)
 	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted", "targets": result.Targets})
 }

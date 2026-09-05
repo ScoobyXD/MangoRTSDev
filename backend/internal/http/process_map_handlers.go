@@ -293,6 +293,9 @@ func (s *Server) handleProcessMapPlacement(w http.ResponseWriter, r *http.Reques
 			CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID,
 			ActorUserID: actorUserID, PermissionUserID: actorUserID, RealtimeConnectionID: realtimeConnectionID,
 		})
+		if resourceType == domain.ProcessMapResourceTypeFolder && result.Changed {
+			s.wakeAttachmentDeletionCleanup()
+		}
 		if err != nil {
 			writeProcessMapError(w, err, "failed_to_delete_process_map_placement")
 			return
