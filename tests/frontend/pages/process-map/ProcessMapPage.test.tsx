@@ -124,6 +124,11 @@ async function harness() {
     if (isProcessName) await key(element, "Enter");
   };
   const key = async (element: Element, value: string) => { await act(async () => element.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true }))); await flush(); };
+  const renameStep = async (name: string) => {
+    if (!container.querySelector('[aria-label="Step name"]')) await click("Rename Step");
+    await input('[aria-label="Step name"]', name);
+    await key(container.querySelector('[aria-label="Step name"]')!, "Enter");
+  };
   const pointer = async (element: Element, type: string, x: number, y: number) => { await act(async () => element.dispatchEvent(new dom.window.MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y }))); };
   const cards = () => [...container.querySelectorAll<HTMLElement>("[data-step-map-id]")];
   const preventsUnload = () => {
@@ -140,7 +145,7 @@ async function harness() {
   };
   const dispose = async () => { await act(async () => root.unmount()); resetProcessMapDeckGLTestStub(); resetProcessMapRealtimeTestStub(); restores.reverse().forEach((restore) => restore()); dom.window.close(); };
   await render();
-  return { dom, container, state, requests, workReads, opened, draftStates, render, findButton, button, click, input, key, pointer, cards, preventsUnload, mutations, batches, chooseFolder, start, dispose };
+  return { dom, container, state, requests, workReads, opened, draftStates, render, findButton, button, click, input, key, renameStep, pointer, cards, preventsUnload, mutations, batches, chooseFolder, start, dispose };
 }
 
 test("Process Map authors a full draft locally and saves exact Step identities, directed connection and geometry in one batch", async () => {
@@ -160,11 +165,9 @@ test("Process Map authors a full draft locally and saves exact Step identities, 
     await h.chooseFolder();
     assert.match(h.container.querySelector('[aria-label="Destination path"]')!.textContent!, /Workspace\/Operations\/Orders/);
     await h.click("+ Create Step");
-    await h.input('[aria-label="Step name"]', "Receive order");
-    await h.click("Apply name");
+    await h.renameStep("Receive order");
     await h.click("+ Create Step");
-    await h.input('[aria-label="Step name"]', "Ship order");
-    await h.click("Apply name");
+    await h.renameStep("Ship order");
     const [sourceID, targetID] = h.cards().map((card) => card.dataset.stepMapId!);
     await h.click("Move Receive order");
     await act(async () => {
@@ -202,11 +205,11 @@ test("Process Map authors a full draft locally and saves exact Step identities, 
     assert.equal(definition.relationships.length, 1);
     assert.deepEqual(definition.relationships[0].source, { resource_type: "process_step", resource_id: sourceID });
     assert.deepEqual(definition.relationships[0].target, { resource_type: "process_step", resource_id: targetID });
-    assert.deepEqual(definition.layout.steps.find((box) => box.process_step_id === sourceID), { process_step_id: sourceID, x: 96, y: 80, width: 240, height: 112 });
+    assert.deepEqual(definition.layout.steps.find((box) => box.process_step_id === sourceID), { process_step_id: sourceID, x: 96, y: 80, width: 128, height: 56 });
     assert.deepEqual(definition.layout.routes, [{ resource_operational_relationship_id: definition.relationships[0].resource_operational_relationship_id, points: [expectedPoint] }]);
     assert.deepEqual(h.cards().map((card) => card.dataset.stepMapId), [sourceID, targetID]);
     assert.equal(h.cards()[0].style.left, "96px");
-    assert.equal(h.cards()[0].style.width, "240px");
+    assert.equal(h.cards()[0].style.width, "128px");
     assert.equal(h.container.querySelector('[aria-label="New Process map"]'), null);
     assert.deepEqual(h.opened, [], "saving must keep the full canvas open");
     assert.ok(h.container.querySelector('[aria-label="Process outline: Order fulfilment"]'), "saving must retain the named Process boundary");
@@ -221,12 +224,18 @@ test("Create Step seeds a draft and failed Save keeps UUIDs and edits while pend
   try {
     await h.start(true);
     assert.equal(h.cards().length, 1);
+    const initialName = h.cards()[0].querySelector<HTMLInputElement>('[aria-label="Step name"]');
+    assert.ok(initialName, "Create Step on the company map must open inline naming in its new draft");
+    assert.equal(h.dom.window.document.activeElement, initialName);
+    assert.equal(initialName.selectionStart, 0);
+    assert.equal(initialName.selectionEnd, initialName.value.length);
+    assert.equal(h.cards()[0].style.width, "112px");
+    assert.equal(h.cards()[0].style.height, "56px");
     const stepID = h.cards()[0].dataset.stepMapId;
     await h.input('[placeholder="Untitled Process"]', "Payment approval");
     await h.chooseFolder();
     await h.click("Move New Step");
-    await h.input('[aria-label="Step name"]', "Check payment");
-    await h.click("Apply name");
+    await h.renameStep("Check payment");
     await h.key(h.button("Move Check payment"), "ArrowDown");
     h.state.batchStatus = 500;
     await h.click("Save Process");
@@ -264,8 +273,7 @@ test("lost Save response preserves newer local edits until explicit recovery loa
     assert.equal(h.preventsUnload(), true);
     await h.input('[placeholder="Untitled Process"]', "Newer local Process name");
     await h.click("Move New Step");
-    await h.input('[aria-label="Step name"]', "Newer local Step name");
-    await h.click("Apply name");
+    await h.renameStep("Newer local Step name");
     await h.key(h.button("Move Newer local Step name"), "ArrowRight");
     await h.click("+ Create Step");
     const laterStepID = h.cards()[1].dataset.stepMapId;
@@ -343,8 +351,7 @@ test("inactive Page retains its draft but closes portal menus, Folder and discar
     await h.input('[placeholder="Untitled Process"]', "Retained draft");
     await h.chooseFolder();
     await h.click("Move New Step");
-    await h.input('[aria-label="Step name"]', "Retained Step");
-    await h.click("Apply name");
+    await h.renameStep("Retained Step");
     await h.key(h.button("Move Retained Step"), "ArrowRight");
     const stepID = h.cards()[0].dataset.stepMapId;
     const viewport = h.container.querySelector(".process-step-map__viewport")!;

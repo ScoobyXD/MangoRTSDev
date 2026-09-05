@@ -70,11 +70,22 @@
 68. Save Process and its save status stay inside the common top-right card.
 69. Hover mode on the focused map previews the hovered Step's name and highlights its connections without changing selection or pending edits.
 70. Closing Step or connection details returns keyboard focus to that exact map item.
-71. The focused draft and saved map show a labeled Process outline derived from their existing canvas bounds without changing Step geometry or Board layout.
+71. The focused draft and saved map show a labeled Process outline that retains its top and left inset and fills the available viewport width and height at the current zoom.
+72. The Process outline expands to contain authored Step and route geometry without changing that geometry or Board layout.
+73. New Step-map boxes use dimensions of 112 by 56 canvas units.
+74. Existing saved Step boxes retain their dimensions until explicitly resized.
+75. In the focused map, dragging any Step card surface other than a resize handle or active title input moves that Step.
+76. Hovering or selecting a Step in the focused map reveals eight resize handles, one at each side midpoint and corner.
+77. Each resize handle moves only its corresponding edges.
+78. Create Step in the focused map focuses its inline title with all text selected.
+79. Double-clicking a Step card or its title in the focused map opens inline title editing with all text selected.
+80. Enter or blur commits a changed, trimmed nonblank inline title through the existing Step rename command.
+81. Escape cancels inline title changes and retains the last committed name.
+82. A blank inline title leaves the last committed Step name unchanged.
 
 ## Process Story
 
-A user chooses Create Process from the map's persistent top-right card, chooses a Folder and edits the filename in the inline path, then arranges Steps on the same white pane. Create Step adds to the focused Process, and Save commits the complete draft to Company Explorer from that card. Further Step edits save normally, and the Board uses those exact Steps as columns. Written explanations remain in the SOP; deleting a Step preserves every Node and status.
+A user chooses Create Process from the map's persistent top-right card, chooses a Folder and edits the filename in the inline path. Create Step adds a compact card with its title selected for typing; the user names, drags, and resizes Steps inside the Process outline. Save commits the complete draft to Company Explorer. Further Step edits save normally, and the Board uses those exact Steps as columns. Written explanations remain in the SOP; deleting a Step preserves every Node and status.
 
 ## Main Scenarios
 

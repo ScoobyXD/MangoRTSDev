@@ -12,11 +12,11 @@
 .process-step-map__edge-hit { fill:none; stroke:transparent; stroke-width:16; cursor:pointer; }
 .process-step-map__edges .is-selected { color:#237abc; }
 .process-step-map__edge-hit:focus-visible { outline:none; stroke:#38a3e65c; }
-.process-step-map__step { position:absolute; display:flex; flex-direction:column; justify-content:center; box-sizing:border-box; padding:15px 22px; border:1px solid #c2d8d0; border-radius:12px; background:linear-gradient(145deg,#ffffff,#e6f0ed); box-shadow:5px 5px 12px #aab4c54a,-3px -3px 8px #fff; }
+.process-step-map__step { position:absolute; display:flex; flex-direction:column; justify-content:center; box-sizing:border-box; padding:5px 8px; border:1px solid #c2d8d0; border-radius:8px; background:linear-gradient(145deg,#ffffff,#e6f0ed); box-shadow:5px 5px 12px #aab4c54a,-3px -3px 8px #fff; }
 .process-step-map__step.is-selected { outline:2px solid #328dbe; outline-offset:2px; }
-.process-work .process-step-map__step-title, .process-step-map__step-title { width:100%; padding:4px; border:0; background:none; box-shadow:none; text-align:center; font-size:14px; font-weight:750; white-space:normal; overflow-wrap:anywhere; cursor:grab; touch-action:none; }
+.process-work .process-step-map__step-title, .process-step-map__step-title { width:100%; min-height:0; padding:2px; border:0; background:none; box-shadow:none; text-align:center; font-size:13px; font-weight:750; white-space:normal; overflow-wrap:anywhere; overflow:hidden; cursor:grab; touch-action:none; }
 .process-step-map__step-title:active { cursor:grabbing; }
-.process-step-map__step-label { text-align:center; margin-top:6px; font-size:10px; color:#628075; pointer-events:none; }
+.process-step-map__step-label { flex-shrink:0; text-align:center; margin-top:2px; font-size:9px; color:#628075; pointer-events:none; }
 .process-work .process-step-map__resize, .process-step-map__resize { position:absolute; bottom:1px; right:1px; width:28px; height:28px; padding:0; border:0; background:none; box-shadow:none; color:#668178; cursor:nwse-resize; touch-action:none; }
 .process-step-map__port { position:absolute; top:calc(50% - 5px); width:10px; height:10px; border:2px solid #f6fbfa; border-radius:50%; background:#72a492; box-sizing:border-box; }
 .process-step-map__port.is-input { left:-5px; }.process-step-map__port.is-output { right:-5px; }
@@ -50,8 +50,24 @@
 .process-step-map__hover-preview { position:absolute; top:calc(100% + 10px); left:0; z-index:4; width:max-content; max-width:260px; padding:10px 12px; border-radius:10px; background:rgba(255,255,255,.94); box-shadow:0 6px 24px #2634491f; color:#273449; font-size:12px; font-weight:650; overflow-wrap:anywhere; pointer-events:none; }
 .process-step-map__hover-preview span { display:block; margin-top:4px; color:#63738a; font-size:11px; font-weight:400; }
 .process-step-map--canvas { position:relative; min-height:0; gap:0; background:#fff; }
-.process-step-map--canvas .process-step-map__viewport { min-height:0; border:0; border-radius:0; padding:80px 24px; box-sizing:border-box; background:#fff; }
+.process-step-map--canvas .process-step-map__viewport { min-height:0; border:0; border-radius:0; padding:80px 24px 24px; box-sizing:border-box; background:#fff; }
+.process-step-map--canvas .process-step-map__extent { min-width:100%; min-height:100%; }
 .process-step-map--canvas .process-step-map__canvas { background:none; }
+.process-step-map--canvas .process-step-map__step { cursor:grab; touch-action:none; }
+.process-step-map--canvas .process-step-map__step:active { cursor:grabbing; }
+.process-step-map__title-input { width:100%; min-width:0; box-sizing:border-box; padding:2px; border:0; border-radius:2px; background:#fff; color:inherit; text-align:center; font:inherit; font-size:13px; font-weight:750; cursor:text; touch-action:auto; }
+.process-step-map--canvas .process-step-map__resize { top:auto; right:auto; bottom:auto; left:auto; z-index:2; width:12px; height:12px; border:1px solid #328dbe; border-radius:2px; background:#fff; opacity:0; pointer-events:none; }
+.process-step-map--canvas .process-step-map__step:hover > .process-step-map__resize,
+.process-step-map--canvas .process-step-map__step.is-selected > .process-step-map__resize,
+.process-step-map--canvas .process-step-map__step:focus-within > .process-step-map__resize { opacity:1; pointer-events:inherit; }
+.process-step-map--canvas .process-step-map__resize[data-resize-handle="nw"] { top:-6px; left:-6px; cursor:nwse-resize; }
+.process-step-map--canvas .process-step-map__resize[data-resize-handle="n"] { top:-6px; left:calc(50% - 6px); cursor:ns-resize; }
+.process-step-map--canvas .process-step-map__resize[data-resize-handle="ne"] { top:-6px; right:-6px; cursor:nesw-resize; }
+.process-step-map--canvas .process-step-map__resize[data-resize-handle="e"] { top:calc(50% - 6px); right:-6px; cursor:ew-resize; }
+.process-step-map--canvas .process-step-map__resize[data-resize-handle="se"] { bottom:-6px; right:-6px; cursor:nwse-resize; }
+.process-step-map--canvas .process-step-map__resize[data-resize-handle="s"] { bottom:-6px; left:calc(50% - 6px); cursor:ns-resize; }
+.process-step-map--canvas .process-step-map__resize[data-resize-handle="sw"] { bottom:-6px; left:-6px; cursor:nesw-resize; }
+.process-step-map--canvas .process-step-map__resize[data-resize-handle="w"] { top:calc(50% - 6px); left:-6px; cursor:ew-resize; }
 .process-step-map__process-outline { position:absolute; inset:0; box-sizing:border-box; border:2px solid #19f07aeb; border-radius:3px; pointer-events:none; }
 .process-step-map__process-outline > span { position:absolute; top:0; left:24px; transform:translateY(-50%); max-width:calc(100% - 48px); box-sizing:border-box; padding:0 10px; background:#fff; color:#1e293b; font-size:13px; font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .process-step-map--canvas .process-step-map__zoom,
@@ -72,7 +88,7 @@
 .process-step-map--canvas .process-step-map__step { background:#f7fbf9; box-shadow:0 5px 16px #26344914; }
 .process-step-map--canvas .process-step-map__empty { top:40px; }
 @media (max-width:700px) {
-  .process-step-map--canvas .process-step-map__viewport { padding:100px 12px 90px; }
+  .process-step-map--canvas .process-step-map__viewport { padding:100px 12px 12px; }
   .process-step-map--canvas .process-step-map__zoom { right:12px; bottom:12px; }
   .process-step-map--canvas .process-step-map__status { left:12px; bottom:60px; max-width:calc(100% - 24px); }
   .process-step-map--canvas .process-step-map__inspector { left:12px; bottom:105px; max-width:calc(100% - 24px); max-height:calc(100% - 260px); }

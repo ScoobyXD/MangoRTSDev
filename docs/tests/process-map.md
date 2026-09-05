@@ -213,13 +213,15 @@
 211. Hover mode MUST retain its checked state when entering or leaving a focused Process.
 212. Opening a new Process draft MUST animate entering its work area while the creation card and breadcrumb stay fixed.
 213. A focused Process MUST immediately show a labeled rectangular outline around its Step canvas, including when it has no Steps.
-214. The Process outline MUST follow the existing Step canvas bounds and zoom without creating or saving another resource or layout record.
+214. The Process outline MUST retain its top and left canvas inset while extending near the viewport's right and bottom edges at the current viewport size and zoom.
 215. A reduced-motion preference MUST disable the Process entrance animation.
+216. The Process outline MUST expand as needed to contain all authored Step and route geometry.
+217. Process outline sizing MUST remain local presentation without rewriting authored geometry or creating another resource or layout record.
 Last updated: 2026-09-04
 
 # Process Story: One company canvas moves from overview to Process work
 
-An authorized user opens `/process-map` on one white map pane. Create Process briefly zooms into a labeled Process outline while the top-right card stays fixed. The user chooses a Folder and edits the draft filename in the inline path, arranges Steps inside the outline, then saves through the card. The complete draft commits to Explorer and remains outlined in the map pane; returning to the company overview restores its mounted camera. Existing geometry and permission rules remain unchanged.
+An authorized user opens `/process-map` on one white map pane. Create Process briefly zooms into a labeled outline that fills the available work area while the top-right card stays fixed. The user chooses a Folder and edits the draft filename in the inline path, creates and names compact Steps directly on the map, then arranges them inside the outline. Save commits the complete draft to Explorer; returning to the company overview restores its mounted camera.
 
 ## Scenario: Fit nested Folders within the existing world
 
