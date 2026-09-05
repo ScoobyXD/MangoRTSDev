@@ -56,6 +56,19 @@ type ProcessMapTileQuery struct {
 	Y                int
 }
 
+// Tile metadata belongs to the same authorized snapshot as its payload.
+type ProcessMapTileMetadata struct {
+	ActorRole              string
+	ProcessMapVersion      int64
+	PermissionGroupVersion int64
+	BusinessDate           string
+}
+
+type ProcessMapTileRead struct {
+	domain.ProcessMapTile
+	Metadata ProcessMapTileMetadata `json:"-"`
+}
+
 type ResourceOperationalRelationshipQuery struct {
 	CompanyID        string
 	ResourceType     string
@@ -782,7 +795,8 @@ type ProcessMapRepository interface {
 	CurrentProcessMapVersions(ctx context.Context, companyID string) (int64, int64, error)
 	GetProcessMapScene(ctx context.Context, input ProcessMapSceneQuery) (domain.ProcessMapScene, error)
 	GetProcessMapChanges(ctx context.Context, input ProcessMapChangesQuery) (ProcessMapChanges, error)
-	GetProcessMapTile(ctx context.Context, input ProcessMapTileQuery) (domain.ProcessMapTile, error)
+	GetProcessMapTileMetadata(ctx context.Context, input ProcessMapTileQuery) (ProcessMapTileMetadata, error)
+	GetProcessMapTile(ctx context.Context, input ProcessMapTileQuery) (ProcessMapTileRead, error)
 	ListResourceOperationalRelationshipsForResource(ctx context.Context, input ResourceOperationalRelationshipQuery) ([]domain.ResourceOperationalRelationship, error)
 	PutProcessMapPlacement(ctx context.Context, input ProcessMapPlacementPutInput) (ProcessMapMutationEnvelope, error)
 	DeleteProcessMapPlacement(ctx context.Context, input ProcessMapPlacementDeleteInput) (ProcessMapMutationEnvelope, error)

@@ -10,8 +10,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
+
 	"miraeopus/backend/internal/domain"
 )
+
+type processMapTileQueryTrace struct {
+	statements []string
+}
+
+func (trace *processMapTileQueryTrace) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	trace.statements = append(trace.statements, data.SQL)
+	return ctx
+}
+
+func (*processMapTileQueryTrace) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
 
 func TestPostgresProcessMapTileLODMatchesMemoryProjection(t *testing.T) {
 	ctx := context.Background()
@@ -157,11 +171,62 @@ $function$`, processIDs["Large"], processIDs["Large Target"])
 		t.Fatal(err)
 	}
 
-	tile, err := repo.GetProcessMapTile(ctx, ProcessMapTileQuery{
-		CompanyID: company.CompanyID, PermissionUserID: viewer.UserID, Z: 20, X: 0, Y: 0,
-	})
+	// Trace only the repository read through another connection to this same
+	// disposable fixture; BEGIN, COMMIT, and separate payload reads count too.
+	connection, err := db.Conn(ctx)
 	if err != nil {
 		t.Fatal(err)
+	}
+	var config *pgx.ConnConfig
+	if err := connection.Raw(func(raw any) error {
+		config = raw.(*stdlib.Conn).Conn().Config()
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := connection.Close(); err != nil {
+		t.Fatal(err)
+	}
+	queryTrace := &processMapTileQueryTrace{}
+	config.Tracer = queryTrace
+	config.RuntimeParams["default_transaction_read_only"] = "on"
+	tracedDB := stdlib.OpenDB(*config)
+	t.Cleanup(func() { _ = tracedDB.Close() })
+	tracedRepo := NewPostgresRepo(tracedDB)
+	query := ProcessMapTileQuery{
+		CompanyID: company.CompanyID, PermissionUserID: viewer.UserID, Z: 20, X: 0, Y: 0,
+	}
+	tile, err := tracedRepo.GetProcessMapTile(ctx, query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queryTrace.statements) != 1 {
+		t.Fatalf("complete tile executed %d statements, want one", len(queryTrace.statements))
+	}
+	t.Log("complete tile: 1 SQL statement, including authorization, metadata, placements, and traces")
+	if tile.Metadata.ActorRole != domain.RoleCompanyUser || tile.Metadata.ProcessMapVersion != tile.ProcessMapReadVersion ||
+		tile.Metadata.ProcessMapVersion != postgresProcessMapVersionForTest(t, repo, company.CompanyID) ||
+		tile.Metadata.PermissionGroupVersion != postgresPolicyGroupVersionForTest(t, repo, company.CompanyID) {
+		t.Fatalf("tile authorization/version metadata = %+v", tile.Metadata)
+	}
+	if _, err := time.Parse("2006-01-02", tile.Metadata.BusinessDate); err != nil {
+		t.Fatalf("tile business date = %q: %v", tile.Metadata.BusinessDate, err)
+	}
+	queryTrace.statements = nil
+	metadata, err := tracedRepo.GetProcessMapTileMetadata(ctx, query)
+	if err != nil || metadata != tile.Metadata || len(queryTrace.statements) != 1 {
+		t.Fatalf("lightweight tile metadata = %+v, err=%v, statements=%d; want %+v in one statement", metadata, err, len(queryTrace.statements), tile.Metadata)
+	}
+	for _, heavyTable := range []string{"process_map_placements", "process_map_traces", "scorecards", "mangorts_v2_resolve_gvic_policy"} {
+		if strings.Contains(queryTrace.statements[0], heavyTable) {
+			t.Fatalf("lightweight tile metadata ran heavy query branch %q", heavyTable)
+		}
+	}
+	t.Log("conditional metadata check: 1 SQL statement, without heavy tile branches")
+	canceledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := tracedRepo.GetProcessMapTileMetadata(canceledCtx, query); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled tile metadata error = %v, want context.Canceled", err)
 	}
 	placementsByID := map[string]domain.ProcessMapVisiblePlacement{}
 	restrictedCount := 0
@@ -233,6 +298,309 @@ $function$`, processIDs["Large"], processIDs["Large Target"])
 			}
 		}
 	}
+	if len(tile.Traces) != 2 {
+		t.Fatalf("independent placement and trace branches returned %d traces, want 2", len(tile.Traces))
+	}
+
+	if _, err := repo.AddCompanyMembership(viewer.CognitoSubject, company.CompanyID, domain.RoleCompanyManager); err != nil {
+		t.Fatal(err)
+	}
+	metadata, err = tracedRepo.GetProcessMapTileMetadata(ctx, query)
+	if err != nil || metadata.ActorRole != domain.RoleCompanyManager || metadata.PermissionGroupVersion <= tile.Metadata.PermissionGroupVersion {
+		t.Fatalf("fresh role metadata = %+v, err=%v", metadata, err)
+	}
+	otherCompany, err := repo.CreateCompany("Global Process Map administrator membership")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Keep the user alive while revoking access to the map's company.
+	if _, err := repo.AddCompanyMembership(viewer.CognitoSubject, otherCompany.CompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.DeleteCompanyUser(company.CompanyID, viewer.UserID, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tracedRepo.GetProcessMapTileMetadata(ctx, query); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoked metadata read error = %v, want ErrNotFound", err)
+	}
+	if _, err := tracedRepo.GetProcessMapTile(ctx, query); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoked complete tile error = %v, want ErrNotFound", err)
+	}
+	if _, err := repo.AddCompanyMembership(viewer.CognitoSubject, otherCompany.CompanyID, domain.RoleDevAdmin); err != nil {
+		t.Fatal(err)
+	}
+	metadata, err = tracedRepo.GetProcessMapTileMetadata(ctx, query)
+	if err != nil || metadata.ActorRole != domain.RoleDevAdmin {
+		t.Fatalf("global administrator metadata = %+v, err=%v", metadata, err)
+	}
+}
+
+func TestPostgresProcessMapTileRestrictedBoundaryAndParentVisibility(t *testing.T) {
+	ctx := context.Background()
+	_, repo := openPostgresProcessMapIntegration(t)
+	company, err := repo.CreateCompany("Process Map restricted spatial boundaries")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := repo.UpsertAuthUser("map-boundary-admin", "map-boundary-admin@example.com", "Boundary Admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	viewer, err := repo.UpsertAuthUser("map-boundary-viewer", "map-boundary-viewer@example.com", "Boundary Viewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(admin.CognitoSubject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(viewer.CognitoSubject, company.CompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	noAccess := ResourceDefaultAccessNoAccess
+	visibleIDs := map[string]bool{}
+	for _, item := range []struct {
+		name             string
+		x, y, width      int
+		denied, included bool
+	}{
+		{"small denied crosses left", -2, 10, 1, true, false},
+		{"small denied crosses top", 10, -1, 1, true, false},
+		{"denied touches left", -4, 30, 1, true, false},
+		{"denied real bounds alone cross left", -20, 40, 30, true, false},
+		{"visible placeholder alone crosses left", -2, 60, 1, false, false},
+		{"visible real bounds cross left", -20, 80, 30, false, true},
+	} {
+		process, err := repo.CreateLogicGate(company.CompanyID, item.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(
+			company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeProcess, process.LogicGateID, nil, item.x, item.y, item.width, 1,
+		)); err != nil {
+			t.Fatal(err)
+		}
+		if item.denied {
+			if _, _, err := repo.PutResourcePermissionPolicy(ResourcePermissionPolicyUpdateInput{
+				CompanyID: company.CompanyID, ResourceType: EntityTypeLogicGate, ResourceID: process.LogicGateID,
+				PermissionMode: PolicyModeCustomized, DefaultAccess: &noAccess,
+				DescendantAction: PolicyDescendantActionInheritedOnly, ActorUserID: admin.UserID,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if item.included {
+			visibleIDs[process.LogicGateID] = true
+		}
+	}
+	folder, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Hidden parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(
+		company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 40, 100, 100, 100,
+	)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repo.PutResourcePermissionPolicy(ResourcePermissionPolicyUpdateInput{
+		CompanyID: company.CompanyID, ResourceType: EntityTypeCompanyExplorerFolder, ResourceID: folder.FolderID,
+		PermissionMode: PolicyModeCustomized, DefaultAccess: &noAccess,
+		DescendantAction: PolicyDescendantActionInheritedOnly, ActorUserID: admin.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for index, inherited := range []bool{false, true} {
+		process, err := repo.CreateLogicGate(company.CompanyID, fmt.Sprintf("Child inherited=%t", inherited))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(
+			company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeProcess, process.LogicGateID, &folder.FolderID, 50+index*30, 110, 10, 10,
+		)); err != nil {
+			t.Fatal(err)
+		}
+		edit := ResourceDefaultAccessEdit
+		policy := ResourcePermissionPolicyUpdateInput{
+			CompanyID: company.CompanyID, ResourceType: EntityTypeLogicGate, ResourceID: process.LogicGateID,
+			PermissionMode: PolicyModeCustomized, DefaultAccess: &edit,
+			DescendantAction: PolicyDescendantActionInheritedOnly, ActorUserID: admin.UserID,
+		}
+		if inherited {
+			policy.PermissionMode = PolicyModeInherited
+			policy.DefaultAccess = nil
+		} else {
+			visibleIDs[process.LogicGateID] = true
+		}
+		if _, _, err := repo.PutResourcePermissionPolicy(policy); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tile, err := repo.GetProcessMapTile(ctx, ProcessMapTileQuery{
+		CompanyID: company.CompanyID, PermissionUserID: viewer.UserID, Z: ProcessMapMaxTileZoom, X: 0, Y: 0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRestricted := map[[2]int]bool{{-2, 10}: true, {10, -1}: true, {40, 100}: true, {80, 110}: true}
+	for _, item := range tile.Placements {
+		switch placement := item.(type) {
+		case domain.ProcessMapRestrictedPlacement:
+			position := [2]int{placement.GridX, placement.GridY}
+			if !wantRestricted[position] {
+				t.Fatalf("unexpected or duplicate restricted boundary placement: %+v", placement)
+			}
+			delete(wantRestricted, position)
+		case domain.ProcessMapVisiblePlacement:
+			if !visibleIDs[placement.ResourceID] || placement.MapParentFolderID != nil {
+				t.Fatalf("unexpected, duplicate, or parent-leaking visible placement: %+v", placement)
+			}
+			delete(visibleIDs, placement.ResourceID)
+		default:
+			t.Fatalf("unexpected placement type %T", item)
+		}
+	}
+	if len(wantRestricted) != 0 || len(visibleIDs) != 0 {
+		t.Fatalf("missing boundary placements: restricted=%v visible=%v", wantRestricted, visibleIDs)
+	}
+}
+
+func TestPostgresProcessMapTileKeepsOneSnapshotDuringConcurrentChange(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	db, repo := openPostgresProcessMapIntegration(t)
+	company, err := repo.CreateCompany("Process Map statement snapshot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := repo.UpsertAuthUser("map-snapshot-admin", "map-snapshot-admin@example.com", "Snapshot Admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	viewer, err := repo.UpsertAuthUser("map-snapshot-viewer", "map-snapshot-viewer@example.com", "Snapshot Viewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(admin.CognitoSubject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(viewer.CognitoSubject, company.CompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	source, err := repo.CreateLogicGate(company.CompanyID, "Before snapshot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := repo.CreateLogicGate(company.CompanyID, "Snapshot target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, processID := range []string{source.LogicGateID, target.LogicGateID} {
+		if _, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(
+			company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeProcess, processID, nil, 10+index*300, 10, 100, 100,
+		)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	created, err := repo.CreateResourceOperationalRelationship(ctx, ResourceOperationalRelationshipCreateInput{
+		CompanyID:   company.CompanyID,
+		Source:      processMapTestRef(domain.ProcessMapResourceTypeProcess, source.LogicGateID),
+		Target:      processMapTestRef(domain.ProcessMapResourceTypeProcess, target.LogicGateID),
+		Trace:       &ProcessMapTraceInput{RoutePoints: []domain.ProcessMapRoutePoint{{X: 200, Y: 60}}},
+		ActorUserID: admin.UserID, PermissionUserID: admin.UserID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := ProcessMapTileQuery{CompanyID: company.CompanyID, PermissionUserID: viewer.UserID, Z: 20, X: 0, Y: 0}
+	before, err := repo.GetProcessMapTile(ctx, query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Preserve STABLE behavior while pausing permission evaluation after the
+	// SELECT has its snapshot. This function exists only in the disposable DB.
+	if _, err := db.ExecContext(ctx, `
+alter function mangorts_user_can_access_resource(uuid,text,uuid,uuid,text) rename to process_map_test_original_access;
+create function mangorts_user_can_access_resource(p_company_id uuid,p_resource_type text,p_resource_id uuid,p_user_id uuid,p_access_level text)
+returns boolean language plpgsql stable as $function$
+begin
+  perform pg_advisory_xact_lock_shared(814921,1);
+  return process_map_test_original_access(p_company_id,p_resource_type,p_resource_id,p_user_id,p_access_level);
+end;
+$function$;`); err != nil {
+		t.Fatal(err)
+	}
+	lockTx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lockTx.Rollback()
+	if _, err := lockTx.ExecContext(ctx, `select pg_advisory_xact_lock(814921,1)`); err != nil {
+		t.Fatal(err)
+	}
+	type tileResult struct {
+		tile ProcessMapTileRead
+		err  error
+	}
+	result := make(chan tileResult, 1)
+	go func() {
+		tile, err := repo.GetProcessMapTile(ctx, query)
+		result <- tileResult{tile: tile, err: err}
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	blocked := false
+	for time.Now().Before(deadline) {
+		if err := db.QueryRowContext(ctx, `select exists(select 1 from pg_locks where locktype='advisory' and classid=814921 and objid=1 and not granted)`).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		if blocked {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !blocked {
+		t.Fatal("tile never reached the paused permission function")
+	}
+	writeTx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writeTx.Rollback()
+	if _, err := writeTx.ExecContext(ctx, `update logic_gates set header='After snapshot' where company_id=$1::uuid and logic_gate_id=$2::uuid`, company.CompanyID, source.LogicGateID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writeTx.ExecContext(ctx, `update process_map_placements set grid_x=20,revision=revision+1 where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`, company.CompanyID, source.LogicGateID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writeTx.ExecContext(ctx, `update process_map_traces set route_points='[{"x":220,"y":90}]'::jsonb,revision=revision+1 where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`, company.CompanyID, created.Relationship.ResourceOperationalRelationshipID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writeTx.ExecContext(ctx, `update company_memberships set role='company_manager' where company_id=$1::uuid and user_id=$2::uuid`, company.CompanyID, viewer.UserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writeTx.ExecContext(ctx, `update workspace_read_versions set version=version+1 where company_id=$1::uuid and scope in ('process-map','policy-group-membership') and resource_key=''`, company.CompanyID); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeTx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := lockTx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case observed := <-result:
+		if observed.err != nil || !reflect.DeepEqual(observed.tile, before) {
+			t.Fatalf("concurrent change mixed tile snapshots: before=%+v observed=%+v err=%v", before, observed.tile, observed.err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	after, err := repo.GetProcessMapTile(ctx, query)
+	if err != nil || after.Metadata.ActorRole != domain.RoleCompanyManager ||
+		after.Metadata.ProcessMapVersion <= before.Metadata.ProcessMapVersion ||
+		after.Metadata.PermissionGroupVersion <= before.Metadata.PermissionGroupVersion ||
+		reflect.DeepEqual(after.Placements, before.Placements) || reflect.DeepEqual(after.Traces, before.Traces) {
+		t.Fatalf("fresh tile did not observe committed metadata and payload changes: before=%+v after=%+v err=%v", before, after, err)
+	}
+	t.Log("concurrent role, versions, placement, name, and trace change: in-flight tile retained one snapshot; next tile saw the committed change")
 }
 
 func TestPostgresProcessMapTileUsesSpatialGiSTIndex(t *testing.T) {

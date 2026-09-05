@@ -232,43 +232,73 @@ from (
 	return result, nil
 }
 
-func (r *PostgresRepo) GetProcessMapTile(ctx context.Context, input ProcessMapTileQuery) (domain.ProcessMapTile, error) {
+// Both tile reads authorize the current company membership and return the role
+// used by the viewer-scoped ETag. A same-company role takes precedence over a
+// dev_admin membership in another company, matching actorRoleForCompany.
+const postgresProcessMapTileMetadataSQL = `
+select actor.role,versions.process_map_version,versions.permission_group_version,
+       to_char(statement_timestamp() at time zone 'America/Los_Angeles','YYYY-MM-DD') business_date
+from (
+  select coalesce(
+    max(membership.role) filter (where membership.company_id=$1::uuid),
+    max(membership.role) filter (where membership.role='dev_admin')
+  ) role
+  from company_memberships membership
+  where membership.user_id=$2::uuid
+    and (membership.company_id=$1::uuid or membership.role='dev_admin')
+  having count(*) > 0
+) actor
+cross join (
+  select coalesce(max(version) filter (where scope='process-map' and resource_key=''),0) process_map_version,
+         coalesce(max(version) filter (where scope='policy-group-membership' and resource_key=''),0) permission_group_version
+  from workspace_read_versions
+  where company_id=$1::uuid and scope in ('process-map','policy-group-membership')
+) versions`
+
+func (r *PostgresRepo) GetProcessMapTileMetadata(ctx context.Context, input ProcessMapTileQuery) (ProcessMapTileMetadata, error) {
 	companyID, permissionUserID, err := normalizePostgresProcessMapRead(input.CompanyID, input.PermissionUserID)
 	if err != nil {
-		return domain.ProcessMapTile{}, err
+		return ProcessMapTileMetadata{}, err
+	}
+	if _, ok := processMapTileBounds(input.Z, input.X, input.Y); !ok {
+		return ProcessMapTileMetadata{}, ErrInvalid
+	}
+	var metadata ProcessMapTileMetadata
+	err = r.db.QueryRowContext(ctx, postgresProcessMapTileMetadataSQL, companyID, permissionUserID).Scan(
+		&metadata.ActorRole, &metadata.ProcessMapVersion, &metadata.PermissionGroupVersion, &metadata.BusinessDate,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ProcessMapTileMetadata{}, ErrNotFound
+	}
+	return metadata, err
+}
+
+func (r *PostgresRepo) GetProcessMapTile(ctx context.Context, input ProcessMapTileQuery) (ProcessMapTileRead, error) {
+	companyID, permissionUserID, err := normalizePostgresProcessMapRead(input.CompanyID, input.PermissionUserID)
+	if err != nil {
+		return ProcessMapTileRead{}, err
 	}
 	tileBounds, ok := processMapTileBounds(input.Z, input.X, input.Y)
 	if !ok {
-		return domain.ProcessMapTile{}, ErrInvalid
+		return ProcessMapTileRead{}, ErrInvalid
 	}
-	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
-	if err != nil {
-		return domain.ProcessMapTile{}, err
-	}
-	defer tx.Rollback()
-	if err := postgresRequireProcessMapMembershipTx(ctx, tx, companyID, permissionUserID); err != nil {
-		return domain.ProcessMapTile{}, err
-	}
-	processVersion, _, err := processMapVersionsTx(ctx, tx, companyID)
-	if err != nil {
-		return domain.ProcessMapTile{}, err
-	}
-	result := domain.ProcessMapTile{
-		Z: input.Z, X: input.X, Y: input.Y, ProcessMapReadVersion: processVersion,
+	result := ProcessMapTileRead{ProcessMapTile: domain.ProcessMapTile{
+		Z: input.Z, X: input.X, Y: input.Y,
 		Placements: []domain.ProcessMapTilePlacement{}, Traces: []domain.ProcessMapTileTrace{},
-	}
+	}}
 	editingZoomExponent := input.Z - ProcessMapMaxTileZoom
 	if input.Z == ProcessMapMaxTileZoom {
 		editingZoomExponent = ProcessMapMaxCameraZoom
 	}
-	rows, err := tx.QueryContext(ctx, `
-with base as (
-  select placement.*,
-         case placement.resource_type when 'company_explorer_folder' then folder.name else process.header end resource_name,
-         mangorts_user_can_access_resource(placement.company_id,placement.resource_type,placement.resource_id,$2::uuid,'edit') allowed,
-         case when placement.map_parent_folder_id is null then true else
-           mangorts_user_can_access_resource(placement.company_id,'company_explorer_folder',placement.map_parent_folder_id,$2::uuid,'edit') end parent_allowed
-  from process_map_placements placement
+	var placementsJSON, tracesJSON []byte
+	// One SELECT gives authorization, versions, details, and traces one statement
+	// snapshot. Independent aggregates keep placements and traces from multiplying.
+	err = r.db.QueryRowContext(ctx, `with tile_metadata as materialized (`+postgresProcessMapTileMetadataSQL+`
+), spatial as materialized (
+  select placement.*,tile_metadata.business_date,
+         case placement.resource_type when 'company_explorer_folder' then folder.name else process.header end resource_name
+  from tile_metadata
+  cross join process_map_placements placement
   left join company_explorer_folders folder
     on placement.resource_type='company_explorer_folder'
    and folder.company_id=placement.company_id and folder.folder_id=placement.resource_id
@@ -278,14 +308,27 @@ with base as (
   where placement.company_id=$1::uuid
     and ((placement.resource_type='company_explorer_folder' and folder.folder_id is not null)
       or (placement.resource_type='logic_gate' and process.logic_gate_id is not null))
+    -- Include either possible footprint before evaluating resource permissions.
+    and (
+      (box(
+        point(placement.grid_x::double precision,placement.grid_y::double precision),
+        point((placement.grid_x::bigint+placement.grid_width)::double precision,(placement.grid_y::bigint+placement.grid_height)::double precision)
+      ) && box(point($3::double precision,$4::double precision),point($5::double precision,$6::double precision))
+       and placement.grid_x < $5 and placement.grid_x::bigint+placement.grid_width > $3
+       and placement.grid_y < $6 and placement.grid_y::bigint+placement.grid_height > $4)
+      or (placement.grid_x < $5 and placement.grid_x::bigint+$7 > $3
+       and placement.grid_y < $6 and placement.grid_y::bigint+$8 > $4)
+    )
+), base as materialized (
+  select placement.*,
+         mangorts_user_can_access_resource(placement.company_id,placement.resource_type,placement.resource_id,$2::uuid,'edit') allowed,
+         case when placement.map_parent_folder_id is null then true else
+           mangorts_user_can_access_resource(placement.company_id,'company_explorer_folder',placement.map_parent_folder_id,$2::uuid,'edit') end parent_allowed
+  from spatial placement
 ), candidate as (
   select placement.*
   from base placement
   where (placement.allowed
-    and box(
-        point(placement.grid_x::double precision,placement.grid_y::double precision),
-        point((placement.grid_x::bigint+placement.grid_width)::double precision,(placement.grid_y::bigint+placement.grid_height)::double precision)
-      ) && box(point($3::double precision,$4::double precision),point($5::double precision,$6::double precision))
     and placement.grid_x < $5 and placement.grid_x::bigint+placement.grid_width > $3
     and placement.grid_y < $6 and placement.grid_y::bigint+placement.grid_height > $4)
    or (not placement.allowed
@@ -294,8 +337,8 @@ with base as (
 ), enriched as (
   select candidate.*,
          score_card.quality_rating,score_card.cost_rating,score_card.delivery_rating,
-         coalesce(raci.responsible_names,'[]'::jsonb)::text responsible_names,
-         coalesce(raci.accountable_names,'[]'::jsonb)::text accountable_names
+         coalesce(raci.responsible_names,'[]'::jsonb) responsible_names,
+         coalesce(raci.accountable_names,'[]'::jsonb) accountable_names
   from candidate
   left join scorecards score_card
     on candidate.allowed and candidate.resource_type='logic_gate'
@@ -303,7 +346,7 @@ with base as (
        * power(2::double precision,$9::integer) >= $10::double precision
    and score_card.company_id=candidate.company_id and score_card.logic_gate_id=candidate.resource_id
    and (score_card.rated_created_timestamp at time zone 'America/Los_Angeles')::date =
-       (statement_timestamp() at time zone 'America/Los_Angeles')::date
+       candidate.business_date::date
   left join lateral (
     select
       coalesce(jsonb_agg(distinct assignment_name order by assignment_name)
@@ -345,7 +388,7 @@ with base as (
         )
     ) assignment_names
   ) raci on true
-)
+), placement_rows as (
 select placement.company_id::text,placement.resource_type,placement.resource_id::text,
        placement.map_parent_folder_id::text,placement.grid_x,placement.grid_y,
        placement.grid_width,placement.grid_height,placement.revision,
@@ -354,90 +397,21 @@ select placement.company_id::text,placement.resource_type,placement.resource_id:
        placement.quality_rating,placement.cost_rating,placement.delivery_rating,
        placement.responsible_names,placement.accountable_names
 from enriched placement
-order by placement.grid_y,placement.grid_x,placement.resource_type,placement.resource_id`,
-		companyID, permissionUserID, tileBounds.MinX, tileBounds.MinY, tileBounds.MaxX, tileBounds.MaxY,
-		ProcessMapRestrictedWidth, ProcessMapRestrictedHeight,
-		editingZoomExponent, ProcessMapEditingLODMinPX)
-	if err != nil {
-		return domain.ProcessMapTile{}, err
-	}
-	for rows.Next() {
-		var placement domain.ProcessMapPlacement
-		var parentID, name, qualityRating, costRating, deliveryRating sql.NullString
-		var responsibleNamesJSON, accountableNamesJSON string
-		var allowed, parentAllowed bool
-		if err := rows.Scan(
-			&placement.CompanyID, &placement.ResourceType, &placement.ResourceID, &parentID,
-			&placement.GridX, &placement.GridY, &placement.GridWidth, &placement.GridHeight,
-			&placement.Revision, &placement.CreatedTimestamp, &placement.UpdatedTimestamp,
-			&name, &allowed, &parentAllowed,
-			&qualityRating, &costRating, &deliveryRating,
-			&responsibleNamesJSON, &accountableNamesJSON,
-		); err != nil {
-			rows.Close()
-			return domain.ProcessMapTile{}, err
-		}
-		if !allowed {
-			restrictedBounds := domain.ProcessMapBounds{MinX: placement.GridX, MinY: placement.GridY, MaxX: placement.GridX + ProcessMapRestrictedWidth, MaxY: placement.GridY + ProcessMapRestrictedHeight}
-			if processMapBoundsIntersect(restrictedBounds, tileBounds) {
-				result.Placements = append(result.Placements, domain.ProcessMapRestrictedPlacement{Restricted: true, GridX: placement.GridX, GridY: placement.GridY})
-			}
-			continue
-		}
-		if parentID.Valid && parentAllowed {
-			placement.MapParentFolderID = &parentID.String
-		}
-		presentation := processMapPlacementPresentationAtTileZoom(placement.GridWidth, placement.GridHeight, input.Z)
-		visibleName := name.String
-		if presentation == domain.ProcessMapPresentationWhole {
-			visibleName = ""
-		}
-		visible := domain.ProcessMapVisiblePlacement{
-			Restricted: false, Presentation: presentation, ResourceType: placement.ResourceType, ResourceID: placement.ResourceID, Name: visibleName,
-			MapParentFolderID: placement.MapParentFolderID, GridX: placement.GridX, GridY: placement.GridY,
-			GridWidth: placement.GridWidth, GridHeight: placement.GridHeight, Revision: placement.Revision,
-			CreatedTimestamp: placement.CreatedTimestamp, UpdatedTimestamp: placement.UpdatedTimestamp, CanEdit: true,
-		}
-		if placement.ResourceType == domain.ProcessMapResourceTypeProcess && presentation == domain.ProcessMapPresentationEditing {
-			if qualityRating.Valid || costRating.Valid || deliveryRating.Valid {
-				visible.ScoreCard = &domain.ProcessMapScoreCardSummary{}
-				if qualityRating.Valid {
-					visible.ScoreCard.QualityRating = &qualityRating.String
-				}
-				if costRating.Valid {
-					visible.ScoreCard.CostRating = &costRating.String
-				}
-				if deliveryRating.Valid {
-					visible.ScoreCard.DeliveryRating = &deliveryRating.String
-				}
-			}
-			if err := json.Unmarshal([]byte(responsibleNamesJSON), &visible.ResponsibleNames); err != nil {
-				rows.Close()
-				return domain.ProcessMapTile{}, err
-			}
-			if err := json.Unmarshal([]byte(accountableNamesJSON), &visible.AccountableNames); err != nil {
-				rows.Close()
-				return domain.ProcessMapTile{}, err
-			}
-		}
-		result.Placements = append(result.Placements, visible)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return domain.ProcessMapTile{}, err
-	}
-	if err := rows.Close(); err != nil {
-		return domain.ProcessMapTile{}, err
-	}
-
-	traceRows, err := tx.QueryContext(ctx, `
-select relationship.company_id::text,relationship.resource_operational_relationship_id::text,
-       relationship.source_resource_type,relationship.source_resource_id::text,
-       relationship.target_resource_type,relationship.target_resource_id::text,
+), trace_rows as (
+select trace.company_id,trace.resource_operational_relationship_id,
        trace.route_points,trace.revision,trace.created_timestamp,trace.updated_timestamp,
-       source_placement.grid_x,source_placement.grid_y,source_placement.grid_width,source_placement.grid_height,
-       target_placement.grid_x,target_placement.grid_y,target_placement.grid_width,target_placement.grid_height
+       jsonb_build_object(
+         'resource_type',relationship.source_resource_type,'resource_id',relationship.source_resource_id,
+         'grid_x',source_placement.grid_x,'grid_y',source_placement.grid_y,
+         'grid_width',source_placement.grid_width,'grid_height',source_placement.grid_height
+       ) source,
+       jsonb_build_object(
+         'resource_type',relationship.target_resource_type,'resource_id',relationship.target_resource_id,
+         'grid_x',target_placement.grid_x,'grid_y',target_placement.grid_y,
+         'grid_width',target_placement.grid_width,'grid_height',target_placement.grid_height
+       ) target
 from process_map_traces trace
+cross join tile_metadata
 join resource_operational_relationships relationship
   on relationship.company_id=trace.company_id and relationship.resource_operational_relationship_id=trace.resource_operational_relationship_id
 join process_map_placements source_placement
@@ -462,32 +436,89 @@ where trace.company_id=$1::uuid
   and path_bounds.min_y < $6 and path_bounds.max_y >= $4
   and mangorts_user_can_access_resource(relationship.company_id,relationship.source_resource_type,relationship.source_resource_id,$2::uuid,'edit')
   and mangorts_user_can_access_resource(relationship.company_id,relationship.target_resource_type,relationship.target_resource_id,$2::uuid,'edit')
-order by relationship.resource_operational_relationship_id`,
-		companyID, permissionUserID, tileBounds.MinX, tileBounds.MinY, tileBounds.MaxX, tileBounds.MaxY)
-	if err != nil {
-		return domain.ProcessMapTile{}, err
+)
+select tile_metadata.role,tile_metadata.process_map_version,tile_metadata.permission_group_version,tile_metadata.business_date,
+       coalesce((select jsonb_agg(to_jsonb(placement) order by placement.grid_y,placement.grid_x,placement.resource_type,placement.resource_id)
+                 from placement_rows placement),'[]'::jsonb),
+       coalesce((select jsonb_agg(to_jsonb(trace) order by trace.resource_operational_relationship_id)
+                 from trace_rows trace),'[]'::jsonb)
+from tile_metadata`,
+		companyID, permissionUserID, tileBounds.MinX, tileBounds.MinY, tileBounds.MaxX, tileBounds.MaxY,
+		ProcessMapRestrictedWidth, ProcessMapRestrictedHeight,
+		editingZoomExponent, ProcessMapEditingLODMinPX,
+	).Scan(&result.Metadata.ActorRole, &result.Metadata.ProcessMapVersion, &result.Metadata.PermissionGroupVersion,
+		&result.Metadata.BusinessDate, &placementsJSON, &tracesJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ProcessMapTileRead{}, ErrNotFound
 	}
-	defer traceRows.Close()
-	for traceRows.Next() {
-		var relationship domain.ResourceOperationalRelationship
-		var trace domain.ProcessMapTrace
-		var routeJSON []byte
-		var source, target domain.ProcessMapPlacement
-		if err := traceRows.Scan(
-			&relationship.CompanyID, &relationship.ResourceOperationalRelationshipID,
-			&relationship.Source.ResourceType, &relationship.Source.ResourceID,
-			&relationship.Target.ResourceType, &relationship.Target.ResourceID,
-			&routeJSON, &trace.Revision, &trace.CreatedTimestamp, &trace.UpdatedTimestamp,
-			&source.GridX, &source.GridY, &source.GridWidth, &source.GridHeight,
-			&target.GridX, &target.GridY, &target.GridWidth, &target.GridHeight,
-		); err != nil {
-			return domain.ProcessMapTile{}, err
+	if err != nil {
+		return ProcessMapTileRead{}, err
+	}
+	result.ProcessMapReadVersion = result.Metadata.ProcessMapVersion
+	var placements []struct {
+		domain.ProcessMapPlacement
+		Name             string   `json:"resource_name"`
+		Allowed          bool     `json:"allowed"`
+		ParentAllowed    bool     `json:"parent_allowed"`
+		QualityRating    *string  `json:"quality_rating"`
+		CostRating       *string  `json:"cost_rating"`
+		DeliveryRating   *string  `json:"delivery_rating"`
+		ResponsibleNames []string `json:"responsible_names"`
+		AccountableNames []string `json:"accountable_names"`
+	}
+	if err := json.Unmarshal(placementsJSON, &placements); err != nil {
+		return ProcessMapTileRead{}, err
+	}
+	for _, item := range placements {
+		if err := ctx.Err(); err != nil {
+			return ProcessMapTileRead{}, err
 		}
-		trace.CompanyID = relationship.CompanyID
-		trace.ResourceOperationalRelationshipID = relationship.ResourceOperationalRelationshipID
-		if err := json.Unmarshal(routeJSON, &trace.RoutePoints); err != nil {
-			return domain.ProcessMapTile{}, err
+		placement := item.ProcessMapPlacement
+		if !item.Allowed {
+			restrictedBounds := domain.ProcessMapBounds{MinX: placement.GridX, MinY: placement.GridY, MaxX: placement.GridX + ProcessMapRestrictedWidth, MaxY: placement.GridY + ProcessMapRestrictedHeight}
+			if processMapBoundsIntersect(restrictedBounds, tileBounds) {
+				result.Placements = append(result.Placements, domain.ProcessMapRestrictedPlacement{Restricted: true, GridX: placement.GridX, GridY: placement.GridY})
+			}
+			continue
 		}
+		if !item.ParentAllowed {
+			placement.MapParentFolderID = nil
+		}
+		presentation := processMapPlacementPresentationAtTileZoom(placement.GridWidth, placement.GridHeight, input.Z)
+		visibleName := item.Name
+		if presentation == domain.ProcessMapPresentationWhole {
+			visibleName = ""
+		}
+		visible := domain.ProcessMapVisiblePlacement{
+			Restricted: false, Presentation: presentation, ResourceType: placement.ResourceType, ResourceID: placement.ResourceID, Name: visibleName,
+			MapParentFolderID: placement.MapParentFolderID, GridX: placement.GridX, GridY: placement.GridY,
+			GridWidth: placement.GridWidth, GridHeight: placement.GridHeight, Revision: placement.Revision,
+			CreatedTimestamp: placement.CreatedTimestamp, UpdatedTimestamp: placement.UpdatedTimestamp, CanEdit: true,
+		}
+		if placement.ResourceType == domain.ProcessMapResourceTypeProcess && presentation == domain.ProcessMapPresentationEditing {
+			if item.QualityRating != nil || item.CostRating != nil || item.DeliveryRating != nil {
+				visible.ScoreCard = &domain.ProcessMapScoreCardSummary{
+					QualityRating: item.QualityRating, CostRating: item.CostRating, DeliveryRating: item.DeliveryRating,
+				}
+			}
+			visible.ResponsibleNames = item.ResponsibleNames
+			visible.AccountableNames = item.AccountableNames
+		}
+		result.Placements = append(result.Placements, visible)
+	}
+	var traces []struct {
+		domain.ProcessMapTrace
+		Source domain.ProcessMapPlacement `json:"source"`
+		Target domain.ProcessMapPlacement `json:"target"`
+	}
+	if err := json.Unmarshal(tracesJSON, &traces); err != nil {
+		return ProcessMapTileRead{}, err
+	}
+	for _, item := range traces {
+		if err := ctx.Err(); err != nil {
+			return ProcessMapTileRead{}, err
+		}
+		trace, source, target := item.ProcessMapTrace, item.Source, item.Target
 		if trace.RoutePoints == nil {
 			trace.RoutePoints = []domain.ProcessMapRoutePoint{}
 		}
@@ -504,20 +535,15 @@ order by relationship.resource_operational_relationship_id`,
 			routePoints = trace.RoutePoints
 		}
 		result.Traces = append(result.Traces, domain.ProcessMapTileTrace{
-			ResourceOperationalRelationshipID: relationship.ResourceOperationalRelationshipID,
+			ResourceOperationalRelationshipID: trace.ResourceOperationalRelationshipID,
 			Presentation:                      presentation,
-			Source:                            relationship.Source, Target: relationship.Target, RoutePoints: routePoints,
-			PathFragments: fragments, Revision: trace.Revision,
+			Source:                            domain.ProcessMapResourceRef{ResourceType: source.ResourceType, ResourceID: source.ResourceID},
+			Target:                            domain.ProcessMapResourceRef{ResourceType: target.ResourceType, ResourceID: target.ResourceID},
+			RoutePoints:                       routePoints, PathFragments: fragments, Revision: trace.Revision,
 			CreatedTimestamp: trace.CreatedTimestamp, UpdatedTimestamp: trace.UpdatedTimestamp,
 		})
 	}
-	if err := traceRows.Err(); err != nil {
-		return domain.ProcessMapTile{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.ProcessMapTile{}, err
-	}
-	return result, nil
+	return result, ctx.Err()
 }
 
 func (r *PostgresRepo) ListResourceOperationalRelationshipsForResource(ctx context.Context, input ResourceOperationalRelationshipQuery) ([]domain.ResourceOperationalRelationship, error) {

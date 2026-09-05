@@ -81,6 +81,43 @@ type processMapAccessContextRepo struct {
 
 type processMapAccessContextKey struct{}
 
+type processMapTileReadCaptureRepo struct {
+	store.Repository
+	calls    []string
+	lastTile store.ProcessMapTileRead
+	metadata func(context.Context, store.ProcessMapTileQuery) (store.ProcessMapTileMetadata, error)
+	tile     func(context.Context, store.ProcessMapTileQuery) (store.ProcessMapTileRead, error)
+}
+
+func (r *processMapTileReadCaptureRepo) ListUserMembershipsContext(ctx context.Context, userID string) ([]domain.CompanyMembership, error) {
+	r.calls = append(r.calls, "membership")
+	return r.Repository.ListUserMembershipsContext(ctx, userID)
+}
+
+func (r *processMapTileReadCaptureRepo) CurrentProcessMapVersions(ctx context.Context, companyID string) (int64, int64, error) {
+	r.calls = append(r.calls, "versions")
+	return r.Repository.CurrentProcessMapVersions(ctx, companyID)
+}
+
+func (r *processMapTileReadCaptureRepo) GetProcessMapTileMetadata(ctx context.Context, query store.ProcessMapTileQuery) (store.ProcessMapTileMetadata, error) {
+	r.calls = append(r.calls, "metadata")
+	if r.metadata != nil {
+		return r.metadata(ctx, query)
+	}
+	return r.Repository.GetProcessMapTileMetadata(ctx, query)
+}
+
+func (r *processMapTileReadCaptureRepo) GetProcessMapTile(ctx context.Context, query store.ProcessMapTileQuery) (store.ProcessMapTileRead, error) {
+	r.calls = append(r.calls, "tile")
+	read := r.Repository.GetProcessMapTile
+	if r.tile != nil {
+		read = r.tile
+	}
+	tile, err := read(ctx, query)
+	r.lastTile = tile
+	return tile, err
+}
+
 func (r *processMapMembershipContextRepo) ListUserMembershipsContext(ctx context.Context, userID string) ([]domain.CompanyMembership, error) {
 	r.called = true
 	return nil, ctx.Err()
@@ -571,6 +608,158 @@ func TestProcessMapHTTPRechecksCurrentCompanyMembershipBeforeConditionalRead(t *
 	stale := fixture.request(t, fixture.viewer, http.MethodGet, path, "", map[string]string{"If-None-Match": first.Header().Get("ETag")})
 	if stale.Code != http.StatusForbidden || !strings.Contains(stale.Body.String(), "company_access_denied") {
 		t.Fatalf("revoked conditional read status=%d body=%s", stale.Code, stale.Body.String())
+	}
+}
+
+func TestProcessMapHTTPTileFreshAndConditionalReads(t *testing.T) {
+	fixture := newProcessMapHTTPFixture(t)
+	fixture.putPlacement(t, fixture.admin, fixture.processA, 0, 0, 10, 8)
+	repo := &processMapTileReadCaptureRepo{Repository: fixture.repo}
+	fixture.server.repo = repo
+	path := "/v1/process-map/tiles/22/0/0?company_id=" + url.QueryEscape(fixture.companyID)
+
+	fresh := fixture.request(t, fixture.viewer, http.MethodGet, path, "", nil)
+	if fresh.Code != http.StatusOK || strings.Join(repo.calls, ",") != "tile" {
+		t.Fatalf("fresh tile status=%d calls=%v body=%s", fresh.Code, repo.calls, fresh.Body.String())
+	}
+	metadata := repo.lastTile.Metadata
+	request := httptest.NewRequest(http.MethodGet, path, nil)
+	wantETag := processMapReadETag(request, fixture.companyID, fixture.viewer.UserID, metadata.ActorRole,
+		processMapTileETagContract, metadata.ProcessMapVersion, metadata.PermissionGroupVersion, metadata.BusinessDate)
+	if got := fresh.Header().Get("ETag"); got != wantETag {
+		t.Fatalf("fresh ETag=%q, want returned tile metadata ETag %q", got, wantETag)
+	}
+	// Repository authorization metadata remains internal; the public tile shape stays unchanged.
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(fresh.Body.Bytes(), &wire); err != nil {
+		t.Fatal(err)
+	}
+	if len(wire) != 6 || wire["z"] == nil || wire["x"] == nil || wire["y"] == nil ||
+		wire["process_map_read_version"] == nil || wire["placements"] == nil || wire["traces"] == nil {
+		t.Fatalf("tile response shape changed: %s", fresh.Body.String())
+	}
+	repo.calls = nil
+	cached := fixture.request(t, fixture.viewer, http.MethodGet, path, "", map[string]string{"If-None-Match": wantETag})
+	if cached.Code != http.StatusNotModified || cached.Body.Len() != 0 || strings.Join(repo.calls, ",") != "metadata" {
+		t.Fatalf("valid conditional tile status=%d calls=%v body=%s", cached.Code, repo.calls, cached.Body.String())
+	}
+
+	if _, err := fixture.repo.DeleteCompanyUser(fixture.companyID, fixture.viewer.UserID, false); err != nil {
+		t.Fatal(err)
+	}
+	repo.calls = nil
+	revoked := fixture.request(t, fixture.viewer, http.MethodGet, path, "", map[string]string{"If-None-Match": wantETag})
+	if revoked.Code != http.StatusForbidden || !strings.Contains(revoked.Body.String(), "company_access_denied") || strings.Join(repo.calls, ",") != "metadata" {
+		t.Fatalf("revoked conditional tile status=%d calls=%v body=%s", revoked.Code, repo.calls, revoked.Body.String())
+	}
+	repo.calls = nil
+	revokedFresh := fixture.request(t, fixture.viewer, http.MethodGet, path, "", nil)
+	if revokedFresh.Code != http.StatusForbidden || !strings.Contains(revokedFresh.Body.String(), "company_access_denied") || strings.Join(repo.calls, ",") != "tile" {
+		t.Fatalf("revoked fresh tile status=%d calls=%v body=%s", revokedFresh.Code, repo.calls, revokedFresh.Body.String())
+	}
+}
+
+func TestProcessMapHTTPTileConditionalMissUsesCompleteReadMetadata(t *testing.T) {
+	fixture := newProcessMapHTTPFixture(t)
+	path := "/v1/process-map/tiles/22/0/0?company_id=" + url.QueryEscape(fixture.companyID)
+	preflight := store.ProcessMapTileMetadata{
+		ActorRole: domain.RoleCompanyAdmin, ProcessMapVersion: 21, PermissionGroupVersion: 8, BusinessDate: "2026-09-04",
+	}
+	complete := store.ProcessMapTileMetadata{
+		ActorRole: domain.RoleCompanyUser, ProcessMapVersion: 22, PermissionGroupVersion: 9, BusinessDate: "2026-09-05",
+	}
+	repo := &processMapTileReadCaptureRepo{Repository: fixture.repo}
+	repo.metadata = func(context.Context, store.ProcessMapTileQuery) (store.ProcessMapTileMetadata, error) {
+		return preflight, nil
+	}
+	repo.tile = func(ctx context.Context, query store.ProcessMapTileQuery) (store.ProcessMapTileRead, error) {
+		tile, err := fixture.repo.GetProcessMapTile(ctx, query)
+		tile.Metadata = complete
+		tile.ProcessMapReadVersion = complete.ProcessMapVersion
+		return tile, err
+	}
+	fixture.server.repo = repo
+	request := httptest.NewRequest(http.MethodGet, path, nil)
+	oldETag := processMapReadETag(request, fixture.companyID, fixture.viewer.UserID, preflight.ActorRole,
+		processMapTileETagContract, preflight.ProcessMapVersion-1, preflight.PermissionGroupVersion, preflight.BusinessDate)
+	response := fixture.request(t, fixture.viewer, http.MethodGet, path, "", map[string]string{"If-None-Match": oldETag})
+	if response.Code != http.StatusOK || strings.Join(repo.calls, ",") != "metadata,tile" {
+		t.Fatalf("conditional miss status=%d calls=%v body=%s", response.Code, repo.calls, response.Body.String())
+	}
+	wantETag := processMapReadETag(request, fixture.companyID, fixture.viewer.UserID, complete.ActorRole,
+		processMapTileETagContract, complete.ProcessMapVersion, complete.PermissionGroupVersion, complete.BusinessDate)
+	if got := response.Header().Get("ETag"); got != wantETag {
+		t.Fatalf("conditional miss ETag=%q, want complete read's role, versions and date ETag %q", got, wantETag)
+	}
+	var wire struct {
+		ProcessMapReadVersion int64 `json:"process_map_read_version"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &wire); err != nil || wire.ProcessMapReadVersion != complete.ProcessMapVersion {
+		t.Fatalf("conditional miss version=%d err=%v body=%s", wire.ProcessMapReadVersion, err, response.Body.String())
+	}
+}
+
+func TestProcessMapHTTPTileRechecksRevocationAfterConditionalMiss(t *testing.T) {
+	fixture := newProcessMapHTTPFixture(t)
+	repo := &processMapTileReadCaptureRepo{Repository: fixture.repo}
+	repo.metadata = func(ctx context.Context, query store.ProcessMapTileQuery) (store.ProcessMapTileMetadata, error) {
+		metadata, err := fixture.repo.GetProcessMapTileMetadata(ctx, query)
+		if err != nil {
+			return metadata, err
+		}
+		_, err = fixture.repo.DeleteCompanyUser(fixture.companyID, fixture.viewer.UserID, false)
+		return metadata, err
+	}
+	fixture.server.repo = repo
+	response := fixture.request(t, fixture.viewer, http.MethodGet,
+		"/v1/process-map/tiles/22/0/0?company_id="+url.QueryEscape(fixture.companyID), "", map[string]string{"If-None-Match": `"stale"`})
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "company_access_denied") || strings.Join(repo.calls, ",") != "metadata,tile" {
+		t.Fatalf("revoked after preflight status=%d calls=%v body=%s", response.Code, repo.calls, response.Body.String())
+	}
+}
+
+func TestProcessMapHTTPTileReadsPropagateRequestCancellation(t *testing.T) {
+	for _, conditional := range []bool{false, true} {
+		name, wantCalls := "complete", "tile"
+		if conditional {
+			name, wantCalls = "conditional", "metadata"
+		}
+		t.Run(name, func(t *testing.T) {
+			fixture := newProcessMapHTTPFixture(t)
+			repo := &processMapTileReadCaptureRepo{Repository: fixture.repo}
+			fixture.server.repo = repo
+			ctx, cancel := context.WithCancel(context.WithValue(context.Background(), processMapAccessContextKey{}, "tile-request"))
+			defer cancel()
+			checkContext := func(ctx context.Context) {
+				t.Helper()
+				if ctx.Value(processMapAccessContextKey{}) != "tile-request" {
+					t.Fatal("tile repository read lost request context")
+				}
+				cancel()
+				if ctx.Err() != context.Canceled {
+					t.Fatalf("tile repository read did not observe cancellation: %v", ctx.Err())
+				}
+			}
+			repo.metadata = func(ctx context.Context, query store.ProcessMapTileQuery) (store.ProcessMapTileMetadata, error) {
+				checkContext(ctx)
+				return store.ProcessMapTileMetadata{}, ctx.Err()
+			}
+			repo.tile = func(ctx context.Context, query store.ProcessMapTileQuery) (store.ProcessMapTileRead, error) {
+				checkContext(ctx)
+				return store.ProcessMapTileRead{}, ctx.Err()
+			}
+			request := httptest.NewRequest(http.MethodGet,
+				"/v1/process-map/tiles/22/0/0?company_id="+url.QueryEscape(fixture.companyID), nil).WithContext(ctx)
+			request = requestWithActorForTest(request, fixture.viewer, fixture.companyID)
+			if conditional {
+				request.Header.Set("If-None-Match", `"stale"`)
+			}
+			response := httptest.NewRecorder()
+			fixture.handler.ServeHTTP(response, request)
+			if strings.Join(repo.calls, ",") != wantCalls || response.Code == http.StatusOK || response.Code == http.StatusNotModified {
+				t.Fatalf("canceled tile status=%d calls=%v body=%s", response.Code, repo.calls, response.Body.String())
+			}
+		})
 	}
 }
 

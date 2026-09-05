@@ -281,13 +281,11 @@ func (r *MemoryRepo) processMapResourceNameLocked(companyID, resourceType, resou
 	}
 }
 
-func (r *MemoryRepo) memoryProcessMapProcessSummaryLocked(companyID, logicGateID string) (*domain.ProcessMapScoreCardSummary, []string, []string) {
+func (r *MemoryRepo) memoryProcessMapProcessSummaryLocked(companyID, logicGateID, businessDate string) (*domain.ProcessMapScoreCardSummary, []string, []string) {
 	var scoreCard *domain.ProcessMapScoreCardSummary
-	if businessDate, err := qdRatingBusinessDate(time.Now().UTC()); err == nil {
-		if rating, ok := r.qdRatings[memoryQDRatingDayKey(companyID, logicGateID, businessDate)]; ok {
-			scoreCard = &domain.ProcessMapScoreCardSummary{
-				QualityRating: rating.QualityRating, CostRating: rating.CostRating, DeliveryRating: rating.DeliveryRating,
-			}
+	if rating, ok := r.qdRatings[memoryQDRatingDayKey(companyID, logicGateID, businessDate)]; ok {
+		scoreCard = &domain.ProcessMapScoreCardSummary{
+			QualityRating: rating.QualityRating, CostRating: rating.CostRating, DeliveryRating: rating.DeliveryRating,
 		}
 	}
 	responsible, accountable := []string{}, []string{}
@@ -395,28 +393,71 @@ func (r *MemoryRepo) processMapSceneLocked(companyID, permissionUserID string) d
 	}
 }
 
-func (r *MemoryRepo) GetProcessMapTile(ctx context.Context, input ProcessMapTileQuery) (domain.ProcessMapTile, error) {
+func (r *MemoryRepo) processMapTileMetadataLocked(companyID, permissionUserID string) (ProcessMapTileMetadata, error) {
+	role := ""
+	if membership, ok := r.memberships[membershipKey(companyID, permissionUserID)]; ok {
+		role = domain.NormalizeRole(membership.Role)
+		if role == "" {
+			role = domain.RoleCompanyUser
+		}
+	} else if memoryUserHasDevAdminMembershipLocked(r.memberships, permissionUserID) {
+		role = domain.RoleDevAdmin
+	}
+	if role == "" {
+		return ProcessMapTileMetadata{}, ErrNotFound
+	}
+	businessDate, err := qdRatingBusinessDate(time.Now().UTC())
+	if err != nil {
+		return ProcessMapTileMetadata{}, err
+	}
+	processVersion, groupVersion := r.processMapVersionsLocked(companyID)
+	return ProcessMapTileMetadata{ActorRole: role, ProcessMapVersion: processVersion, PermissionGroupVersion: groupVersion, BusinessDate: businessDate}, nil
+}
+
+func (r *MemoryRepo) GetProcessMapTileMetadata(ctx context.Context, input ProcessMapTileQuery) (ProcessMapTileMetadata, error) {
 	companyID, permissionUserID, err := normalizeMemoryProcessMapRead(input.CompanyID, input.PermissionUserID)
 	if err != nil {
-		return domain.ProcessMapTile{}, err
+		return ProcessMapTileMetadata{}, err
+	}
+	if _, ok := processMapTileBounds(input.Z, input.X, input.Y); !ok {
+		return ProcessMapTileMetadata{}, ErrInvalid
+	}
+	if err := ctx.Err(); err != nil {
+		return ProcessMapTileMetadata{}, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return ProcessMapTileMetadata{}, err
+	}
+	return r.processMapTileMetadataLocked(companyID, permissionUserID)
+}
+
+func (r *MemoryRepo) GetProcessMapTile(ctx context.Context, input ProcessMapTileQuery) (ProcessMapTileRead, error) {
+	companyID, permissionUserID, err := normalizeMemoryProcessMapRead(input.CompanyID, input.PermissionUserID)
+	if err != nil {
+		return ProcessMapTileRead{}, err
 	}
 	tileBounds, ok := processMapTileBounds(input.Z, input.X, input.Y)
 	if !ok {
-		return domain.ProcessMapTile{}, ErrInvalid
+		return ProcessMapTileRead{}, ErrInvalid
 	}
 	if err := ctx.Err(); err != nil {
-		return domain.ProcessMapTile{}, err
+		return ProcessMapTileRead{}, err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if !r.userHasCompanyMembershipLocked(companyID, permissionUserID) {
-		return domain.ProcessMapTile{}, ErrNotFound
+	if err := ctx.Err(); err != nil {
+		return ProcessMapTileRead{}, err
 	}
-	processVersion, _ := r.processMapVersionsLocked(companyID)
-	result := domain.ProcessMapTile{
-		Z: input.Z, X: input.X, Y: input.Y, ProcessMapReadVersion: processVersion,
+	metadata, err := r.processMapTileMetadataLocked(companyID, permissionUserID)
+	if err != nil {
+		return ProcessMapTileRead{}, err
+	}
+	result := ProcessMapTileRead{Metadata: metadata, ProcessMapTile: domain.ProcessMapTile{
+		Z: input.Z, X: input.X, Y: input.Y, ProcessMapReadVersion: metadata.ProcessMapVersion,
 		Placements: []domain.ProcessMapTilePlacement{}, Traces: []domain.ProcessMapTileTrace{},
-	}
+	}}
 
 	placements := make([]domain.ProcessMapPlacement, 0)
 	for _, placement := range r.processMapPlacements {
@@ -425,7 +466,6 @@ func (r *MemoryRepo) GetProcessMapTile(ctx context.Context, input ProcessMapTile
 		}
 	}
 	slices.SortFunc(placements, compareProcessMapPlacements)
-	visible := map[string]domain.ProcessMapPlacement{}
 	for _, placement := range placements {
 		if !r.processMapResourceExistsLocked(companyID, placement.ResourceType, placement.ResourceID) {
 			continue
@@ -444,7 +484,6 @@ func (r *MemoryRepo) GetProcessMapTile(ctx context.Context, input ProcessMapTile
 		if !exists || !processMapBoundsIntersect(itemBounds, tileBounds) {
 			continue
 		}
-		visible[processMapPlacementMemoryKey(companyID, placement.ResourceType, placement.ResourceID)] = placement
 		parentID := placement.MapParentFolderID
 		if parentID != nil && !r.processMapResourceAllowedLocked(companyID, permissionUserID, domain.ProcessMapResourceTypeFolder, *parentID) {
 			parentID = nil
@@ -456,7 +495,7 @@ func (r *MemoryRepo) GetProcessMapTile(ctx context.Context, input ProcessMapTile
 		var scoreCard *domain.ProcessMapScoreCardSummary
 		var responsibleNames, accountableNames []string
 		if placement.ResourceType == domain.ProcessMapResourceTypeProcess && presentation == domain.ProcessMapPresentationEditing {
-			scoreCard, responsibleNames, accountableNames = r.memoryProcessMapProcessSummaryLocked(companyID, placement.ResourceID)
+			scoreCard, responsibleNames, accountableNames = r.memoryProcessMapProcessSummaryLocked(companyID, placement.ResourceID, metadata.BusinessDate)
 		}
 		result.Placements = append(result.Placements, domain.ProcessMapVisiblePlacement{
 			Restricted: false, Presentation: presentation, ResourceType: placement.ResourceType, ResourceID: placement.ResourceID, Name: name,
@@ -507,7 +546,7 @@ func (r *MemoryRepo) GetProcessMapTile(ctx context.Context, input ProcessMapTile
 			CreatedTimestamp: trace.CreatedTimestamp, UpdatedTimestamp: trace.UpdatedTimestamp,
 		})
 	}
-	return result, nil
+	return result, ctx.Err()
 }
 
 func (r *MemoryRepo) ListResourceOperationalRelationshipsForResource(ctx context.Context, input ResourceOperationalRelationshipQuery) ([]domain.ResourceOperationalRelationship, error) {

@@ -86,10 +86,6 @@ func qdRatingBusinessDate(value time.Time) (string, error) {
 	return value.In(location).Format("2006-01-02"), nil
 }
 
-func QDRatingBusinessDate(value time.Time) (string, error) {
-	return qdRatingBusinessDate(value)
-}
-
 func qdRatingMonthBounds(query QDRatingMonthQuery) (time.Time, time.Time, error) {
 	location, err := qdRatingBusinessLocation()
 	if err != nil {

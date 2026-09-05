@@ -250,11 +250,16 @@
 248. Create Step and Board / Map controls in the Process editor's Map pane MUST float inside the canvas without reducing its layout area.
 249. Process Step canvases MUST omit scrollbars, dots, separate toolbars, persistent help text, zoom buttons, and Fit.
 250. Tile reads MUST skip inherited Responsible and Accountable assignment resolution for restricted placements, Folders, and Processes below the tile's editing-detail threshold.
+251. A fresh tile MUST read current company authorization, actor role, map and permission-group versions, placements, and traces in one read-only database statement snapshot.
+252. A conditional tile MUST freshly authorize the viewer and read current versions before returning 304; a changed tile MUST use the same complete read as a fresh tile.
+253. A 200 tile ETag MUST use the role, versions, and Los Angeles business date returned by its complete read; score-card selection MUST use that same business date.
+254. Spatial candidate filtering MUST include both real placement bounds and the restricted 4-by-3 footprint before resolving and reusing placement and parent permissions.
+255. A complete tile read MUST keep placements and traces independent while preserving endpoint authorization, crossing traces, clipping, and detail eligibility.
 Last updated: 2026-09-05
 
 # Process Story: One company canvas moves from overview to Process work
 
-An authorized user opens `/process-map` on one white map pane, creates a Process, chooses its Folder, and names and connects Steps inside the green outline. Displayed numbering follows the flow from the leftmost Step. Blank-space dragging pans and the wheel zooms while controls stay fixed. Save commits the draft to Explorer and keeps it focused; returning restores the unchanged company camera. The Process editor's right-hand Map uses this same canvas beside the SOP, with floating Create Step and Board / Map controls.
+An authorized user opens `/process-map` on one white map pane. Each fresh tile returns its authorized content and ETag metadata from one snapshot; cached tiles first recheck current access and versions. The user creates a Process, chooses its Folder, and names and connects Steps inside the green outline. Displayed numbering follows the flow from the leftmost Step. Blank-space dragging pans and the wheel zooms while controls stay fixed. Save commits the draft to Explorer and keeps it focused; returning restores the unchanged company camera. The Process editor's right-hand Map uses this same canvas beside the SOP, with floating Create Step and Board / Map controls.
 
 ## Scenario: Fit nested Folders within the existing world
 
