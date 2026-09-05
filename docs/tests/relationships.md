@@ -30,8 +30,7 @@ A foreground Send captures the existing inspection events under its authenticate
 15. Layout never creates, replaces, or changes a Step owner, operational endpoint, Explorer parent, Node assignment, policy, or Board order.
 16. Step and edge deletion prune their dependent layout entries in the same transaction; Process deletion cascades its layout, and recycle/restore preserves exact surviving references in dependency order.
 17. Creating a Process in a chosen Folder checks current destination Edit access inside the same transaction that creates its one Explorer placement.
-<<<<<<< HEAD
-18. A Process AI write or move requires the exact expected Process, Step, Node status, and assignment version inside the mutation transaction; a mismatch changes neither text nor placement.
+18. A Process AI text write, chat, or move requires the exact expected Process, Step, Node status, and assignment version inside the mutation transaction; a mismatch saves no text, chat, or placement change.
 19. Save Process atomically creates its exact Process, chosen Explorer Folder placement, company-map placement, Steps, directed Step edges, layout, chosen RACI assignments, SOP document, and committed events through the existing workspace batch command.
 20. Process creation accepts only one new Process in an existing editable Folder and only Step endpoints listed in that creation request.
 21. Process creation allocates each Process, Step, and edge UUID once; an existing identity rejects the entire save without updating records or creating another Process.
@@ -44,17 +43,7 @@ A foreground Send captures the existing inspection events under its authenticate
 
 ## Process Step Relationship Story
 
-A user starts creating a Process from the company map, chooses its Folder, arranges its Steps, sets RACI, and writes its SOP before Save Process. One transaction stores the exact Process, Steps, connections, layout, Explorer and company-map placements, policy, and canonical editor document. Untouched RACI follows the Folder live. Board, Editor, and Map then edit those same records. Leaving before Save stores nothing. Deleting a Step removes its incident edges and geometry while Nodes retain their Process and status; restore puts exact Steps and edges back before their layout.
-=======
-18. A Process AI text write, chat, or move requires the exact expected Process, Step, Node status, and assignment version inside the mutation transaction; a mismatch saves no text, chat, or placement change.
-19. Saving a new Process map draft atomically creates its exact Process, chosen Explorer Folder placement, Steps, directed Step edges, layout, and committed events through the existing workspace batch command.
-20. A draft save accepts only one new Process in an existing editable Folder and only Step endpoints listed in that draft.
-21. A draft allocates each Process, Step, and edge UUID once; an existing identity rejects the entire save without updating records or creating another Process.
-
-## Process Step Relationship Story
-
-A user starts a Process draft from the company map, chooses its Folder through the destination path, and arranges its Steps before Save. One transaction stores the exact Process, Steps, connections, layout, and Explorer placement. Board and Map then edit those same records. AI Process text writes, chats, and moves recheck the tracked Node's exact work state inside their mutation transaction; chats retain their existing exact Node/textbox ownership and mention rules. Deleting a Step removes its incident edges and geometry while Nodes retain their Process and status; restore puts exact Steps and edges back before their layout.
->>>>>>> codex/persist-ai-run-inspections0000856
+A user starts creating a Process from the company map, chooses its Folder, arranges its Steps, sets RACI, and writes its SOP before Save Process. One transaction stores the exact Process, Steps, connections, layout, Explorer and company-map placements, policy, and canonical editor document. Untouched RACI follows the Folder live. Board, Editor, and Map then edit those same records. Leaving before Save stores nothing. AI Process text writes, chats, and moves recheck the tracked Node's exact work state inside their mutation transaction; chats retain their existing exact Node/textbox ownership and mention rules. Deleting a Step removes its incident edges and geometry while Nodes retain their Process and status; restore puts exact Steps and edges back before their layout.
 
 # Current Huddle Relationship Business Logic Laws
 
