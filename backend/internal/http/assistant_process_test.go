@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,6 +14,88 @@ import (
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 )
+
+type assistantProcessCancelAfterSaveRepo struct {
+	store.Repository
+	cancel    context.CancelFunc
+	document  store.EditorJSONDocumentRef
+	reads     atomic.Int32
+	committed atomic.Bool
+}
+
+func (r *assistantProcessCancelAfterSaveRepo) CommitEditorJSONDocument(input store.EditorJSONCommitInput) (store.EditorJSONCommit, error) {
+	result, err := r.Repository.CommitEditorJSONDocument(input)
+	if err == nil && input.Document.ResourceType == store.EntityTypeNode {
+		r.document = input.Document
+		r.committed.Store(true)
+		r.cancel()
+	}
+	return result, err
+}
+
+func (r *assistantProcessCancelAfterSaveRepo) GetEditorJSONSnapshot(document store.EditorJSONDocumentRef) (store.EditorJSONSnapshot, error) {
+	if document.ResourceType == store.EntityTypeNode && r.committed.Load() {
+		r.reads.Add(1)
+	}
+	return r.Repository.GetEditorJSONSnapshot(document)
+}
+
+func TestAssistantProcessStopAfterCommittedTextRetainsConfirmedSave(t *testing.T) {
+	var calls atomic.Int32
+	var fixture assistantProcessFixture
+	server, repo := assistantTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch calls.Add(1) {
+		case 1:
+			assistantProviderComplete(w, assistantProviderCall("create", "create_process_node", fmt.Sprintf(`{"name":"Keep this saved text after Stop","process_step_id":%q}`, fixture.first.ProcessStepID)))
+		case 2:
+			assistantProviderComplete(w, assistantProviderCall("write", "write_process_node", `{"plain_text":"This text was committed before Stop."}`))
+		default:
+			t.Error("Stop allowed another provider request")
+			assistantProviderComplete(w)
+		}
+	})
+	fixture = seedAssistantProcess(t, repo, "Preserve committed work")
+	if _, err := repo.AddCompanyMembership("assistant-user", assistantTestCompany, domain.RoleDevAdmin); err != nil {
+		t.Fatal(err)
+	}
+	requestID := store.NewUUIDv7String()
+	r := assistantContextChatRequest(assistantRequest{RequestID: requestID, ProcessID: fixture.process.LogicGateID, InspectContext: true, Messages: []assistantMessage{{Role: "user", Content: "Carry out this Process using the supplied notes."}}})
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	tracing := &assistantProcessCancelAfterSaveRepo{Repository: repo, cancel: cancel}
+	server.repo = tracing
+	response := httptest.NewRecorder()
+	server.Routes().ServeHTTP(response, r.WithContext(ctx))
+	if calls.Load() != 2 || tracing.document.DocumentID == "" || tracing.reads.Load() != 0 {
+		t.Fatalf("unexpected work after Stop: calls=%d saved=%+v later_reads=%d body=%s", calls.Load(), tracing.document, tracing.reads.Load(), response.Body.String())
+	}
+	snapshot, err := repo.GetEditorJSONSnapshot(tracing.document)
+	if err != nil || snapshot.Revision != 1 || !strings.Contains(string(snapshot.JSONDocument), "This text was committed before Stop.") {
+		t.Fatalf("confirmed text did not survive Stop: %+v, %v", snapshot, err)
+	}
+	key := assistantTestCompany + ":" + fixture.user.UserID + ":" + requestID
+	server.assistant.mu.Lock()
+	capture := server.assistant.captures[key]
+	var events []assistantTrace
+	if capture != nil {
+		events = append(events, capture.events...)
+	}
+	server.assistant.mu.Unlock()
+	found := false
+	for _, event := range events {
+		var data map[string]any
+		if json.Unmarshal(event.Data, &data) != nil || event.Kind != "tool" || data["name"] != "write_process_node" {
+			continue
+		}
+		confirmed, ok := data["confirmed_save"].(map[string]any)
+		if ok && confirmed["textbox_id"] == tracing.document.DocumentID && data["canonical_read_confirmed"] == false {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("Stop capture omitted confirmed save identity or incorrectly confirmed canonical read: %+v", events)
+	}
+}
 
 type assistantProcessFixture struct {
 	process     domain.LogicGate
@@ -146,15 +229,15 @@ func TestAssistantProcessCanDiscussMissingSOPOrSteps(t *testing.T) {
 				if len(contexts) != 1 {
 					t.Fatalf("incomplete Process inspection events=%d, want 1", len(contexts))
 				}
-				if tools, ok := contexts[0]["tools"].([]any); !ok || len(tools) != 0 {
-					t.Fatalf("first inspection must explicitly show tools:[], got %#v", contexts[0]["tools"])
+				if tools, ok := contexts[0]["tools"].([]any); !ok || len(tools) != 1 || tools[0].(map[string]any)["name"] != "read" {
+					t.Fatalf("incomplete Process inspection must show only the native skill read tool, got %#v", contexts[0]["tools"])
 				}
 			}
 			select {
 			case body := <-captured:
 				tools, _ := body["tools"].([]any)
-				if len(tools) != 0 {
-					t.Fatalf("incomplete Process exposed %d execution tools", len(tools))
+				if len(tools) != 1 || tools[0].(map[string]any)["name"] != "read" {
+					t.Fatalf("incomplete Process exposed mutation tools: %+v", tools)
 				}
 				definition := assistantDeveloperContext(t, body["input"])
 				selected, _ := definition["process"].(map[string]any)
@@ -227,8 +310,8 @@ func TestAssistantProcessFollowupReloadsCanonicalSOPWithoutCreatingWork(t *testi
 		if selected["logic_gate_id"] != process.LogicGateID || selected["header"] != process.Header {
 			t.Fatalf("follow-up lost the selected Process: %+v", selected)
 		}
-		instructions, _ := body["instructions"].(string)
-		if !strings.Contains(instructions, "not a request to execute") {
+		instructions := assistantProcessInputText(body["input"])
+		if !strings.Contains(instructions, "does not authorize execution") {
 			t.Error("the model is not told that selecting a Process alone does not authorize execution")
 		}
 		sop, _ := definition["sop"].([]any)
@@ -281,12 +364,15 @@ func TestAssistantProcessExecutesSavedNodeWithAutomaticContext(t *testing.T) {
 			}
 			wantTools := map[string][]string{"create_process_node": {"name", "process_step_id"}, "write_process_node": {"plain_text"}, "move_process_node_to_step": {"process_step_id"}}
 			tools, _ := body["tools"].([]any)
-			if len(tools) != len(wantTools) {
+			if len(tools) != len(wantTools)+1 {
 				t.Errorf("Process mode exposed %d tools", len(tools))
 			}
 			for _, raw := range tools {
 				tool, _ := raw.(map[string]any)
 				name, _ := tool["name"].(string)
+				if name == "read" {
+					continue // The native skill reader is checked by the Pi runtime isolation tests.
+				}
 				keys, allowed := wantTools[name]
 				params, _ := tool["parameters"].(map[string]any)
 				properties, _ := params["properties"].(map[string]any)

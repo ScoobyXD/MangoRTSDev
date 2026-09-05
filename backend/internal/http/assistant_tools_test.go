@@ -26,10 +26,10 @@ func assistantTestArguments(t *testing.T, name string, args map[string]any) stri
 		args = map[string]any{}
 	}
 	for _, tool := range assistantTools() {
-		if tool.OfFunction.Name != name {
+		if tool.Name != name {
 			continue
 		}
-		for key, raw := range tool.OfFunction.Parameters["properties"].(map[string]any) {
+		for key, raw := range tool.Parameters["properties"].(map[string]any) {
 			if _, exists := args[key]; !exists {
 				if _, nullable := raw.(map[string]any)["type"].([]string); nullable {
 					args[key] = nil
@@ -249,9 +249,14 @@ func TestAssistantToolsNeverRepeatAnUncertainCommittedWrite(t *testing.T) {
 				request = request.WithContext(ctx)
 				repo.cancel = cancel
 			}
-			_, err := server.dispatchAssistantTool(request, "create_node", `{"name":"Only once"}`)
-			if err == nil || strings.Contains(err.Error(), "sensitive") || repo.calls != 1 {
+			result, err := server.dispatchAssistantTool(request, "create_node", `{"name":"Only once"}`)
+			if (cancelled && (err != nil || !strings.Contains(result, "Only once"))) || (!cancelled && (err == nil || strings.Contains(err.Error(), "sensitive"))) || repo.calls != 1 {
 				t.Fatalf("uncertain write calls=%d error=%v", repo.calls, err)
+			}
+			if cancelled {
+				if _, err := server.dispatchAssistantTool(request, "create_node", `{"name":"Must not run"}`); err == nil || repo.calls != 1 {
+					t.Fatal("Stop allowed another action")
+				}
 			}
 			nodes, _ := memory.ListNodes(companyID)
 			if len(nodes) != 1 || nodes[0].Title != "Only once" {
@@ -325,9 +330,8 @@ func TestAssistantToolsCatalogAndResponseBound(t *testing.T) {
 		t.Fatalf("tool count=%d", len(tools))
 	}
 	seen := map[string]bool{}
-	for _, tool := range tools {
-		fn := tool.OfFunction
-		if seen[fn.Name] || !fn.Strict.Value || fn.Parameters["additionalProperties"] != false {
+	for _, fn := range tools {
+		if seen[fn.Name] || !fn.Strict || fn.Parameters["additionalProperties"] != false {
 			t.Fatalf("invalid tool definition %s", fn.Name)
 		}
 		seen[fn.Name] = true
@@ -337,5 +341,52 @@ func TestAssistantToolsCatalogAndResponseBound(t *testing.T) {
 	_, _ = result.Write([]byte("more"))
 	if !result.overflow || result.body.Len() != assistantToolResultLimit {
 		t.Fatalf("unbounded captured response: %d", result.body.Len())
+	}
+}
+
+func TestAssistantToolsCatalogWireShape(t *testing.T) {
+	for _, scenario := range []struct {
+		name    string
+		process *assistantProcessExecution
+		count   int
+	}{
+		{name: "ordinary", count: 27},
+		{name: "Process", process: &assistantProcessExecution{}, count: 3},
+		{name: "blocked Process", process: &assistantProcessExecution{definition: assistantProcessDefinition{ExecutionBlockedReason: "SOP required"}}, count: 0},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			encoded, err := json.Marshal(assistantCatalog(scenario.process))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var tools []map[string]any
+			if err := json.Unmarshal(encoded, &tools); err != nil || tools == nil || len(tools) != scenario.count {
+				t.Fatalf("catalog must be an array of %d tools: %s", scenario.count, encoded)
+			}
+			for _, tool := range tools {
+				name, named := tool["name"].(string)
+				description, described := tool["description"].(string)
+				if len(tool) != 5 || tool["type"] != "function" || tool["strict"] != true || !named || name == "" || !described || description == "" {
+					t.Fatalf("Pi requires a flat, strict function definition: %+v", tool)
+				}
+				parameters, ok := tool["parameters"].(map[string]any)
+				if !ok || len(parameters) != 4 || parameters["type"] != "object" || parameters["additionalProperties"] != false {
+					t.Fatalf("%s lost its exact argument schema: %+v", name, parameters)
+				}
+				properties, hasProperties := parameters["properties"].(map[string]any)
+				required, hasRequired := parameters["required"].([]any)
+				if !hasProperties || !hasRequired || len(required) != len(properties) {
+					t.Fatalf("%s must declare every argument required, including an empty array for no arguments", name)
+				}
+				previous := ""
+				for _, value := range required {
+					key, ok := value.(string)
+					if !ok || key <= previous || properties[key] == nil {
+						t.Fatalf("%s has invalid required keys: %+v", name, required)
+					}
+					previous = key
+				}
+			}
+		})
 	}
 }

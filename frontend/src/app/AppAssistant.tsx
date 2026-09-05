@@ -3,17 +3,16 @@ import { addAuthTerminalFailureListener, getAuthSessionCacheGeneration, isTermin
 import { ACTIVE_COMPANY_CHANGED_EVENT, getActiveCompanyID } from "../auth/currentCompany.js";
 import {
   ASSISTANT_DEFAULT_REASONING_EFFORT, ASSISTANT_MAX_MESSAGE_CHARS, ASSISTANT_REASONING_EFFORTS,
-  ASSISTANT_STOP_MESSAGE, assistantErrorMessage, assistantHistoryError, getAssistantStatus,
-  isAssistantReasoningEffort, streamAssistantChat, type AssistantMessage, type AssistantReasoningEffort, type AssistantEvent,
+  ASSISTANT_STOP_MESSAGE, assistantErrorMessage, assistantHistoryError, getAssistantStatus, getAssistantTrace, getAssistantResult,
+  isAssistantReasoningEffort, streamAssistantChat, type AssistantMessage, type AssistantReasoningEffort, type AssistantTrace,
 } from "../modules/assistant/assistantApi.js";
-import { createRequestJSON } from "../modules/api/requestJSON.js";
+import { APIHTTPError, createRequestJSON } from "../modules/api/requestJSON.js";
 import { openEditorEntityLink } from "../modules/editor/editorEntityLinks.js";
 import { AssistantComposer, type AssistantComposerHandle, type AssistantProcess } from "../modules/assistant/AssistantComposer.js";
 import { AppModalPortal } from "./AppModalPortal.js";
 
 type Props = { apiBase: string; userID: string; bottomInset: number };
-type ContextSnapshot = Extract<AssistantEvent, { type: "context" }>["context"];
-type Turn = { question: string; reply: string; status: "running" | "complete" | "stopped" | "failed"; notice: string; process?: AssistantProcess; nodeID?: string; contexts: ContextSnapshot[] };
+type Turn = { requestID: string; question: string; reply: string; status: "running" | "complete" | "stopped" | "failed"; notice: string; process?: AssistantProcess; nodeID?: string; inspecting: boolean; traces: AssistantTrace[]; captureFinished?: boolean; recovering?: boolean; inspectionNotice?: string; interruption?: { time: string; message: string } };
 const ASSISTANT_REASONING_STORAGE_KEY = "mangorts.assistant.reasoningEffort.v1";
 const ASSISTANT_REASONING_LABELS: Record<AssistantReasoningEffort, string> = {
   low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Maximum",
@@ -49,6 +48,13 @@ function subscribeCompany(listener: () => void): () => void {
   return () => window.removeEventListener(ACTIVE_COMPANY_CHANGED_EVENT, listener);
 }
 
+const AssistantTraceDetails = React.memo(function AssistantTraceDetails({ trace }: { trace: AssistantTrace }) {
+  return <details>
+    <summary>{trace.sequence}. {trace.kind.replace(/_/g, " ")} · {trace.status} · {trace.time}</summary>
+    <pre>{JSON.stringify(trace, null, 2)}</pre>
+  </details>;
+});
+
 export function AppAssistant(props: Props) {
   const companyID = useSyncExternalStore(subscribeCompany, getActiveCompanyID);
   const authGeneration = useSyncExternalStore(addAuthTerminalFailureListener, getAuthSessionCacheGeneration);
@@ -69,6 +75,7 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
   const [reasoningEffort, setReasoningEffort] = useState(loadReasoningEffort);
   const [running, setRunning] = useState(false);
   const activeRequest = useRef<AbortController | null>(null);
+  const inspectionRequests = useRef(new Set<AbortController>());
   const composerRef = useRef<AssistantComposerHandle>(null);
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -79,7 +86,11 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
   const panelID = React.useId();
   const transcriptID = React.useId();
 
-  useLayoutEffect(() => () => { activeRequest.current?.abort(); }, []);
+  useLayoutEffect(() => () => {
+    activeRequest.current?.abort();
+    activeRequest.current = null;
+    for (const controller of inspectionRequests.current) controller.abort();
+  }, []);
   useEffect(() => {
     const controller = new AbortController();
     if (isTerminalAuthFailureActive()) {
@@ -117,23 +128,95 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
   ]);
   const historyError = draft.length > ASSISTANT_MAX_MESSAGE_CHARS ? "Keep your message under 8,000 characters." : assistantHistoryError([...history, { role: "user", content: draft.trim() }]);
 
+  const revokeInspection = () => {
+    setCanInspectContext(false);
+    setInspectedTurn(null);
+    setInspectContext(false);
+    setTurns((current) => current.map((item) => ({ ...item, traces: [], inspecting: false })));
+  };
+
+  const recoverTurn = async (index: number, requestID: string, inspecting: boolean, bindRecoveredProcess = false) => {
+    const controller = new AbortController();
+    inspectionRequests.current.add(controller);
+    const update = (changes: Partial<Turn>) => setTurns((current) => current.map((turn, turnIndex) => turnIndex === index && turn.requestID === requestID ? { ...turn, ...changes } : turn));
+    update({ recovering: true, ...(inspecting ? { inspectionNotice: "Recovering the final server capture…" } : {}) });
+    try {
+      const snapshot = await (inspecting ? getAssistantTrace : getAssistantResult)(apiBase, companyID, requestID, controller.signal);
+      if (controller.signal.aborted) return;
+      const events = "events" in snapshot ? (snapshot as { events: AssistantTrace[] }).events : undefined;
+      const process = snapshot.process ? { id: snapshot.process.id, label: snapshot.process.name } : undefined;
+      if (bindRecoveredProcess && process) composerRef.current?.bindProcess(process);
+      setTurns((current) => current.map((turn, turnIndex) => turnIndex === index && turn.requestID === requestID && (!events || turn.inspecting && events.length >= turn.traces.length) && (!turn.captureFinished || snapshot.finished) ? {
+        ...turn, ...(events ? { traces: events } : {}), captureFinished: snapshot.finished, ...(process ? { process } : {}), ...(snapshot.node_id ? { nodeID: snapshot.node_id } : {}), inspectionNotice: snapshot.finished
+        ? "Final server capture recovered. Saved actions remain in Mango."
+        : "The server has not finished stopping. Some action outcomes remain uncertain. Reopen Inspect to recover the latest capture.",
+      } : turn));
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      if (inspecting && error instanceof APIHTTPError && (error.status === 403 || error.status === 404)) {
+        const captureUnavailable = error.status === 404;
+        if (captureUnavailable) update({ inspectionNotice: "Final server capture is unavailable. Received events are retained; saved action results remain uncertain. Reopen Inspect to try again." });
+        else revokeInspection();
+        try {
+          const result = await getAssistantResult(apiBase, companyID, requestID, controller.signal);
+          if (controller.signal.aborted) return;
+          const process = result.process ? { id: result.process.id, label: result.process.name } : undefined;
+          update({ captureFinished: result.finished, ...(process ? { process } : {}), ...(result.node_id ? { nodeID: result.node_id } : {}), ...(captureUnavailable ? { inspectionNotice: result.finished
+            ? "Final server capture is unavailable. Received events are retained. Saved action results recovered; saved actions remain in Mango."
+            : "Final server capture is unavailable. Received events are retained. The server has not finished stopping. Reopen Inspect to refresh saved action results." } : {}) });
+          if (bindRecoveredProcess && process) composerRef.current?.bindProcess(process);
+        } catch {
+          // Keep already received links and traces; public results cannot restore unavailable inspection.
+        }
+      }
+      else if (inspecting) update({ inspectionNotice: "Final server capture could not be recovered. Received events are retained; later action outcomes are uncertain. Reopen Inspect to try again." });
+    } finally {
+      inspectionRequests.current.delete(controller);
+      if (!controller.signal.aborted) update({ recovering: false });
+    }
+  };
+
+  const openInspection = async (index: number) => {
+    const turn = turns[index];
+    if (!turn?.inspecting) return;
+    const controller = new AbortController();
+    inspectionRequests.current.add(controller);
+    try {
+      const status = await getAssistantStatus(apiBase, companyID, controller.signal);
+      if (controller.signal.aborted) return;
+      setCanInspectContext(status.can_inspect_context === true);
+      if (!status.can_inspect_context) {
+        revokeInspection();
+        return;
+      }
+      setInspectedTurn(index);
+      if (!turn.captureFinished && (turn.status === "failed" || turn.status === "stopped")) await recoverTurn(index, turn.requestID, true);
+    } catch {
+      if (!controller.signal.aborted) setAvailabilityMessage("Inspection access could not be checked. Try Inspect again.");
+    } finally {
+      inspectionRequests.current.delete(controller);
+    }
+  };
+
   const send = async () => {
     const question = draft.trim();
     if (activeRequest.current || pickerOpen || !available || !question || question.length > ASSISTANT_MAX_MESSAGE_CHARS || historyError) return;
     const controller = new AbortController();
     activeRequest.current = controller;
     const index = turns.length;
-    const process = selectedProcess ?? undefined;
+    const requestID = crypto.randomUUID();
+    let process = selectedProcess ?? undefined;
     const inspecting = canInspectContext && inspectContext;
-    setTurns((current) => [...current, { question, reply: "", status: "running", notice: "Thinking…", process, contexts: [] }]);
+    setTurns((current) => [...current, { requestID, question, reply: "", status: "running", notice: "Thinking…", process, inspecting, traces: [] }]);
     composerRef.current?.clearMessage();
     setInspectContext(false);
     setRunning(true);
     followReply.current = true;
     const update = (changes: Partial<Turn>) => setTurns((current) => current.map((turn, turnIndex) => turnIndex === index ? { ...turn, ...changes } : turn));
     let reply = "";
+    let recover = false;
     try {
-      await streamAssistantChat(apiBase, companyID, [...history, { role: "user", content: question }], reasoningEffort, controller.signal, (message) => {
+      await streamAssistantChat(apiBase, companyID, requestID, [...history, { role: "user", content: question }], reasoningEffort, controller.signal, (message) => {
         if (controller.signal.aborted) return;
         if (message.type === "text") {
           reply += message.text;
@@ -142,18 +225,25 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
           update({ notice: message.status === "running" ? "Working in Mango…" : "Preparing reply…" });
         } else if (message.type === "node") {
           if (process?.id === message.process_id) update({ nodeID: message.node_id });
-        } else if (message.type === "context") {
-          if (inspecting) setTurns((current) => current.map((turn, turnIndex) => turnIndex === index ? { ...turn, contexts: [...turn.contexts, message.context] } : turn));
+        } else if (message.type === "process") {
+          process = { id: message.process_id, label: message.name };
+          update({ process });
+          composerRef.current?.bindProcess(process);
+        } else if (message.type === "trace") {
+          if (inspecting) setTurns((current) => current.map((turn, turnIndex) => turnIndex === index && turn.inspecting ? { ...turn, traces: [...turn.traces, message.trace] } : turn));
         } else if (message.type === "done") {
-          update({ status: "complete", notice: reply ? "" : "Finished without a text reply." });
+          update({ status: "complete", captureFinished: true, notice: reply ? "" : "Finished without a text reply." });
         } else {
+          recover = true;
           update({ status: "failed", notice: message.message });
         }
       }, process?.id, inspecting);
     } catch (error) {
-      if (!controller.signal.aborted) update({ status: "failed", notice: assistantErrorMessage(error) });
+      recover = true;
+      if (!controller.signal.aborted) update({ status: "failed", notice: assistantErrorMessage(error), interruption: { time: new Date().toISOString(), message: "The browser lost the response stream. Server completion and in-flight action outcomes were not confirmed." } });
     } finally {
       if (activeRequest.current === controller) {
+        if (recover || controller.signal.aborted) await recoverTurn(index, requestID, inspecting, true);
         activeRequest.current = null;
         setRunning(false);
       }
@@ -162,7 +252,7 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
 
   const stop = () => {
     activeRequest.current?.abort();
-    setTurns((current) => current.map((turn) => turn.status === "running" ? { ...turn, status: "stopped", notice: ASSISTANT_STOP_MESSAGE } : turn));
+    setTurns((current) => current.map((turn) => turn.status === "running" ? { ...turn, status: "stopped", notice: ASSISTANT_STOP_MESSAGE, interruption: { time: new Date().toISOString(), message: "Stop requested in the browser; the response stream was closed. This is not confirmation that an in-flight action was canceled or undone." } } : turn));
   };
 
   const setPanelVisibility = (open: boolean) => {
@@ -195,7 +285,10 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
         {turns.length > 0 && <section className="mango-assistant-transcript" id={transcriptID} aria-label="Chat transcript">
         <header>
           <strong>Mango chat</strong>
-          <button type="button" disabled={running || turns.length === 0} onClick={() => { setTurns([]); composerRef.current?.clear(); setInspectContext(false); setInspectedTurn(null); }}>Clear chat</button>
+          <button type="button" disabled={running || turns.length === 0} onClick={() => {
+            for (const controller of inspectionRequests.current) controller.abort();
+            setTurns([]); composerRef.current?.clear(); setInspectContext(false); setInspectedTurn(null);
+          }}>Clear chat</button>
         </header>
         <div className="mango-assistant-messages mango-home-scroll" ref={transcriptRef} onScroll={(event) => {
           const element = event.currentTarget;
@@ -210,7 +303,8 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
               {turn.reply && <p>{turn.reply}</p>}
               {turn.notice && <p className="mango-assistant-hint" role="status">{turn.notice}</p>}
               {turn.nodeID && <button type="button" className="mango-assistant-resource" onClick={() => openEditorEntityLink({ entityType: "node", entityID: turn.nodeID!, label: "AI Process Node" })}>Open Node</button>}
-              {turn.contexts.length > 0 && <button type="button" className="mango-assistant-resource" onClick={() => setInspectedTurn(index)}>View context</button>}
+              {!turn.inspecting && turn.captureFinished !== true && (turn.status === "stopped" || turn.status === "failed") && <button type="button" className="mango-assistant-resource" disabled={running || turn.recovering} onClick={() => { void recoverTurn(index, turn.requestID, false); }}>Refresh saved result</button>}
+              {canInspectContext && turn.inspecting && <button type="button" className="mango-assistant-resource" onClick={() => { void openInspection(index); }}>Inspect</button>}
             </div>
           </React.Fragment>)}
         </div>
@@ -234,22 +328,22 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
             ? <button type="button" className="mango-assistant-send" onClick={stop}>Stop</button>
             : <button type="submit" className="mango-assistant-send" disabled={!available || !draft.trim() || Boolean(historyError) || pickerOpen}>Send</button>}
         </form>
-        {canInspectContext && <label className="mango-assistant-inspect"><input type="checkbox" checked={inspectContext} disabled={running} onChange={(event) => setInspectContext(event.currentTarget.checked)} />Inspect context for next message</label>}
+        {canInspectContext && <label className="mango-assistant-inspect"><input type="checkbox" checked={inspectContext} disabled={running} onChange={(event) => setInspectContext(event.currentTarget.checked)} />Inspect next message</label>}
         {(availabilityMessage || historyError) && <p className="mango-assistant-availability" role="status">{availabilityMessage || historyError}</p>}
       </div>
     </div>
-    {inspectedTurn !== null && turns[inspectedTurn] && <AppModalPortal onRequestClose={() => setInspectedTurn(null)}>
-      <section role="dialog" aria-modal="true" aria-label="AI context" className="mango-assistant-context">
-        <header><strong>AI context</strong><button type="button" onClick={() => setInspectedTurn(null)}>Close context</button></header>
-        <p>Initial model input and the additions supplied to each later call. Earlier input is included again in later calls.</p>
-        <div className="mango-assistant-context-calls">{turns[inspectedTurn].contexts.map((context, index) => <details key={index} open={index === 0}>
-          <summary>Model call {context.step} — {index === 0 ? "initial context" : "additional input"}</summary>
-          {context.model && <p>Model: {context.model} · Reasoning: {context.reasoning_effort}</p>}
-          {context.instructions && <><strong>Instructions</strong><pre>{context.instructions}</pre></>}
-          <strong>Input</strong><pre>{JSON.stringify(context.input, null, 2)}</pre>
-          {context.tools && <><strong>Available tools</strong><pre>{JSON.stringify(context.tools, null, 2)}</pre></>}
-          {context.omitted_reasoning_items > 0 && <p>{context.omitted_reasoning_items} private model reasoning item(s) omitted.</p>}
-        </details>)}</div>
+    {canInspectContext && inspectedTurn !== null && turns[inspectedTurn] && <AppModalPortal onRequestClose={() => setInspectedTurn(null)}>
+      <section role="dialog" aria-modal="true" aria-label="AI inspection" className="mango-assistant-context">
+        <header><strong>AI inspection</strong><button type="button" onClick={() => setInspectedTurn(null)}>Close inspection</button></header>
+        <p>Complete captured context, skills, tool events, and final provider requests. Prepared, dispatched, saved, failed, and uncertain are separate outcomes.</p>
+        <p>Security omissions: credentials, authentication headers, private provider internals, and hidden reasoning are excluded. Recorded omission markers identify unavailable or removed fields.</p>
+        <p>Inspection stays in memory. Clear chat, reload, or an account/company change loses this browser history. Server recovery lasts up to 15 minutes, until your next Send in this company, or until backend restart. Earlier captured turns remain here until this chat is cleared.</p>
+        <div className="mango-assistant-context-calls">
+          {turns[inspectedTurn].interruption && <p role="status">Browser observation at {turns[inspectedTurn].interruption!.time}: {turns[inspectedTurn].interruption!.message}</p>}
+          {turns[inspectedTurn].inspectionNotice && <p role="status">{turns[inspectedTurn].inspectionNotice}</p>}
+          {turns[inspectedTurn].traces.length === 0 && <p>No server events received yet.</p>}
+          {turns[inspectedTurn].traces.map((trace) => <AssistantTraceDetails key={trace.sequence} trace={trace} />)}
+        </div>
       </section>
     </AppModalPortal>}
   </aside>;

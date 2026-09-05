@@ -8,7 +8,7 @@ import { ASSISTANT_MAX_MESSAGE_CHARS } from "./assistantApi.js";
 
 export type AssistantProcess = { id: string; label: string };
 export type AssistantDraft = { text: string; process: AssistantProcess | null };
-export type AssistantComposerHandle = { clear: () => void; clearMessage: () => void };
+export type AssistantComposerHandle = { clear: () => void; clearMessage: () => void; bindProcess: (process: AssistantProcess) => void };
 type Props = {
   companyID: string;
   requestJSON: BoundRequestJSON;
@@ -102,16 +102,17 @@ export const AssistantComposer = React.forwardRef<AssistantComposerHandle, Props
     editor.view.dom.setAttribute("data-placeholder", props.placeholder);
   }, [editor, props.disabled, props.placeholder]);
   useEffect(() => { if (!props.visible) updatePicker(null); }, [props.visible]);
+  const clearMessage = (process: AssistantProcess | null) => editor?.commands.setContent({ type: "doc", content: [{ type: "paragraph", content: process ? [
+    { type: "mangoEntityLink", attrs: { entityType: "logic_gate", entityId: process.id, label: process.label } },
+    { type: "text", text: " " },
+  ] : [] }] });
   useImperativeHandle(ref, () => ({
     clear: () => { updatePicker(null); editor?.commands.clearContent(); },
     clearMessage: () => {
       if (!editor) return;
-      const { process } = readDraft(editor);
-      editor.commands.setContent({ type: "doc", content: [{ type: "paragraph", content: process ? [
-        { type: "mangoEntityLink", attrs: { entityType: "logic_gate", entityId: process.id, label: process.label } },
-        { type: "text", text: " " },
-      ] : [] }] });
+      clearMessage(readDraft(editor).process);
     },
+    bindProcess: clearMessage,
   }), [editor]);
 
   return <>

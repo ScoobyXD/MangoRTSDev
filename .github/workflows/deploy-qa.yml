@@ -57,6 +57,15 @@ jobs:
           terraform_version: 1.15.7
           terraform_wrapper: false
 
+      - name: Set up Node for Pi tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install Pi runtime dependencies
+        working-directory: ai/runtime
+        run: npm ci --ignore-scripts
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -324,7 +333,7 @@ jobs:
             fi
           }
 
-          push_if_missing backend/Dockerfile "$GITHUB_SHA"
+          push_if_missing backend/Dockerfile "$GITHUB_SHA" .
           push_if_missing backend/Dockerfile.migrations "${GITHUB_SHA}-migrations"
           push_if_missing backend/Dockerfile.qa-copy "${GITHUB_SHA}-qa-copy" . "$GITHUB_SHA"
           {

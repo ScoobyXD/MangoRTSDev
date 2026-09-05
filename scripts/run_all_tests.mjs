@@ -61,6 +61,7 @@ run(
   `${process.platform === "win32" ? "python" : "python3"} -m unittest tests.scripts.test_compare_schema_inventory tests.scripts.test_prepare_prod_db_schema_copy tests.scripts.test_qa_dev_copy_sql_contracts tests.scripts.test_sanitize_pg_dump_schema tests.scripts.test_schema_alignment_contracts`,
   repoRoot,
 );
+run("Pi adapter tests", "npm test", resolve(repoRoot, "ai", "runtime"));
 runBackendGoTests();
 run("Infrastructure contract tests", "node --test infra/tests/assistant_config.test.mjs infra/tests/attachment_direct_upload.test.mjs infra/tests/ci_workflow.test.mjs infra/tests/email_sqs.test.mjs infra/tests/qa_environment.test.mjs infra/tests/valkey_realtime.test.mjs", repoRoot);
 

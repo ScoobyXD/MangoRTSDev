@@ -1,0 +1,17 @@
+{
+  "name": "mangorts-pi-runtime",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "test": "node --test --test-isolation=none runtime.test.mjs"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "0.85.0",
+    "@earendil-works/pi-coding-agent": "0.85.0",
+    "@earendil-works/pi-server": "0.85.0",
+    "openai": "6.40.0"
+  }
+}
