@@ -20,7 +20,7 @@ import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection
 import { fetchSavedViews, saveSavedView, type SavedView, type SavedViewGrouping } from "../../pages/home/savedViewsApi";
 import { NODE_ICON_GRADIENT_END, NODE_ICON_GRADIENT_START } from "../../icons/index.js";
 import { buildUniversalNestedGroups, type UniversalNestedGroup, type UniversalGroupValue } from "../grouping/universalGrouping";
-import { assignNodeToLogicGateStatus, changeProcessNodeState, createProcessNode, createProcessStep, deleteProcessStep, deleteProcessStepRelationship, dispatchLogicGateWorkUpdated, clearProcessWorkCache, getCachedProcessWork, getProcessWorkSingleFlight, invalidateLogicGateArenaViewCache, PROCESS_WORK_UPDATED_EVENT, updateProcessStep, type ProcessNodeStatePatch } from "./kanbanApi";
+import { assignNodeToLogicGateStatus, changeProcessNodeState, createProcessNode, createProcessStep, deleteProcessStep, dispatchLogicGateWorkUpdated, clearProcessWorkCache, getCachedProcessWork, getProcessWorkSingleFlight, invalidateLogicGateArenaViewCache, PROCESS_WORK_UPDATED_EVENT, updateProcessStep, type ProcessNodeStatePatch } from "./kanbanApi";
 import { mergeCreatedProcessStep, orderedProcessSteps, PROCESS_STATUSES, PROCESS_WORK_VIEWS, processNodeMovePlan, processStatusColor, processWorkCounts, processWorkView, type ProcessStep, type ProcessWorkNode, type ProcessWorkSnapshot, type ProcessWorkView } from "./processWork";
 import { readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
 import { shouldResetNodeEditorOverlayViewMode } from "./nodeEditorOverlayViewMode";
@@ -236,7 +236,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
   });
   const steps = useMemo(() => orderedProcessSteps(snapshot?.steps ?? []), [snapshot?.steps]);
   const counts = useMemo(() => processWorkCounts(snapshot?.nodes ?? []), [snapshot?.nodes]);
-  const stepByID = useMemo(() => new Map(steps.map((step) => [step.process_step_id, step])), [steps]);
   const userName = (id?: string) => users.find((person) => person.user_id === id)?.display_name || users.find((person) => person.user_id === id)?.email || "";
   const canEdit = snapshot?.permissions.can_edit === true;
   const selectedIDs = [...selected];
@@ -360,7 +359,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
   };
   const renderStep = (step: ProcessStep | null, index: number) => {
     const id = step?.process_step_id ?? null, nodes = visible.filter((node) => node.process_step_id === id);
-    const outgoing = snapshot?.relationships.filter((edge) => edge.source.resource_id === id) ?? [];
     return <section key={id ?? "unassigned"} data-process-step={id ?? "unassigned"} className={`process-work__step${step ? "" : " process-work__unassigned"}`} onDragOver={allowDrop} onDrop={(event) => drop(event, id)}>
       <header><div><h3 className="process-work__step-heading">{step && canEdit ? stepRename?.stepID === id ? <input className="process-work__step-title-input" aria-label="Step name" autoFocus maxLength={200} value={stepRename.name} onChange={(event) => setStepRename({ stepID: step.process_step_id, name: event.target.value })} onBlur={() => commitStepRename(step)} onKeyDown={(event) => {
         if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); }
@@ -372,7 +370,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
         <button type="button" disabled={busy || index === 0} onClick={() => moveStep(step, -1)}>Move left</button><button type="button" disabled={busy || index === steps.length - 1} onClick={() => moveStep(step, 1)}>Move right</button>
         <button type="button" disabled={busy} onClick={() => addStep(id!)}>Add next step</button><button type="button" disabled={busy} className="process-work__danger" onClick={() => setDeletion({ step })}>Delete column</button>
       </div></details>}</div>}</header>
-      {outgoing.length > 0 && <div className="process-work__connections">{outgoing.map((edge) => <span key={edge.resource_operational_relationship_id}>→ {stepByID.get(edge.target.resource_id)?.name}{canEdit && <button type="button" title="Remove connection" disabled={busy} onClick={() => void mutate(() => deleteProcessStepRelationship(apiBase, companyID, processID, edge.resource_operational_relationship_id))}>×</button>}</span>)}</div>}
       <div className="process-work__step-nodes">{renderNodes(nodes, id)}{nodes.length === 0 && <p className="process-work__empty-lane">{step ? "No active work" : "Active work without a step appears here."}</p>}</div>
     </section>;
   };

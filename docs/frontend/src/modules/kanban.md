@@ -6,7 +6,7 @@ The header shows **Steps · Requested · Pending · Backlog · Done**. Steps dis
 
 The compact rectangular view tabs share a row with **Group**. Requested is yellow, Pending gray, Backlog purple, and Done green. The board has no work-search or account-filter controls; optional priority/date/person/account grouping and Date Added sorting remain available.
 
-Step headers show the name without an ordinal badge. Their top-right plus button creates a Node, and the three-dot menu provides Rename, Move left, Move right, Add next step, and Delete column. Existing outgoing connection chips remain visible without a Connect to dropdown. There is no bottom New Node button.
+Step headers show the name without an ordinal badge. Their top-right plus button creates a Node, and the three-dot menu provides Rename, Move left, Move right, Add next step, and Delete column. The Board omits step connection chips; saved connections remain available in Map view. There is no bottom New Node button.
 
 Node cards use larger titles while retaining status, priority, due date, and placement metadata. Cards omit selection checkboxes and the Change footer. Click, Ctrl/Cmd-click, and Shift-click selection, bulk commands, shared Node editing, request actions, Start work, and exact-mailbox email drops remain available. These features read the same work snapshot and reuse the existing saved-view, Node, assignment, editor, and email commands.
 
