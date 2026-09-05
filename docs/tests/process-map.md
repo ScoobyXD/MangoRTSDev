@@ -214,7 +214,7 @@
 212. Opening a new Process draft MUST animate entering its work area while the creation card and breadcrumb stay fixed.
 213. A focused Process MUST immediately show a labeled rectangular outline around its Step canvas, including when it has no Steps.
 214. A new Process outline MUST start at the existing top and left inset and fill the available work area at 100% zoom.
-215. A reduced-motion preference MUST disable the Process entrance animation.
+215. A reduced-motion preference MUST skip Process entrance and exit animations.
 216. The Process outline MUST expand as needed to contain all authored Step and route geometry.
 217. Process outline sizing MUST remain local presentation without rewriting authored geometry or creating another resource or layout record.
 218. Panning or zooming a focused Process MUST move or scale its outline, Steps, and routes together without changing the outline's world dimensions.
@@ -238,11 +238,17 @@
 236. Focused Step numbering MUST start at 1 on the leftmost Step and follow the fewest directed connections to each reachable Step.
 237. Unreachable Steps MUST remain unnumbered.
 238. Displayed Step numbers MUST NOT change saved Step order, names, geometry, or relationships.
+239. Confirmed draft discard and leaving a saved Process MUST retain the outgoing Process during an outward zoom-and-fade transition back to the company canvas.
+240. Both canvases MUST remain noninteractive until the focused Process exit finishes.
+241. A Process exit MUST finish on its own exit animation end or after a 440-millisecond cleanup timeout.
+242. Child and unrelated animation events MUST NOT finish a Process exit.
+243. Saving a Process draft MUST keep the saved Process focused.
+244. Enabling reduced motion or hiding the Page MUST immediately finish any pending Process exit.
 Last updated: 2026-09-04
 
 # Process Story: One company canvas moves from overview to Process work
 
-An authorized user opens `/process-map` on one white map pane. Create Process enters a labeled outline; its card enables Step creation while Folder and Process creation stay disabled. The user chooses the orange Folder path, names Steps, and drags between their output and input ports to connect the flow. Displayed numbering starts at the leftmost Step and follows its connections. Blank-space dragging pans and the wheel zooms while the card and breadcrumb stay fixed. Save commits the draft to Explorer; returning restores the mounted company camera.
+An authorized user opens `/process-map` on one white map pane. Create Process enters a labeled outline; its card enables Step creation while Folder and Process creation stay disabled. The user chooses the orange Folder path, names Steps, and drags between their output and input ports to connect the flow. Displayed numbering starts at the leftmost Step and follows its connections. Blank-space dragging pans and the wheel zooms while the card and breadcrumb stay fixed. Save commits the draft to Explorer and keeps it focused. Returning reverses the entrance transition and restores interaction with the unchanged company camera.
 
 ## Scenario: Fit nested Folders within the existing world
 

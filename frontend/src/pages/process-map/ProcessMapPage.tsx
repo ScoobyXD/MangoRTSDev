@@ -21,6 +21,7 @@ export function ProcessMapPage(props: ProcessMapPageProps) {
 function ProcessMapCompanyPage({ apiBase, companyID, onOpenLogicGate, onDraftStateChange, active = true }: ProcessMapPageProps) {
   const [hoverModeEnabled, setHoverModeEnabled] = useState(false);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  const [exiting, setExiting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [folderDialog, setFolderDialog] = useState<{ parentID?: string } | null>(null);
   const [folders, setFolders] = useState<CompanyExplorerFolder[]>([]);
@@ -34,6 +35,16 @@ function ProcessMapCompanyPage({ apiBase, companyID, onOpenLogicGate, onDraftSta
   const needsFolders = workspace !== null || folderDialog !== null;
   useEffect(() => { onDraftStateChange?.(workspace?.kind === "draft"); }, [onDraftStateChange, workspace?.kind]);
   useEffect(() => { if (!active) { setFolderDialog(null); setPendingWorkspace(null); } }, [active]);
+  const finishExit = useCallback(() => { setWorkspace(null); setExiting(false); }, []);
+  useEffect(() => {
+    if (!exiting) return;
+    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    if (!active || motion.matches) { finishExit(); return; }
+    const onMotionChange = () => { if (motion.matches) finishExit(); };
+    motion.addEventListener("change", onMotionChange);
+    const timer = window.setTimeout(finishExit, 440);
+    return () => { window.clearTimeout(timer); motion.removeEventListener("change", onMotionChange); };
+  }, [active, exiting, finishExit]);
   useEffect(() => {
     if (!needsFolders) return;
     const controller = new AbortController();
@@ -45,13 +56,18 @@ function ProcessMapCompanyPage({ apiBase, companyID, onOpenLogicGate, onDraftSta
       .finally(() => { if (!controller.signal.aborted) setFoldersLoading(false); });
     return () => controller.abort();
   }, [apiBase, companyID, needsFolders, folderRefresh]);
+  const openWorkspace = useCallback((next: Workspace | null) => {
+    setNotice("");
+    if (workspace && !next && active && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) setExiting(true);
+    else setWorkspace(next);
+  }, [active, workspace]);
   const changeWorkspace = useCallback((next: Workspace | null) => {
-    if (busy) return;
+    if (busy || exiting) return;
     if (workspace?.kind === "draft") setPendingWorkspace({ next });
-    else { setWorkspace(next); setNotice(""); }
-  }, [busy, workspace?.kind]);
+    else openWorkspace(next);
+  }, [busy, exiting, openWorkspace, workspace?.kind]);
   const createProcess = (parentID?: string, firstStep = false) => changeWorkspace({ kind: "draft", processID: crypto.randomUUID(), folderID: parentID ?? "", firstStep });
-  const createFolder = (parentID?: string) => { if (!busy) setFolderDialog({ parentID }); };
+  const createFolder = (parentID?: string) => { if (!busy && !exiting) setFolderDialog({ parentID }); };
   const saved = (process: SavedMapProcess) => {
     setBusy(false);
     setPendingWorkspace(null);
@@ -61,10 +77,11 @@ function ProcessMapCompanyPage({ apiBase, companyID, onOpenLogicGate, onDraftSta
   };
   return <main className="process-map-page" aria-label="Process Map">
     <div className="process-map-page__canvas">
-      <div className={`process-map-company-canvas${workspace ? " is-focused" : ""}`} aria-hidden={workspace ? true : undefined} ref={(element) => element?.toggleAttribute("inert", Boolean(workspace))}>
+      <div className={`process-map-company-canvas${workspace && !exiting ? " is-focused" : ""}`} aria-hidden={workspace ? true : undefined} ref={(element) => element?.toggleAttribute("inert", Boolean(workspace))}>
         <ProcessMapSurface apiBase={apiBase} companyID={companyID} hoverModeEnabled={hoverModeEnabled} onOpenLogicGate={onOpenLogicGate} onCreateFolder={createFolder} onCreateProcess={(parentID) => createProcess(parentID)} onCreateStep={(parentID) => createProcess(parentID, true)} />
       </div>
       {!workspace && <ProcessMapActions onCreateFolder={() => createFolder()} onCreateProcess={() => createProcess()} onCreateStep={() => createProcess(undefined, true)} hoverModeEnabled={hoverModeEnabled} onHoverModeChange={setHoverModeEnabled} />}
+      {workspace && <div className={`process-map-focus${exiting ? " is-exiting" : ""}`} aria-hidden={exiting ? true : undefined} ref={(element) => element?.toggleAttribute("inert", exiting)} onAnimationEnd={(event) => { if (exiting && event.target === event.currentTarget && event.animationName === "process-map-exit") finishExit(); }}>
       {workspace?.kind === "draft" && <ProcessMapDraft key={workspace.processID} apiBase={apiBase} companyID={companyID} processID={workspace.processID} firstStep={workspace.firstStep} initialFolderID={workspace.folderID} folders={folders} foldersLoading={foldersLoading || !!folderError} active={active} onSaved={saved} onBack={() => changeWorkspace(null)} onBusyChange={setBusy} hoverModeEnabled={hoverModeEnabled} onHoverModeChange={setHoverModeEnabled} />}
       {workspace?.kind === "saved" && <section className="process-map-workspace" aria-label="Saved Process map">
         <div className="process-map-workspace__path" aria-label="Process location">
@@ -77,11 +94,12 @@ function ProcessMapCompanyPage({ apiBase, companyID, onOpenLogicGate, onDraftSta
             <button type="button" disabled={busy} onClick={() => onOpenLogicGate(workspace.processID, workspace.name)}>Open Board / SOP</button>
           </ProcessMapActions>} />
       </section>}
+      </div>}
       {folderDialog && foldersLoading && <div role="status" className="process-map-authoring-notice">Loading Folders… <button type="button" onClick={() => setFolderDialog(null)}>Cancel</button></div>}
       {folderError && needsFolders && <div role="alert" className="process-map-authoring-notice">{folderError} <button type="button" onClick={() => setFolderRefresh((value) => value + 1)}>Retry</button>{folderDialog && <button type="button" onClick={() => setFolderDialog(null)}>Cancel</button>}</div>}
       {notice && <div role="status" className="process-map-authoring-notice">{notice}<button type="button" aria-label="Dismiss notice" onClick={() => setNotice("")}>×</button></div>}
       {folderDialog && !foldersLoading && !folderError && <ProcessMapCreateFolderDialog apiBase={apiBase} companyID={companyID} folders={folders} initialParentFolderID={folderDialog.parentID} onClose={() => setFolderDialog(null)} onCreated={(folder) => { setFolderDialog(null); setFolderRefresh((value) => value + 1); setNotice(`Folder “${folder.name}” created.`); emitExplorerContextUpdated({ companyID, kind: "company_explorer" }); }} />}
-      {pendingWorkspace && <section ref={confirmRef} className="process-map-confirm" role="dialog" aria-labelledby="process-map-discard-title"><h2 id="process-map-discard-title">Discard this Process draft?</h2><p>This Process and its Steps have not been saved.</p><div><button type="button" autoFocus onClick={() => setPendingWorkspace(null)}>Keep editing</button><button type="button" disabled={busy} onClick={() => { if (busy) return; setWorkspace(pendingWorkspace.next); setBusy(false); setPendingWorkspace(null); }}>Discard draft</button></div></section>}
+      {pendingWorkspace && <section ref={confirmRef} className="process-map-confirm" role="dialog" aria-labelledby="process-map-discard-title"><h2 id="process-map-discard-title">Discard this Process draft?</h2><p>This Process and its Steps have not been saved.</p><div><button type="button" autoFocus onClick={() => setPendingWorkspace(null)}>Keep editing</button><button type="button" disabled={busy || exiting} onClick={() => { if (busy || exiting) return; openWorkspace(pendingWorkspace.next); setBusy(false); setPendingWorkspace(null); }}>Discard draft</button></div></section>}
     </div>
   </main>;
 }

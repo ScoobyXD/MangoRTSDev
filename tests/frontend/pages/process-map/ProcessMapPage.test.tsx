@@ -3,7 +3,7 @@ import test from "node:test";
 import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import type { WorkspaceProcessDefinition } from "../../../../frontend/src/modules/workspace/workspaceEntityCommands.js";
-import { resetProcessMapDeckGLTestStub } from "../../modules/process-map/processMapDeckGLTestStub.js";
+import { readProcessMapDeckGLTestProps, resetProcessMapDeckGLTestStub } from "../../modules/process-map/processMapDeckGLTestStub.js";
 import { resetProcessMapRealtimeTestStub } from "../../modules/process-map/processMapRealtimeTestStub.js";
 
 const companyID = "11111111-1111-4111-8111-111111111111";
@@ -22,9 +22,13 @@ async function settle(condition: () => boolean, message: string) {
 }
 let fixtureNumber = 0;
 
-async function harness() {
+async function harness(reducedMotion = false) {
   const apiBase = `http://process-page-${++fixtureNumber}.test`;
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: apiBase, pretendToBeVisual: true });
+  // Expose standard animation events so React does not register a vendor-prefixed name in jsdom.
+  Object.defineProperty(dom.window, "AnimationEvent", { value: dom.window.Event });
+  const motionQuery = Object.assign(new dom.window.EventTarget(), { media: "(prefers-reduced-motion: reduce)", matches: reducedMotion, onchange: null, addListener() {}, removeListener() {} });
+  dom.window.matchMedia = (media) => (media === motionQuery.media ? motionQuery : Object.assign(new dom.window.EventTarget(), { media, matches: false, onchange: null, addListener() {}, removeListener() {} })) as MediaQueryList;
   const restores: Array<() => void> = [];
   const install = (name: string, value: unknown) => {
     const previous = Object.getOwnPropertyDescriptor(globalThis, name);
@@ -134,6 +138,23 @@ async function harness() {
     await key(container.querySelector('[aria-label="Step name"]')!, "Enter");
   };
   const pointer = async (element: Element, type: string, x: number, y: number) => { await act(async () => element.dispatchEvent(new dom.window.MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y }))); };
+  const animationEnd = async (element: Element, name = "process-map-exit") => {
+    const event = new dom.window.Event("animationend", { bubbles: true });
+    Object.defineProperty(event, "animationName", { value: name });
+    await act(async () => element.dispatchEvent(event));
+    await flush();
+  };
+  const finishExit = async () => {
+    const outgoing = container.querySelector(".process-map-focus.is-exiting");
+    assert.ok(outgoing, "the outgoing Process must remain mounted for its exit animation");
+    await animationEnd(outgoing);
+    assert.equal(outgoing.isConnected, false, "the Process exit animation must release the outgoing view");
+  };
+  const setReducedMotion = async (matches: boolean) => {
+    motionQuery.matches = matches;
+    await act(async () => motionQuery.dispatchEvent(new dom.window.Event("change")));
+    await flush();
+  };
   const cards = () => [...container.querySelectorAll<HTMLElement>("[data-step-map-id]")];
   const preventsUnload = () => {
     const event = new dom.window.Event("beforeunload", { cancelable: true });
@@ -149,7 +170,7 @@ async function harness() {
   };
   const dispose = async () => { await act(async () => root.unmount()); resetProcessMapDeckGLTestStub(); resetProcessMapRealtimeTestStub(); restores.reverse().forEach((restore) => restore()); dom.window.close(); };
   await render();
-  return { dom, container, state, requests, workReads, opened, draftStates, render, findButton, button, click, input, key, renameStep, pointer, cards, preventsUnload, mutations, batches, chooseFolder, start, dispose };
+  return { dom, container, state, requests, workReads, opened, draftStates, render, findButton, button, click, input, key, renameStep, pointer, animationEnd, finishExit, setReducedMotion, cards, preventsUnload, mutations, batches, chooseFolder, start, dispose };
 }
 
 test("Process Map authors Steps and connections locally and saves their exact identities and geometry in one batch", async () => {
@@ -334,6 +355,7 @@ test("discard asks first, keeping edits sends no writes, and company navigation 
     assert.equal(h.button("Name Process").firstChild!.textContent, "Unsaved first company");
     await h.click("← Company map");
     await h.click("Discard draft");
+    await h.finishExit();
     assert.equal(h.container.querySelector('[aria-label="New Process map"]'), null);
     assert.equal(h.draftStates.at(-1), false);
     assert.equal(h.preventsUnload(), false);
@@ -352,6 +374,119 @@ test("discard asks first, keeping edits sends no writes, and company navigation 
     assert.equal(h.mutations().length, 0);
     assert.deepEqual(h.opened, []);
   } finally { await h.dispose(); }
+});
+
+test("confirmed discard retains the outgoing Process until its own exit animation finishes", async () => {
+  const h = await harness();
+  try {
+    await h.start(true);
+    const company = h.container.querySelector(".process-map-company-canvas")!;
+    const workspace = h.container.querySelector('[aria-label="New Process map"]')!;
+    const step = h.cards()[0];
+    await h.click("← Company map");
+    assert.ok(h.container.querySelector('[aria-labelledby="process-map-discard-title"]'));
+    assert.equal(h.container.querySelector(".process-map-focus.is-exiting"), null, "requesting confirmation must not start the exit");
+    await h.click("Discard draft");
+    const outgoing = h.container.querySelector(".process-map-focus.is-exiting")!;
+    assert.ok(outgoing);
+    assert.ok(outgoing.contains(workspace));
+    assert.equal(h.cards()[0], step, "the authored content must remain mounted during the reverse animation");
+    assert.equal(outgoing.hasAttribute("inert"), true);
+    assert.equal(outgoing.getAttribute("aria-hidden"), "true");
+    assert.equal(company.classList.contains("is-focused"), false, "the company canvas must start returning before the Process unmounts");
+    assert.equal(company.hasAttribute("inert"), true);
+    assert.equal(h.findButton("+ Create Process"), undefined, "company creation must not become interactive beneath the outgoing Process");
+    assert.equal(h.container.querySelector('[aria-labelledby="process-map-discard-title"]'), null);
+    await h.animationEnd(workspace);
+    assert.equal(h.container.querySelector(".process-map-focus.is-exiting"), outgoing, "a bubbling child animation cannot finish the exit");
+    await h.animationEnd(outgoing, "process-map-enter");
+    assert.equal(h.container.querySelector(".process-map-focus.is-exiting"), outgoing, "an unrelated animation cannot finish the exit");
+    await h.finishExit();
+    assert.equal(h.container.querySelector(".process-map-focus"), null);
+    assert.equal(h.container.querySelector(".process-map-company-canvas"), company);
+    assert.equal(company.hasAttribute("inert"), false);
+    assert.equal(company.hasAttribute("aria-hidden"), false);
+    assert.equal(h.button("+ Create Process").disabled, false);
+    assert.equal(h.draftStates.at(-1), false);
+    assert.equal(h.preventsUnload(), false);
+    assert.equal(h.mutations().length, 0);
+  } finally { await h.dispose(); }
+});
+
+test("saving keeps the Process focused and its timed exit preserves the mounted company camera", async () => {
+  const h = await harness();
+  try {
+    const company = h.container.querySelector(".process-map-company-canvas")!;
+    const deckElement = company.querySelector("[data-process-map-deck-test-stub]")!;
+    assert.ok(deckElement);
+    const deck = readProcessMapDeckGLTestProps() as ReturnType<typeof readProcessMapDeckGLTestProps> & { onViewStateChange: (params: { viewState: Record<string, unknown> }) => unknown };
+    await act(async () => { deck.onViewStateChange({ viewState: { ...deck.viewState, target: [320, -160, 0], zoom: 1.5 } }); });
+    const camera = structuredClone(readProcessMapDeckGLTestProps().viewState);
+    await h.start(true);
+    await h.input('[placeholder="Untitled Process"]', "Saved Process");
+    await h.chooseFolder();
+    await h.click("Save Process");
+    await settle(() => h.findButton("Open Board / SOP")?.disabled === false, "the saved Process did not finish loading");
+    const saved = h.container.querySelector('[aria-label="Saved Process map"]')!;
+    assert.ok(saved);
+    assert.equal(company.classList.contains("is-focused"), true, "Save must keep the focused Process open");
+    assert.equal(h.container.querySelector(".process-map-focus.is-exiting"), null);
+    await h.click("← Company map");
+    assert.ok(h.container.querySelector(".process-map-focus.is-exiting")?.contains(saved));
+    assert.equal(company.hasAttribute("inert"), true);
+    assert.equal(company.querySelector("[data-process-map-deck-test-stub]"), deckElement);
+    assert.deepEqual(readProcessMapDeckGLTestProps().viewState, camera);
+    // No animation event is dispatched: the bounded cleanup timer must still finish.
+    await settle(() => h.container.querySelector(".process-map-focus") === null, "the exit timeout did not restore the company map");
+    assert.equal(h.container.querySelector(".process-map-company-canvas"), company);
+    assert.equal(company.querySelector("[data-process-map-deck-test-stub]"), deckElement);
+    assert.deepEqual(readProcessMapDeckGLTestProps().viewState, camera);
+    assert.equal(company.hasAttribute("inert"), false);
+    assert.equal(h.button("+ Create Step").disabled, false);
+    assert.equal(h.mutations().length, 1, "leaving a saved Process must not issue another write");
+    assert.deepEqual(h.opened, []);
+  } finally { await h.dispose(); }
+});
+
+test("reduced motion returns immediately from both confirmed drafts and saved Processes", async () => {
+  for (const saveFirst of [false, true]) {
+    const h = await harness(true);
+    try {
+      await h.start(true);
+      const company = h.container.querySelector(".process-map-company-canvas")!;
+      if (saveFirst) {
+        await h.input('[placeholder="Untitled Process"]', "Reduced motion Process");
+        await h.chooseFolder();
+        await h.click("Save Process");
+        await settle(() => h.findButton("Open Board / SOP")?.disabled === false, "the saved Process did not finish loading");
+      }
+      await h.click("← Company map");
+      if (!saveFirst) await h.click("Discard draft");
+      assert.equal(h.container.querySelector(".process-map-focus"), null, "reduced motion must not wait for an animation or timeout");
+      assert.equal(h.container.querySelector(".process-map-company-canvas"), company);
+      assert.equal(company.hasAttribute("inert"), false);
+      assert.equal(h.button("+ Create Process").disabled, false);
+      assert.equal(h.mutations().length, saveFirst ? 1 : 0);
+    } finally { await h.dispose(); }
+  }
+});
+
+test("an exit finishes when reduced motion is enabled or the Page becomes inactive", async () => {
+  for (const cause of ["reduced motion", "inactive"] as const) {
+    const h = await harness();
+    try {
+      await h.start(true);
+      await h.click("← Company map");
+      await h.click("Discard draft");
+      assert.ok(h.container.querySelector(".process-map-focus.is-exiting"));
+      if (cause === "reduced motion") await h.setReducedMotion(true);
+      else { h.state.active = false; await h.render(); }
+      assert.equal(h.container.querySelector(".process-map-focus"), null, `${cause} must finish the pending exit without an animation event`);
+      assert.equal(h.container.querySelector(".process-map-company-canvas")!.hasAttribute("inert"), false);
+      assert.equal(h.preventsUnload(), false);
+      assert.equal(h.mutations().length, 0);
+    } finally { await h.dispose(); }
+  }
 });
 
 test("inactive Page retains its draft but closes portal menus and discard dialogs and cancels an unfinished gesture", async () => {
@@ -496,6 +631,7 @@ test("Folder and Process creation stay disabled inside a draft and become availa
     assert.equal(h.container.querySelector('[aria-label="Destination path"]')!.textContent, "Workspace/Operations/Orders");
     await h.click("← Company map");
     await h.click("Discard draft");
+    await h.finishExit();
     assert.equal(h.container.querySelector('[aria-label="New Process map"]'), null);
     assert.equal(h.cards().length, 0);
     assert.equal(h.button("+ Create Folder").disabled, false);
