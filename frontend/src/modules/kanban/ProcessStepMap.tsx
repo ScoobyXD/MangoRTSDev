@@ -87,7 +87,7 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
   const editingRef = useRef(editingStepID);
   const titleInput = useRef<HTMLInputElement>(null);
   const [hoveredStepID, setHoveredStepID] = useState<string | null>(null);
-  const [name, setName] = useState("");
+  const [name, setName] = useState(() => steps.find((step) => step.process_step_id === initialEditingStepID)?.name ?? "");
   const [targetID, setTargetID] = useState("");
   const [zoom, setZoom] = useState(1);
   const [loading, setLoading] = useState(true);
