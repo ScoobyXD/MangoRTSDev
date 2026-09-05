@@ -17,8 +17,6 @@
 !backend/internal/sourceaudit/*.go
 !backend/internal/store/*.go
 !ai/AGENTS.md
-!ai/MCP.md
-!ai/SKILLS.md
 !ai/skills/mango-process/SKILL.md
 !ai/runtime/package.json
 !ai/runtime/package-lock.json

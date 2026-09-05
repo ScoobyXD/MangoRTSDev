@@ -27,7 +27,7 @@
 25. A new browser chat session starts collapsed; expanding it preserves the selected reasoning effort, which defaults to medium and remembers the last valid browser choice.
 26. API startup must prefer a nonempty `OPENAI_API_KEY`; otherwise, when the model and `OPENAI_API_KEY_SECRET_ARN` exist, it must read one nonempty key from that secret into memory, and an explicit retrieval failure must stop startup.
 27. Selecting a Process with the universal `#` reference picker inserts the existing atomic inline label; its exact identity remains selected across Sends until removed, replaced, or the session is cleared.
-28. Every Send automatically loads the authenticated user's ID, name, email, company ID, and current company role; a selected Process additionally loads its current identity/name, real Steps/order/connections, and canonical SOP.
+28. Every Send supplies the authenticated user's ID, name, email, company ID, and current company role once under identity; selected or discovered Process context contains only its definition, Steps/order/connections, and canonical SOP, without another copy of the user.
 29. Process context uses the existing canonical SOP document and never adds a separate Step instruction field or interprets map coordinates as execution order.
 30. Selecting a Process supplies discussion context and never means permission to execute; only an execution request may use its three actions to create one Node, add text, and move that Node between its Steps.
 31. Process tools never accept a model-selected company, actor, Process, Node, or textbox identity; Step arguments must identify actual Steps of the selected Process.
@@ -60,7 +60,7 @@
 58. The actual pinned Pi SDK owns the only model/tool loop; Go supervises one bounded Node child and retains all authenticated business dispatch.
 59. The model may search visible Processes and bind one exact Process during the same Send; binding loads fresh authorized context, changes the tool catalog, and never mutates or authorizes execution.
 60. After binding, no ordinary mutation tool can dispatch; one interaction binds at most one Process and creates at most one Process Node.
-61. Native Pi skills use only packaged approved ai content; home/project instructions, arbitrary filesystem/shell tools, extensions, customer slash expansion, retries, and compaction remain disabled.
+61. Native Pi skills use only packaged AGENTS.md and the Process SKILL.md; home/project instructions, arbitrary filesystem/shell tools, extensions, customer slash expansion, retries, and compaction remain disabled.
 62. Required request capture must be retained before provider dispatch; capture failure or a size limit stops further work without silently truncating retained events.
 63. Inspection distinguishes preparation, dispatch, confirmed saved results, failures, denials, stops, and uncertain outcomes; provider-hidden instructions and private reasoning are unavailable.
 64. Credentials, authorization headers, secret URLs, opaque private continuation fields, and raw provider errors never enter inspection; security omissions are explicit and credentials/secret URLs are removed before model egress.
@@ -73,6 +73,7 @@
 71. Every actor may recover only their own saved Process/Node links through the current-company result endpoint; it rechecks current resource access and returns no prompts or traces.
 72. Stopped or failed turns can recover their saved links through the result endpoint when inspection is unavailable while retaining received traces; unfinished recovery offers a manual refresh without repeating the action or polling automatically.
 73. Inspection records the HTTP status of every provider response, including rejected requests, without exposing private error bodies.
+74. General AI rules live in AGENTS.md; the Process skill adds only Process-specific execution guidance, and tool/skill catalogs come from their registered definitions.
 
 ## Process story
 

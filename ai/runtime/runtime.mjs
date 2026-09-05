@@ -11,7 +11,7 @@ import { validateResponse } from './response-validation.mjs';
 
 export const AI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const LIMITS = Object.freeze({ tools: 16, responses: 17, output_bytes: 32000, context_bytes: 512000, trace_bytes: 8388608 });
-const ASSETS = ['AGENTS.md', 'MCP.md', 'SKILLS.md', 'skills/mango-process/SKILL.md'];
+const ASSETS = ['AGENTS.md', 'skills/mango-process/SKILL.md'];
 const SAFE_ERROR = 'Chat stopped. Check Mango before repeating an action; completed changes may remain.';
 const bytes = value => Buffer.byteLength(typeof value === 'string' ? value : JSON.stringify(value), 'utf8');
 const sha256 = value => createHash('sha256').update(value).digest('hex');
@@ -30,12 +30,6 @@ async function createModelRuntime(apiKey) {
   return ModelRuntime.create({ credentials, modelsPath: null, modelsStore: new InMemoryModelsStore(), allowModelNetwork: false, refreshOnCreate: false });
 }
 
-export async function checkModel(modelID) {
-  const runtime = await createModelRuntime();
-  const model = runtime.getModel('openai', modelID);
-  return Boolean(model && model.api === 'openai-responses');
-}
-
 // The supported ResourceLoader interface avoids all default package/home/project discovery.
 // Skill metadata is parsed by Pi's native loader; only these explicit packaged files can load.
 async function resources() {
@@ -46,7 +40,7 @@ async function resources() {
     if (bytes(content) > 32000 || content.split('\n').length > 1000) throw new Error(SAFE_ERROR);
     assets.set(path, { path, content, sha256: sha256(content) });
   }
-  const skills = loadSkills({ cwd: AI_ROOT, agentDir: AI_ROOT, skillPaths: [resolve(AI_ROOT, ASSETS[3])], includeDefaults: false });
+  const skills = loadSkills({ cwd: AI_ROOT, agentDir: AI_ROOT, skillPaths: [resolve(AI_ROOT, 'skills/mango-process/SKILL.md')], includeDefaults: false });
   if (skills.diagnostics.length || skills.skills.length !== 1 || skills.skills[0].name !== 'mango-process') throw new Error(SAFE_ERROR);
   const extensions = { extensions: [], errors: [], runtime: createExtensionRuntime() };
   return {
@@ -180,7 +174,6 @@ export async function runInteraction(start, transport, signal = new AbortControl
         async execute(id, args) {
           active();
           const reply = await transport.tool({ id, name: definition.name, arguments: args });
-          if (reply.error) { stop(); throw new Error(reply.error); }
           if (reply.tools) {
             session.agent.state.tools = [readTool, ...mangoTools(reply.tools)];
             await capture('tool_catalog', 'completed', { tools: reply.tools });

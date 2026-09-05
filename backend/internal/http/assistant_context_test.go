@@ -49,6 +49,13 @@ func assistantDeveloperContext(t *testing.T, input any) map[string]any {
 				t.Fatal("invalid structured Mango context")
 			}
 			if process, ok := value["process"].(map[string]any); ok {
+				identity, ok := value["identity"].(map[string]any)
+				if !ok || identity["user_id"] == nil || identity["company_id"] != assistantTestCompany {
+					t.Fatal("selected Process context lost the separately supplied actor")
+				}
+				if _, duplicated := process["user"]; duplicated {
+					t.Fatal("selected Process context repeats the actor")
+				}
 				return process
 			}
 			if identity, ok := value["identity"].(map[string]any); ok {

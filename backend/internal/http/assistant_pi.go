@@ -13,8 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/openai/openai-go/v3/responses"
 )
 
 func assistantRuntimePaths() (string, string) {
@@ -85,12 +83,12 @@ type assistantBridgeMessage struct {
 	} `json:"event"`
 }
 
-func assistantCatalog(process *assistantProcessExecution) []responses.ToolUnionParam {
+func assistantCatalog(process *assistantProcessExecution) []assistantFunctionTool {
 	if process == nil {
 		return append(assistantTools(), assistantBindingTools()...)
 	}
 	if process.definition.ExecutionBlockedReason != "" {
-		return []responses.ToolUnionParam{}
+		return []assistantFunctionTool{}
 	}
 	return assistantProcessTools()
 }

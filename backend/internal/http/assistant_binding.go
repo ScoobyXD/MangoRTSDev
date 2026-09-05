@@ -4,12 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-
-	"github.com/openai/openai-go/v3/responses"
 )
 
-func assistantBindingTools() []responses.ToolUnionParam {
-	return []responses.ToolUnionParam{
+func assistantBindingTools() []assistantFunctionTool {
+	return []assistantFunctionTool{
 		assistantFunction("bind_process", "Bind one exact Process found through Mango's permission-filtered search/read tools for this interaction. Returns its live SOP, Steps, and connections, then limits available Mango tools to this Process. Binding only reads context and never authorizes execution. Ask the user when the target is ambiguous.", map[string]any{"process_id": map[string]any{"type": "string", "format": "uuid"}}),
 	}
 }

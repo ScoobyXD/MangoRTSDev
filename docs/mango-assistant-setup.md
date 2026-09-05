@@ -1,6 +1,6 @@
 # Mango chat setup
 
-The existing Mango composer uses the installed official Pi SDK for its model/tool loop. Go supervises a short-lived Node child and keeps authenticated Mango tool dispatch in the existing backend handlers. The Pi packages are pinned to `0.85.0` in `ai/runtime/package.json` and its lockfile. Generic instructions and the one native Process skill are packaged in `ai/`; live Process SOPs stay in canonical Mango editor storage. The assistant adds no schema migration.
+The existing Mango composer uses the installed official Pi SDK for its model/tool loop. Go supervises a short-lived Node child and keeps authenticated Mango tool dispatch in the existing backend handlers. Go describes those tools with its own small JSON structure and has no OpenAI SDK dependency. The Pi packages are pinned to `0.85.0` in `ai/runtime/package.json` and its lockfile. General instructions live in `ai/AGENTS.md`; `ai/skills/mango-process/SKILL.md` adds the Process-specific steps. Live Process SOPs stay in canonical Mango editor storage. The assistant adds no schema migration.
 
 Install the runtime dependencies from the repository root using Node **22.19 or newer**:
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
-import { AI_ROOT, checkModel, inspectable, LIMITS, runInteraction } from './runtime.mjs';
+import { AI_ROOT, inspectable, LIMITS, runInteraction } from './runtime.mjs';
 import { PROVIDER_RESPONSE_MAX_BYTES, validateResponse } from './response-validation.mjs';
 
 const functionTool = name => ({ type: 'function', name, description: `Fixture ${name}`, parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false } });
@@ -47,9 +47,12 @@ async function fixture(t, handler) {
   return { start, captured, requests, dispatches, emitted, transport };
 }
 
-test('published Pi model catalog supports configured model and rejects unknown models', async () => {
-  assert.equal(await checkModel('gpt-5.4'), true);
-  assert.equal(await checkModel('not-a-real-model'), false);
+test('unknown configured model stops the actual interaction before provider egress', async t => {
+  const f = await fixture(t, response => reply(response, [textItem('Must not be requested.')]));
+  f.start.model = 'not-a-real-model';
+  await assert.rejects(runInteraction(f.start, f.transport));
+  assert.equal(f.requests.length, 0);
+  assert.equal(f.dispatches.length, 0);
 });
 
 test('real Pi captures exact initial and continuation HTTP bodies, complete native skill loads, and saved results', async t => {
@@ -112,7 +115,7 @@ test('denied native read records failure and stops continuation', async t => {
 
 test('Go failure stops continuation and records independent tool failure', async t => {
   const f = await fixture(t, response => reply(response, [toolItem('fixture_write', { text: 'first' })]));
-  f.transport.tool = async value => { f.dispatches.push(value); return { error: 'Mango denied this action.' }; };
+  f.transport.tool = async value => { f.dispatches.push(value); throw new Error('Mango denied this action.'); };
   await assert.rejects(runInteraction(f.start, f.transport));
   assert.equal(f.dispatches.length, 1);
   assert.equal(f.requests.length, 1);
@@ -127,7 +130,7 @@ test('binding switches tools before continuation and cannot dispatch stale catal
   f.transport.tool = async value => {
     f.dispatches.push(value);
     if (value.name === 'bind_process') return { result: { process: 'saved-process-id' }, tools: [functionTool('create_process_node')] };
-    return { error: 'Stop after checking the switched catalog.' };
+    throw new Error('Stop after checking the switched catalog.');
   };
   await assert.rejects(runInteraction(f.start, f.transport));
   assert.deepEqual(f.requests[1].tools.map(tool => tool.name).sort(), ['create_process_node', 'read']);
@@ -160,7 +163,7 @@ test('provider failures do not retry, redirect, or expose private errors', async
 });
 
 test('native read counts against total tools and capture limit stops before egress', async t => {
-  const f = await fixture(t, (response, call) => reply(response, call === 1 ? [toolItem('read', { path: 'SKILLS.md' })] : [toolItem('fixture_write', { text: 'never' }, 'call_2')]));
+  const f = await fixture(t, (response, call) => reply(response, call === 1 ? [toolItem('read', { path: 'skills/mango-process/SKILL.md' })] : [toolItem('fixture_write', { text: 'never' }, 'call_2')]));
   f.start.limits = { ...LIMITS, tools: 1 };
   await assert.rejects(runInteraction(f.start, f.transport));
   assert.equal(f.dispatches.length, 0);
@@ -219,7 +222,7 @@ test('in-flight Stop aborts provider work without follow-up calls', async t => {
 });
 
 test('skill capture failure and undeclared shell calls never dispatch Mango tools', async t => {
-  const f = await fixture(t, response => reply(response, [toolItem('read', { path: 'SKILLS.md' })]));
+  const f = await fixture(t, response => reply(response, [toolItem('read', { path: 'skills/mango-process/SKILL.md' })]));
   const retain = f.transport.capture;
   f.transport.capture = async value => {
     if (value.kind === 'skill_load') throw new Error('capture unavailable');

@@ -37,8 +37,15 @@ func TestAssistantBindingReadsExactLiveDefinitionWithoutMutation(t *testing.T) {
 		t.Fatalf("binding created execution state: %+v", bound)
 	}
 	definition := bound.definition
-	if definition.User["user_id"] != fixture.user.UserID || definition.User["company_id"] != assistantTestCompany || definition.Process.LogicGateID != fixture.process.LogicGateID {
-		t.Fatalf("binding lost current identity: %+v", definition)
+	if definition.Process.LogicGateID != fixture.process.LogicGateID {
+		t.Fatalf("binding lost the exact Process identity: %+v", definition)
+	}
+	var context map[string]any
+	if json.Unmarshal([]byte(bound.definitionJSON), &context) != nil {
+		t.Fatal("binding returned invalid Process context")
+	}
+	if _, duplicated := context["user"]; duplicated {
+		t.Fatal("binding repeated the separately supplied actor context")
 	}
 	if len(definition.Steps) != 2 || definition.Steps[0].ID != fixture.first.ProcessStepID || definition.Steps[1].ID != fixture.last.ProcessStepID || len(definition.Relationships) != 1 || definition.Relationships[0].ResourceOperationalRelationshipID != fixture.edge.ResourceOperationalRelationshipID {
 		t.Fatalf("binding lost saved Steps or connections: %+v", definition)

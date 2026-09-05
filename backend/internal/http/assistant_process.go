@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/openai/openai-go/v3/responses"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 )
@@ -28,7 +27,6 @@ type assistantProcessSOP struct {
 // This is the current request's input, not a new persisted Process or Run model.
 // It deliberately contains no geometry, unrelated Nodes, or credentials.
 type assistantProcessDefinition struct {
-	User                   map[string]string                        `json:"user"`
 	Process                domain.LogicGateWorkHeader               `json:"process"`
 	Steps                  []assistantProcessStep                   `json:"steps"`
 	Relationships          []domain.ResourceOperationalRelationship `json:"relationships"`
@@ -59,9 +57,9 @@ func assistantExpectedNodeWork(r *http.Request) *store.NodeWorkPrecondition {
 	return expected
 }
 
-func assistantProcessTools() []responses.ToolUnionParam {
+func assistantProcessTools() []assistantFunctionTool {
 	stepID := map[string]any{"type": "string", "format": "uuid"}
-	return []responses.ToolUnionParam{
+	return []assistantFunctionTool{
 		assistantFunction("create_process_node", "Create the one Node for this request in the selected Process and starting Step. Call once. Returns the saved Node identity and Step.", map[string]any{"name": map[string]any{"type": "string", "minLength": 1, "maxLength": 240}, "process_step_id": stepID}),
 		assistantFunction("write_process_node", "Add a new text box with the work for the current Step to this request's Node. Existing text is preserved. Returns the actual saved document.", map[string]any{"plain_text": map[string]any{"type": "string", "minLength": 1, "maxLength": 16000}}),
 		assistantFunction("move_process_node_to_step", "Move this request's Node to another supplied Step of the selected Process after doing the current work. Preserve Node status.", map[string]any{"process_step_id": stepID}),
@@ -89,7 +87,6 @@ func (s *Server) readAssistantProcess(r *http.Request, processID, nodeID string)
 	if err != nil {
 		return definition, nil, errors.New("Mango could not read the selected Process and its Steps.")
 	}
-	definition.User = assistantUserContext(actor, role)
 	definition.Steps = []assistantProcessStep{}
 	definition.SOP = []assistantProcessSOP{}
 	definition.Process = work.LogicGate

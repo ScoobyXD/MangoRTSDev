@@ -12,17 +12,23 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/responses"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 )
 
 const assistantToolResultLimit = 64 << 10
 
+type assistantFunctionTool struct {
+	Type        string         `json:"type"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Strict      bool           `json:"strict"`
+	Parameters  map[string]any `json:"parameters"`
+}
+
 // These are fixed internal operations. Every call below goes through the same
 // handler as the app; model arguments never supply a company, actor or URL.
-func assistantTools() []responses.ToolUnionParam {
+func assistantTools() []assistantFunctionTool {
 	id := map[string]any{"type": "string", "format": "uuid"}
 	text := map[string]any{"type": "string", "minLength": 1, "maxLength": 500}
 	optionalText := map[string]any{"type": []string{"string", "null"}, "maxLength": 500}
@@ -32,7 +38,7 @@ func assistantTools() []responses.ToolUnionParam {
 	attachmentResource := map[string]any{"type": "string", "enum": []string{"node", "logic_gate", "company_explorer_folder"}}
 	textboxID := map[string]any{"type": "string", "minLength": 1, "maxLength": 128}
 	optionalTextboxID := map[string]any{"type": []string{"string", "null"}, "minLength": 1, "maxLength": 128}
-	return []responses.ToolUnionParam{
+	return []assistantFunctionTool{
 		assistantFunction("get_me", "Read the signed-in user and selected company membership.", map[string]any{}),
 		assistantFunction("list_my_processes", "Read the signed-in user's assigned Processes in the selected company. Use this for 'my processes' or 'what processes am I assigned to'. Mango filters by current RACI assignments, including inherited and group assignments, and current Process access. Includes any R, A, C, or I role; does not scan only the first 50 company Processes.", map[string]any{}),
 		assistantFunction("list_processes", "Find visible Processes (canonical logic_gate resources); returns at most 50. Use query to narrow results.", map[string]any{"query": optionalText}),
@@ -62,16 +68,16 @@ func assistantTools() []responses.ToolUnionParam {
 	}
 }
 
-func assistantFunction(name, description string, properties map[string]any) responses.ToolUnionParam {
+func assistantFunction(name, description string, properties map[string]any) assistantFunctionTool {
 	required := make([]string, 0, len(properties))
 	for key := range properties {
 		required = append(required, key)
 	}
 	sort.Strings(required)
-	return responses.ToolUnionParam{OfFunction: &responses.FunctionToolParam{
-		Name: name, Description: openai.String(description), Strict: openai.Bool(true),
+	return assistantFunctionTool{
+		Type: "function", Name: name, Description: description, Strict: true,
 		Parameters: map[string]any{"type": "object", "properties": properties, "required": required, "additionalProperties": false},
-	}}
+	}
 }
 
 // Validate the flat scalar inputs against the exact schema sent to the model.
@@ -80,14 +86,14 @@ func assistantToolArguments(name, arguments string) (map[string]any, error) {
 	return assistantArgumentsForTools(assistantTools(), name, arguments)
 }
 
-func assistantArgumentsForTools(tools []responses.ToolUnionParam, name, arguments string) (map[string]any, error) {
+func assistantArgumentsForTools(tools []assistantFunctionTool, name, arguments string) (map[string]any, error) {
 	if len(arguments) > 32<<10 {
 		return nil, errors.New("Mango tool arguments are too large.")
 	}
 	var properties map[string]any
 	for _, tool := range tools {
-		if tool.OfFunction.Name == name {
-			properties = tool.OfFunction.Parameters["properties"].(map[string]any)
+		if tool.Name == name {
+			properties = tool.Parameters["properties"].(map[string]any)
 			break
 		}
 	}
