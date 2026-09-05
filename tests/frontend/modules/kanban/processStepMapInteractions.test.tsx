@@ -125,13 +125,23 @@ async function harness(draft = false, canvas = false) {
     return result;
   };
   const click = async (label: string) => { await act(async () => button(label).click()); await flush(); };
+  const input = async (value: string) => {
+    const element = container.querySelector<HTMLInputElement>('[aria-label="Step name"]');
+    assert.ok(element, "inline Step name must be available");
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")!.set!.call(element, value);
+      element.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
+    return element;
+  };
+  const doubleClick = async (element: Element) => { await act(async () => element.dispatchEvent(new dom.window.MouseEvent("dblclick", { bubbles: true, cancelable: true, detail: 2 }))); await flush(); };
   const pointer = async (element: Element, type: string, x: number, y: number) => {
     await act(async () => element.dispatchEvent(new dom.window.MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 })));
   };
   const key = async (element: Element, value: string) => { await act(async () => element.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true }))); await flush(); };
   const writes = () => requests.filter((request) => request.method === "PUT");
   const dispose = async () => { await act(async () => root.unmount()); restores.reverse().forEach((restore) => restore()); dom.window.close(); };
-  return { dom, container, state, requests, localCalls, busyStates, mount, render, button, click, pointer, key, writes, dispose };
+  return { dom, container, state, requests, localCalls, busyStates, mount, render, button, click, input, doubleClick, pointer, key, writes, dispose };
 }
 
 test("canvas action callback creates through the existing command and keeps actions available beside Step details", async () => {
@@ -144,6 +154,16 @@ test("canvas action callback creates through the existing command and keeps acti
     assert.equal(h.requests.filter((request) => request.method === "POST" && request.path.endsWith("/steps")).length, 1);
     assert.ok(h.container.querySelector('[data-step-map-id="new"].is-selected'));
     assert.ok(h.container.querySelector('[aria-label="Selected Step"]'));
+    const step = h.container.querySelector<HTMLElement>('[data-step-map-id="new"]')!;
+    assert.equal(step.style.width, "112px");
+    assert.equal(step.style.height, "56px");
+    const input = step.querySelector<HTMLInputElement>('[aria-label="Step name"]')!;
+    assert.ok(input, "new Steps must be named directly in their card");
+    assert.equal(h.dom.window.document.activeElement, input);
+    assert.equal(input.selectionStart, 0);
+    assert.equal(input.selectionEnd, input.value.length);
+    assert.equal(h.container.querySelector('[aria-label="Selected Step"] input[aria-label="Step name"]'), null);
+    await h.key(input, "Escape");
     assert.equal(h.button("Create Step").disabled, false);
     await h.click("Close Step details");
     assert.equal(h.dom.window.document.activeElement, h.button("Move New step"));
@@ -164,12 +184,8 @@ test("canvas hover previews leave an unfinished Step name and selection intact",
   try {
     h.state.hoverModeEnabled = true;
     await h.mount();
-    await h.click("Move Receive");
-    const input = h.container.querySelector<HTMLInputElement>('[aria-label="Step name"]')!;
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(h.dom.window.HTMLInputElement.prototype, "value")!.set!.call(input, "Receive delivery");
-      input.dispatchEvent(new h.dom.window.Event("input", { bubbles: true }));
-    });
+    await h.doubleClick(h.button("Move Receive"));
+    const input = await h.input("Receive delivery");
     await h.pointer(h.button("Move Check"), "pointerover", 520, 280);
     assert.match(h.container.querySelector('[role="tooltip"]')?.textContent ?? "", /Check/);
     assert.ok(h.container.querySelector(".process-step-map__edges .is-hovered"));
@@ -178,16 +194,166 @@ test("canvas hover previews leave an unfinished Step name and selection intact",
     await h.key(input, "ArrowRight");
     await h.pointer(input, "contextmenu", 20, 20);
     assert.equal(h.container.querySelector('[aria-label="Process map creation"]'), null);
-    assert.deepEqual(h.localCalls, [], "inspector and hover events must not issue map commands");
+    assert.deepEqual(h.localCalls, [], "text navigation and hover events must not issue map commands");
     h.state.hoverModeEnabled = false;
     await h.mount();
     assert.equal(h.container.querySelector('[role="tooltip"]'), null);
     assert.equal(h.container.querySelector(".is-hovered"), null);
     assert.ok(h.container.querySelector('[data-step-map-id="a"].is-selected'));
     assert.equal(input.value, "Receive delivery");
-    await h.click("Apply name");
+    await h.key(input, "Enter");
     assert.equal(h.state.steps.find((step) => step.process_step_id === "a")?.name, "Receive delivery");
     assert.deepEqual(h.localCalls, ["rename"]);
+  } finally { await h.dispose(); }
+});
+
+test("canvas body, title and keyboard naming share one inline editor and only commit nonblank changes", async () => {
+  const h = await harness(false, true);
+  const renames = () => h.requests.filter((request) => request.method === "PATCH");
+  try {
+    await h.mount();
+    const card = h.container.querySelector<HTMLElement>('[data-step-map-id="a"]')!;
+    await h.doubleClick(card);
+    const entered = await h.input("  Receive delivery  ");
+    assert.ok(card.contains(entered));
+    assert.equal(h.dom.window.document.activeElement, entered);
+    await h.key(entered, "Enter");
+    assert.deepEqual(renames(), [{ path: "/v2/logic-gates/process/steps/a", method: "PATCH", body: { company_id: "company", name: "Receive delivery" } }]);
+    assert.equal(h.container.querySelector('[aria-label="Step name"]'), null);
+    assert.ok(h.button("Move Receive delivery"));
+
+    await h.key(h.button("Move Receive delivery"), "F2");
+    const selected = card.querySelector<HTMLInputElement>('[aria-label="Step name"]')!;
+    assert.equal(h.dom.window.document.activeElement, selected);
+    assert.equal(selected.selectionStart, 0);
+    assert.equal(selected.selectionEnd, "Receive delivery".length);
+    const cancelled = await h.input("Discard this edit");
+    await h.key(cancelled, "Escape");
+    assert.ok(h.button("Move Receive delivery"));
+    assert.equal(renames().length, 1, "Escape must preserve the existing name without a command");
+
+    await h.doubleClick(h.button("Move Receive delivery"));
+    await h.input("   ");
+    await act(async () => h.button("Zoom in").focus());
+    await flush();
+    assert.ok(h.button("Move Receive delivery"));
+    assert.equal(h.container.querySelector('[aria-label="Step name"]'), null);
+    assert.equal(renames().length, 1, "a blank blur must restore the previous name");
+
+    await h.click("Move Check");
+    await h.click("Rename Step");
+    const blurred = await h.input("Inspect delivery");
+    assert.ok(h.container.querySelector('[data-step-map-id="b"]')!.contains(blurred));
+    await act(async () => h.button("Zoom in").focus());
+    await flush();
+    assert.equal(renames().length, 2, "blur must issue one rename for the exact edited Step");
+    assert.deepEqual(renames()[1], { path: "/v2/logic-gates/process/steps/b", method: "PATCH", body: { company_id: "company", name: "Inspect delivery" } });
+    assert.ok(h.button("Move Inspect delivery"));
+    assert.equal(h.writes().length, 0, "editing text must not move or resize the Step");
+  } finally { await h.dispose(); }
+});
+
+test("canvas body dragging uses the current zoom and directional handles keep opposite edges fixed", async () => {
+  const h = await harness(false, true);
+  try {
+    await h.mount();
+    await h.click("Zoom in");
+    await h.click("Zoom in");
+    const card = h.container.querySelector<HTMLElement>('[data-step-map-id="a"]')!;
+    assert.deepEqual([...card.querySelectorAll<HTMLElement>("[data-resize-handle]")].map((handle) => handle.dataset.resizeHandle).sort(), ["e", "n", "ne", "nw", "s", "se", "sw", "w"]);
+    const body = card.querySelector(".process-step-map__step-label")!;
+    await h.pointer(body, "pointerdown", 100, 100);
+    await h.pointer(body, "pointermove", 148, 124);
+    assert.equal(h.writes().length, 0);
+    await h.pointer(body, "pointerup", 148, 124);
+    await flush();
+    assert.equal(h.writes().length, 1);
+    assert.deepEqual(h.state.layout.steps[0], { process_step_id: "a", x: 96, y: 80, width: 224, height: 112 });
+
+    const north = h.button("Resize Receive n");
+    await h.pointer(north, "pointerdown", 100, 100);
+    await h.pointer(north, "pointermove", 124, 76);
+    await h.pointer(north, "pointerup", 124, 76);
+    await flush();
+    assert.equal(h.writes().length, 2, "a resize must not also start a body drag");
+    assert.deepEqual(h.state.layout.steps[0], { process_step_id: "a", x: 96, y: 64, width: 224, height: 128 }, "north ignores horizontal movement and keeps the bottom edge fixed");
+
+    await h.key(h.button("Resize Receive w"), "ArrowLeft");
+    assert.equal(h.writes().length, 3);
+    assert.deepEqual(h.state.layout.steps[0], { process_step_id: "a", x: 80, y: 64, width: 240, height: 128 });
+
+    const northWest = h.button("Resize Receive nw");
+    await h.pointer(northWest, "pointerdown", 100, 100);
+    await h.pointer(northWest, "pointermove", 124, 124);
+    await h.pointer(northWest, "pointerup", 124, 124);
+    await flush();
+    assert.equal(h.writes().length, 4);
+    assert.deepEqual(h.state.layout.steps[0], { process_step_id: "a", x: 96, y: 80, width: 224, height: 112 }, "northwest shrinks from its corner while preserving the opposite corner");
+    assert.equal(h.requests.filter((request) => request.method === "PATCH" || request.method === "POST").length, 0);
+  } finally { await h.dispose(); }
+});
+
+test("resizing an edited Step waits for its pending rename without starting a body drag", async () => {
+  const h = await harness(false, true);
+  let releaseRename!: (value: Response) => void;
+  try {
+    await h.mount();
+    await h.doubleClick(h.button("Move Receive"));
+    await h.input("Receive arrival");
+    h.state.customFetch = (request) => request.method === "PATCH" ? new Promise((resolve) => { releaseRename = resolve; }) : null;
+    const resize = h.button("Resize Receive");
+    await h.pointer(resize, "pointerdown", 100, 100);
+    assert.equal(h.requests.filter((request) => request.method === "PATCH").length, 1);
+    assert.equal(h.busyStates.at(-1), true);
+    await h.pointer(resize, "pointermove", 148, 132);
+    await h.pointer(resize, "pointerup", 148, 132);
+    await flush();
+    assert.equal(h.writes().length, 0, "the resize event must not bubble into a move while its rename is pending");
+    const card = h.container.querySelector<HTMLElement>('[data-step-map-id="a"]')!;
+    assert.equal(card.style.left, "64px");
+    assert.equal(card.style.top, "64px");
+    assert.equal(card.style.width, "224px");
+    assert.equal(card.style.height, "112px");
+    assert.deepEqual(h.state.layout, initialLayout);
+    h.state.steps = h.state.steps.map((step) => step.process_step_id === "a" ? { ...step, name: "Receive arrival" } : step);
+    h.state.customFetch = null;
+    await act(async () => releaseRename(response({ step: h.state.steps[0] })));
+    await flush();
+    assert.equal(h.busyStates.at(-1), false);
+    assert.ok(h.button("Move Receive arrival"));
+    const readyResize = h.button("Resize Receive arrival");
+    await h.pointer(readyResize, "pointerdown", 100, 100);
+    await h.pointer(readyResize, "pointermove", 132, 116);
+    await h.pointer(readyResize, "pointerup", 132, 116);
+    await flush();
+    assert.equal(h.writes().length, 1, "one later resize must save after the rename finishes");
+    assert.deepEqual(h.state.layout.steps[0], { process_step_id: "a", x: 64, y: 64, width: 256, height: 128 });
+    assert.equal(h.requests.filter((request) => request.method === "PATCH").length, 1);
+  } finally { await h.dispose(); }
+});
+
+test("losing edit permission cancels an inline Step name without committing it later", async () => {
+  const h = await harness(false, true);
+  try {
+    await h.mount();
+    await h.doubleClick(h.button("Move Receive"));
+    const staleInput = await h.input("Unapproved name");
+    h.state.canEdit = false;
+    await h.mount();
+    assert.ok(h.container.querySelector('[aria-label="Step name"]') === null, "permission loss must cancel the inline editor");
+    assert.ok(h.button("Move Receive"));
+    await h.key(staleInput, "Enter");
+    await h.pointer(h.button("Resize Receive"), "pointerdown", 100, 100);
+    await h.pointer(h.button("Resize Receive"), "pointerup", 132, 116);
+    assert.deepEqual(h.requests.filter((request) => request.method !== "GET"), []);
+    h.state.canEdit = true;
+    await h.mount();
+    assert.ok(h.container.querySelector('[aria-label="Step name"]') === null, "restoring permission must not reopen cancelled text");
+    await h.key(h.button("Move Receive"), "F2");
+    const newInput = h.container.querySelector<HTMLInputElement>('[aria-label="Step name"]')!;
+    assert.equal(newInput.value, "Receive");
+    await h.key(newInput, "Enter");
+    assert.deepEqual(h.requests.filter((request) => request.method !== "GET"), []);
   } finally { await h.dispose(); }
 });
 

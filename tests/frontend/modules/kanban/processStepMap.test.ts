@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { completeStepMapLayout, defaultStepMapRoute, moveStepMapBox, stepMapPath, type ProcessStepMapLayout } from "../../../../frontend/src/modules/kanban/processStepMapGeometry.js";
+import { completeStepMapLayout, defaultStepMapRoute, moveStepMapBox, stepMapPath, type ProcessStepMapLayout, type StepMapResizeHandle } from "../../../../frontend/src/modules/kanban/processStepMapGeometry.js";
 import type { ProcessStep, ProcessStepRelationship } from "../../../../frontend/src/modules/kanban/processWork.js";
 
 const steps: ProcessStep[] = [
@@ -27,13 +27,47 @@ test("new Step geometry avoids saved boxes and resize preserves identity and bou
   const next = completeStepMapLayout(base, steps, []);
   const added = next.steps.find((box) => box.process_step_id === "b")!;
   assert.ok(added.x >= 864 || added.y >= 224, "the new Step must not cover an existing saved Step");
-  const resized = moveStepMapBox(next.steps[0], { x: -1000, y: -1000 }, true);
+  assert.deepEqual([added.width, added.height], [112, 56], "new Steps occupy one-quarter the previous 224 by 112 area");
+  assert.deepEqual(next.steps[0], base.steps[0], "existing authored sizes must not shrink");
+  const resized = moveStepMapBox(next.steps[0], { x: -1000, y: -1000 }, "se");
   assert.equal(resized.process_step_id, "a");
-  assert.deepEqual([resized.width, resized.height], [160, 96]);
+  assert.deepEqual([resized.width, resized.height], [112, 56]);
   assert.deepEqual([resized.x, resized.y], [48, 48]);
   const moved = moveStepMapBox(resized, { x: 25, y: 41 });
   assert.deepEqual([moved.x, moved.y], [80, 96]);
-  assert.deepEqual([moved.width, moved.height], [160, 96]);
+  assert.deepEqual([moved.width, moved.height], [112, 56]);
+});
+
+test("each corner and side resize handle moves only its edges and retains the opposite anchor", () => {
+  const box = { process_step_id: "a", x: 100, y: 200, width: 224, height: 112 };
+  const expected: Record<StepMapResizeHandle, number[]> = {
+    n: [100, 248, 224, 64], ne: [100, 248, 256, 64], e: [100, 200, 256, 112], se: [100, 200, 256, 160],
+    s: [100, 200, 224, 160], sw: [132, 200, 192, 160], w: [132, 200, 192, 112], nw: [132, 248, 192, 64],
+  };
+  for (const handle of Object.keys(expected) as StepMapResizeHandle[]) {
+    const resized = moveStepMapBox(box, { x: 25, y: 41 }, handle);
+    assert.equal(resized.process_step_id, box.process_step_id);
+    assert.deepEqual([resized.x, resized.y, resized.width, resized.height], expected[handle], handle);
+  }
+  const compact = { ...box, width: 112, height: 56 };
+  assert.deepEqual(moveStepMapBox(compact, { x: 0, y: 0 }, "se"), compact, "a click must not round the compact height up");
+  assert.equal(moveStepMapBox(compact, { x: 0, y: 16 }, "s").height, 72, "resizing follows the 16px grid from the authored size");
+});
+
+test("resizing clamps size and coordinates while keeping the opposite edge fixed", () => {
+  const box = { process_step_id: "a", x: 100, y: 200, width: 224, height: 112 };
+  const small = moveStepMapBox(box, { x: 1000, y: 1000 }, "nw");
+  assert.deepEqual(small, { ...box, x: 212, y: 256, width: 112, height: 56 });
+  const large = moveStepMapBox(box, { x: -20000, y: -20000 }, "nw");
+  assert.deepEqual(large, { ...box, x: -9676, y: -9688, width: 10000, height: 10000 });
+  for (const coordinate of [-999990, 999990]) {
+    const original = { ...box, x: coordinate, y: coordinate };
+    const resized = moveStepMapBox(original, { x: coordinate < 0 ? -64 : 1000, y: coordinate < 0 ? -64 : 1000 }, "nw");
+    assert.ok(resized.x >= -1000000 && resized.x <= 1000000);
+    assert.ok(resized.y >= -1000000 && resized.y <= 1000000);
+    assert.equal(resized.x + resized.width, original.x + original.width);
+    assert.equal(resized.y + resized.height, original.y + original.height);
+  }
 });
 
 test("manual route points produce orthogonal paths with anchors derived from current Step bounds", () => {
