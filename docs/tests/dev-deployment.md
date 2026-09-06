@@ -6,7 +6,8 @@
 4. The daily DEV attachment-maintenance task inherits the API CPU and memory settings.
 5. The DEV deployment workflow uses the CPU and memory defaults in `infra/aws-dev/variables.tf` without sizing overrides.
 6. DEV sizing changes must leave QA and production sizing unchanged.
+7. The existing DEV Aurora cluster `miraerts-northerncalifornia-devcluster` in `us-west-1` must use a minimum of 0.5 ACU and a maximum of 1 ACU.
 
 ## Process Story
 
-After the change reaches `main`, a separately authorized run of `.github/workflows/deploy-dev.yml` writes `ci.auto.tfvars` with the existing task count and worker enablement, but no CPU or memory values. Terraform takes those defaults from the DEV root, passes them through `infra/aws-dev/main.tf` to the shared module, and registers new API, email-worker, and attachment-maintenance task definitions. The services roll out at the same task counts, and the daily maintenance schedule targets its new task definition. No GitHub variable changes are needed. Local Terraform runs with explicit sizing inputs must use the same targets because explicit inputs override defaults.
+An authorized run of `.github/workflows/deploy-dev.yml` from `main` writes task count and worker enablement to `ci.auto.tfvars` and uses the DEV root CPU and memory defaults. `infra/aws-dev/main.tf` passes these values to the shared module, which updates the API, email-worker, and daily maintenance task definitions while preserving task counts. No GitHub variable changes are needed; explicit local sizing inputs must match the same targets. An authorized RDS capacity change configures the Aurora range directly on the existing DEV cluster. The ECS Terraform deployment references its database endpoint without managing Aurora capacity.
