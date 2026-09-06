@@ -177,13 +177,13 @@ variable "container_port" {
 variable "backend_cpu" {
   description = "Fargate task CPU units."
   type        = number
-  default     = 2048
+  default     = 1024
 }
 
 variable "backend_memory" {
   description = "Fargate task memory MiB."
   type        = number
-  default     = 4096
+  default     = 2048
 }
 
 variable "backend_desired_count" {
@@ -235,13 +235,13 @@ variable "email_worker_concurrency" {
 variable "email_worker_cpu" {
   description = "Fargate CPU units for the private DEV email worker."
   type        = number
-  default     = 1024
+  default     = 512
 }
 
 variable "email_worker_memory" {
   description = "Fargate memory MiB for the private DEV email worker."
   type        = number
-  default     = 2048
+  default     = 1024
 }
 
 variable "email_worker_alarm_action_arns" {
