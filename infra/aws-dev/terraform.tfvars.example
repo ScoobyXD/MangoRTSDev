@@ -40,8 +40,8 @@ email_worker_enabled                  = true
 email_sqs_database_migration_complete = true
 email_reconciliation_schedule_enabled = false
 email_worker_concurrency              = 3
-email_worker_cpu                      = 1024
-email_worker_memory                   = 2048
+email_worker_cpu                      = 512
+email_worker_memory                   = 1024
 email_worker_alarm_action_arns        = [] # Optional SNS/incident destinations; CloudWatch alarms still exist when this is empty.
 
 # Private, TLS-only, IAM-authenticated Valkey Pub/Sub backplane for committed
