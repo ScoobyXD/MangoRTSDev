@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
-import type { AssistantComposerHandle } from "./AssistantComposer.js";
+import type { AssistantComposerHandle, AssistantDraft } from "./AssistantComposer.js";
 import { transcribeAssistantAudio } from "./assistantApi.js";
 
 const MAX_RECORDING_BYTES = 2_000_000_000;
@@ -11,6 +11,7 @@ type Recording = {
   chunks: Blob[]; bytes: number; timer?: ReturnType<typeof setTimeout>; stopping: boolean;
   audioContext?: AudioContext; source?: MediaStreamAudioSourceNode; analyser?: AnalyserNode;
   activityTimer?: ReturnType<typeof setInterval>;
+  sendRequested?: boolean;
 };
 
 function releaseMicrophone(recording: Recording) {
@@ -38,11 +39,13 @@ function dispose(recording: Recording) {
   recording.chunks = [];
 }
 
-export function useAssistantDictation(apiBase: string, companyID: string, composer: RefObject<AssistantComposerHandle>) {
+export function useAssistantDictation(apiBase: string, companyID: string, composer: RefObject<AssistantComposerHandle>, onSend: (draft: AssistantDraft) => void) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [message, setMessage] = useState("");
   const [audioLevel, setAudioLevel] = useState(0);
   const current = useRef<Recording | null>(null);
+  const latestOnSend = useRef(onSend);
+  latestOnSend.current = onSend;
 
   const cancel = (notice = "Dictation canceled. Your draft was kept.") => {
     const recording = current.current;
@@ -68,6 +71,7 @@ export function useAssistantDictation(apiBase: string, companyID: string, compos
   const transcribe = async (recording: Recording) => {
     if (current.current !== recording) return;
     clearTimeout(recording.timer);
+    recording.recorder!.onstop = null;
     if (!recording.stopping) { fail(recording, "Recording stopped unexpectedly. Please record again."); return; }
     const audio = new Blob(recording.chunks, { type: recording.recorder!.mimeType });
     recording.chunks = [];
@@ -75,28 +79,38 @@ export function useAssistantDictation(apiBase: string, companyID: string, compos
     try {
       const text = await transcribeAssistantAudio(apiBase, companyID, audio, recording.controller.signal);
       if (current.current !== recording) return;
-      composer.current?.finishDictation(text);
+      const draft = composer.current?.finishDictation(text);
+      if (!draft) throw new Error("The draft is no longer available. Please record again.");
       current.current = null;
       dispose(recording);
       setPhase("idle");
-      setMessage("Transcript added. Review your draft, then press Send.");
+      setMessage(recording.sendRequested ? "Transcript added." : "Transcript added. Review your draft, then press Send.");
+      if (recording.sendRequested) latestOnSend.current(draft);
     } catch (error) {
       fail(recording, error instanceof Error ? error.message : "Transcription failed. Please try again.");
     }
   };
 
-  const stop = (recording: Recording, reason: "manual" | "silence" | "size" = "manual") => {
+  const stop = (recording: Recording, reason: "manual" | "silence" | "size" | "send" = "manual") => {
     if (current.current !== recording || recording.stopping) return;
     recording.stopping = true;
     clearTimeout(recording.timer);
     setPhase("transcribing");
     setAudioLevel(0);
-    setMessage(reason === "silence" ? "Stopped after one minute of silence. Transcribing…" : reason === "size" ? "2 GB limit reached. Transcribing…" : "Transcribing…");
+    setMessage(reason === "silence" ? "Stopped after one minute of silence. Transcribing…" : reason === "size" ? "2 GB limit reached. Transcribing…" : reason === "send" ? "Transcribing before sending…" : "Transcribing…");
     // Wait for MediaRecorder's final dataavailable event and then its stop event.
     recording.timer = setTimeout(() => fail(recording, "The recording could not finish. Please try again."), 5_000);
     try { recording.recorder!.stop(); }
     catch { fail(recording, "The recording could not finish. Please try again."); }
     finally { releaseMicrophone(recording); }
+  };
+
+  const sendRecording = () => {
+    const recording = current.current;
+    if (!recording?.recorder || recording.stopping || recording.recorder.state !== "recording") return false;
+    recording.sendRequested = true;
+    stop(recording, "send");
+    return true;
   };
 
   const toggle = async () => {
@@ -147,7 +161,7 @@ export function useAssistantDictation(apiBase: string, companyID: string, compos
       recorder.start(1_000);
       clearTimeout(recording.timer);
       setPhase("recording");
-      setMessage("Recording · Click to stop. Stops after one minute of silence or at 2 GB. Editing and Send are paused.");
+      setMessage("Recording · Click the microphone to stop, or Send to transcribe and send. Stops after one minute of silence or at 2 GB. Editing is paused.");
       const samples = new Float32Array(analyser.fftSize);
       let lastVoiceAt = performance.now();
       // A timer keeps silence detection working when background tabs pause animation frames.
@@ -170,5 +184,5 @@ export function useAssistantDictation(apiBase: string, companyID: string, compos
     }
   };
 
-  return { phase, message, audioLevel, busy: phase !== "idle", isBusy: () => current.current !== null, toggle, cancel };
+  return { phase, message, audioLevel, busy: phase !== "idle", isBusy: () => current.current !== null, toggle, cancel, sendRecording };
 }

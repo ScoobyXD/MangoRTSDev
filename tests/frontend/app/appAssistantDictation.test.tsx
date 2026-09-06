@@ -117,9 +117,10 @@ async function harness() {
     return track;
   };
   const record = async () => { await click("Start dictation"); return grant(); };
+  const finish = async (data = "audio") => { await act(async () => { recorders.at(-1)!.chunk(data); recorders.at(-1)!.finish(); }); };
   const complete = async (data = "audio") => {
     await click("Stop recording");
-    await act(async () => { recorders.at(-1)!.chunk(data); recorders.at(-1)!.finish(); });
+    await finish(data);
   };
   const respond = async (text: string, status = 200) => { await act(async () => {
     requests.at(-1)!.response.resolve(status === 200
@@ -130,7 +131,7 @@ async function harness() {
   await act(async () => { render(); });
   await click("Expand Mango chat");
   return {
-    dom, container, replace, input, button, click, setText, grant, record, complete, respond, unmount, permissions, recorders, requests, chats, sample, audioContexts, activityTimers,
+    dom, container, replace, input, button, click, setText, grant, record, finish, complete, respond, unmount, permissions, recorders, requests, chats, sample, audioContexts, activityTimers,
     company: async () => { await act(async () => { setActiveCompanyID("company-b"); }); },
     account: async () => { await act(async () => { render("user-b"); }); },
     logout: async () => { await act(async () => { markTerminalAuthFailure("logout"); }); },
@@ -143,7 +144,7 @@ async function harness() {
   };
 }
 
-test("dictation waits for final audio, locks every Send path, preserves selected text and Process, and supports Undo", async () => {
+test("manual dictation waits for final audio, locks editing and pending Send paths, preserves selected text and Process, and supports Undo", async () => {
   const h = await harness();
   try {
     const processID = "11111111-1111-4111-8111-111111111111";
@@ -156,10 +157,10 @@ test("dictation waits for final audio, locks every Send path, preserves selected
     const original = h.input().editor.getJSON();
     const expected = h.input().editor.state.tr.insertText("<b>spoken</b>", 9, 9).doc.toJSON();
     assert.equal(h.button("Start dictation").type, "button");
-    const assertBlocked = async () => {
-      assert.equal(h.button("Send").disabled, true);
+    const assertBlocked = async (canSend = false) => {
+      assert.equal(h.button("Send").disabled, !canSend);
       assert.equal(h.input().editor.isEditable, false);
-      await act(async () => {
+      if (!canSend) await act(async () => {
         Simulate.submit(h.container.querySelector("form")!);
         h.input().dispatchEvent(new h.dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
       });
@@ -169,7 +170,7 @@ test("dictation waits for final audio, locks every Send path, preserves selected
     await h.click("Start dictation");
     await assertBlocked();
     const track = await h.grant();
-    await assertBlocked();
+    await assertBlocked(true);
     await act(async () => { h.recorders[0].chunk("first-"); });
     await h.click("Stop recording");
     assert.equal(track.stopped, true, "Stop releases the microphone before the recorder's final event");
@@ -191,7 +192,7 @@ test("dictation waits for final audio, locks every Send path, preserves selected
     await h.respond("<b>spoken</b>");
     assert.deepEqual(h.input().editor.getJSON(), expected, "selected text and exact Process identity survive plain text insertion");
     assert.equal(h.input().querySelector("b"), null, "transcription is not parsed as HTML");
-    assert.equal(h.chats.length, 0, "dictation never sends a chat message");
+    assert.equal(h.chats.length, 0, "manual microphone stop only inserts the transcript for review");
     assert.equal(h.input().editor.isEditable, true);
     await act(async () => { assert.equal(h.input().editor.commands.undo(), true); });
     assert.deepEqual(h.input().editor.getJSON(), original, "one Undo removes only the transcript");
@@ -200,6 +201,86 @@ test("dictation waits for final audio, locks every Send path, preserves selected
     assert.equal(h.chats.length, 1);
     assert.equal(h.chats[0].process_id, processID);
     assert.match(h.chats[0].messages.at(-1)!.content, /<b>spoken<\/b>/);
+  } finally { await h.dispose(); }
+});
+
+for (const submit of ["Send", "Enter"] as const) {
+  test(`${submit} during recording waits for the complete transcript and sends the latest draft exactly once`, async () => {
+    const h = await harness();
+    try {
+      const processID = "11111111-1111-4111-8111-111111111111";
+      if (submit === "Send") await act(async () => {
+        h.input().editor.commands.setContent({ type: "doc", content: [{ type: "paragraph", content: [
+          { type: "text", text: "Existing " },
+          { type: "mangoEntityLink", attrs: { entityType: "logic_gate", entityId: processID, label: "Review" } },
+          { type: "text", text: " words " },
+        ] }] });
+        h.input().editor.commands.setTextSelection(h.input().editor.state.doc.content.size - 1);
+      });
+      const track = await h.record();
+      assert.equal(h.button("Send").disabled, false, "recording can be sent even when the preexisting draft is empty");
+      if (submit === "Send") await h.click("Send");
+      else await act(async () => { h.input().dispatchEvent(new h.dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); });
+      assert.equal(track.stopped, true);
+      assert.equal(h.recorders[0].stopCalls, 1);
+      assert.equal(h.requests.length, 0, "Send waits for final recorder bytes");
+      assert.equal(h.chats.length, 0, "the old draft must not send before transcription");
+      assert.equal(h.button("Send").disabled, true);
+      await h.finish("first and final audio");
+      await act(async () => {
+        Simulate.submit(h.container.querySelector("form")!);
+        h.input().dispatchEvent(new h.dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        h.recorders[0].finish();
+      });
+      assert.equal(h.requests.length, 1, "duplicate submission and recorder completion cannot restart transcription");
+      assert.equal(h.chats.length, 0);
+      const transcript = "Complete spoken text. ".repeat(500).trim();
+      await h.respond(transcript);
+      assert.equal(h.chats.length, 1);
+      assert.equal(h.chats[0].messages.at(-1)!.content, submit === "Send" ? `Existing #Review words ${transcript}` : transcript);
+      assert.equal(h.chats[0].process_id, submit === "Send" ? processID : undefined);
+      assert.equal(h.recorders[0].stopCalls, 1);
+    } finally { await h.dispose(); }
+  });
+}
+
+for (const failure of ["empty", "provider", "capture", "changed draft"] as const) {
+  test(`Send during recording does not send on ${failure} failure and does not carry its intent into the next recording`, async () => {
+    const h = await harness();
+    try {
+      await h.setText("Keep this draft");
+      const track = await h.record();
+      await h.click("Send");
+      if (failure === "capture") await act(async () => { h.recorders[0].onerror?.(); });
+      else {
+        await h.finish();
+        if (failure === "changed draft") await h.setText("Changed draft");
+        await h.respond(failure === "empty" ? "" : failure === "provider" ? "Speech service unavailable" : "New words", failure === "provider" ? 502 : 200);
+      }
+      assert.equal(track.stopped, true);
+      assert.equal(h.chats.length, 0);
+      assert.equal(h.input().editor.getText(), failure === "changed draft" ? "Changed draft" : "Keep this draft");
+      assert.equal(h.input().editor.isEditable, true);
+      await h.record(); await h.complete(); await h.respond("Later words");
+      assert.equal(h.chats.length, 0, "a later manual stop only inserts its transcript");
+      assert.match(h.input().editor.getText(), /Later words/);
+    } finally { await h.dispose(); }
+  });
+}
+
+test("manual or silence stop that completes first cannot turn a later Send click into an automatic submission", async () => {
+  const h = await harness();
+  try {
+    for (const stopBy of ["manual", "silence"] as const) {
+      await h.setText("Keep this draft");
+      await h.record();
+      if (stopBy === "manual") await h.click("Stop recording");
+      else await h.sample(0, 60_000);
+      await act(async () => { Simulate.submit(h.container.querySelector("form")!); });
+      await h.finish(); await h.respond("Spoken words");
+      assert.equal(h.chats.length, 0);
+      assert.match(h.input().editor.getText(), /Spoken words/);
+    }
   } finally { await h.dispose(); }
 });
 
@@ -316,11 +397,11 @@ test("unsupported recording, a missing device, and capture errors leave the draf
 });
 
 for (const action of ["collapse", "clear", "company", "account", "logout", "unmount"] as const) {
-  test(`${action} cancels transcription and rejects its stale response`, async () => {
+  test(`${action} cancels a pending dictation Send and rejects its stale response`, async () => {
     const h = await harness();
     try {
       await h.setText("Keep this draft");
-      const track = await h.record(); await h.complete();
+      const track = await h.record(); await h.click("Send"); await h.finish();
       if (action === "collapse") await h.click("Collapse Mango chat");
       else if (action === "clear") await h.click("Clear chat");
       else await h[action]();

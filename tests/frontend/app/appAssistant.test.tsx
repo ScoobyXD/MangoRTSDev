@@ -85,8 +85,8 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
     dom.window.localStorage.setItem("mangorts.assistant.reasoningEffort.v1", "ultra");
     await act(async () => { render(); });
     assert.equal(input().getAttribute("aria-disabled"), "false");
-    assert.equal(container.querySelector('input[type="checkbox"]'), null, "normal users have no context-inspection control");
-    assert.equal(Array.from(container.querySelectorAll("button")).some((button) => button.textContent === "Inspect"), false, "normal users have no header Inspect button");
+    assert.equal(container.querySelector('input[type="checkbox"]'), null, "inspection has no opt-in checkbox");
+    assert.equal(Array.from(container.querySelectorAll("button")).some((button) => button.textContent === "Inspect"), false, "missing status capability must not grant inspection before access is confirmed");
     const assistant = container.querySelector<HTMLElement>(".mango-assistant")!;
     assert.equal(assistant.style.left, "", "chat centering must not inherit the app sidebar inset");
     const stylesheet = readFileSync(resolve(process.cwd(), "frontend/src/index.css"), "utf8");
@@ -121,7 +121,7 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
     await send("List my processes", true);
     assert.equal(requests.length, 1);
     assert.equal(requests[0].body.reasoning_effort, "max");
-    assert.equal(requests[0].body.inspect_context, undefined, "normal users must not request privileged traces");
+    assert.equal(requests[0].body.inspect_context, undefined, "unconfirmed inspection access must not request traces");
     assert.equal(reasoningSelect().disabled, true, "the effort for a running Send must stay fixed");
     await act(async () => { assistantButton("Collapse Mango chat").click(); });
     assert.equal(requests[0].signal.aborted, false, "collapsing must not stop the active request");
@@ -280,9 +280,11 @@ test("Process pills persist across follow-ups and inspection retains full server
     if (event.type === "trace") traces[index].push(event.trace!);
     await act(async () => { streams[index].enqueue(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`)); });
   };
-  const inspect = async (turn: Element) => {
+  const inspect = async (turn: Element, view = "All events") => {
     await act(async () => { Array.from(turn.querySelectorAll("button")).find((button) => button.textContent === "Inspect")!.click(); });
-    return dom.window.document.querySelector<HTMLElement>('[role="dialog"][aria-label="AI inspection"]')!;
+    const dialog = dom.window.document.querySelector<HTMLElement>('[role="dialog"][aria-label="AI inspection"]')!;
+    if (dialog) await act(async () => { Array.from(dialog.querySelectorAll("button")).find(button => button.textContent === view)!.click(); });
+    return dialog;
   };
   const choose = async (index = 1) => {
     await act(async () => { input().editor.commands.setTextSelection(input().editor.state.doc.content.size - 1); });
@@ -409,7 +411,7 @@ test("Process pills persist across follow-ups and inspection retains full server
     assert.equal(publicRecoveries.length, 2, "revoked Inspect recovery requests public saved metadata once");
     assert.equal(new URL(publicRecoveries[1]).searchParams.get("request_id"), requests[8].request_id);
     assert.match(Array.from(container.querySelectorAll('[data-assistant-turn-status="stopped"]')).at(-1)!.textContent!, /Open Node/, "losing Inspect does not hide an accessible confirmed saved Node");
-    assert.equal(dom.window.document.querySelector('[aria-label="AI inspection"]'), null, "revocation closes privileged inspection");
+    assert.equal(dom.window.document.querySelector('[aria-label="AI inspection"]'), null, "revocation closes inspection");
     assert.equal(Array.from(container.querySelectorAll("button")).some((button) => button.textContent === "Inspect"), false);
     await choose();
     await act(async () => { Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Clear chat")!.click(); });
@@ -423,7 +425,34 @@ test("Process pills persist across follow-ups and inspection retains full server
     canInspect = true;
     await act(async () => { render("inspection-race-user"); });
     await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Expand Mango chat"]')!.click(); });
-    await append("Inspect this completed turn"); await key("Enter"); await emit(9, { type: "done" });
+    await append("Inspect this completed turn"); await key("Enter");
+    assert.equal(requests[9].process_id, undefined, "ordinary conversations do not need a bound Process for inspection");
+    await emit(9, { type: "trace", trace: { sequence: 1, kind: "context", status: "completed", time: "2026-09-06T00:00:00Z", data: {
+      identity: { user_id: "inspection-race-user" }, sources: [{ kind: "database", label: "Signed-in user", table: "public.users", columns: ["user_id", "email"], key: { user_id: "inspection-race-user" } }],
+    } } });
+    await emit(9, { type: "trace", trace: { sequence: 2, kind: "runtime", status: "completed", time: "2026-09-06T00:00:01Z", data: {
+      effective_system_prompt: "Full captured instructions", sources: [{ kind: "file", label: "App instructions", path: "ai/AGENTS.md", runtime_path: "/app/ai/AGENTS.md", sha256: "captured-file-hash" }],
+    } } });
+    await emit(9, { type: "trace", trace: { sequence: 3, kind: "provider_request", status: "prepared", time: "2026-09-06T00:00:02Z", data: {
+      invocation: 1, body: { instructions: "Full captured instructions", input: [{ role: "user", content: "Inspect this completed turn" }], tools: [{ name: "get_me" }] },
+    } } });
+    modal = await inspect(header(), "Inputs & sources");
+    for (const content of ["public.users", "inspection-race-user", "ai/AGENTS.md", "/app/ai/AGENTS.md", "captured-file-hash", "public.ai_runs.inspection_json"]) assert.ok(modal.textContent!.includes(content), content);
+    await act(async () => { Array.from(modal.querySelectorAll("button")).find(button => button.textContent === "Model requests")!.click(); });
+    assert.match(modal.textContent!, /Prepared; dispatch not confirmed/);
+    assert.match(modal.textContent!, /Full captured instructions/);
+    assert.match(modal.textContent!, /get_me/);
+    const allEventsButton = Array.from(modal.querySelectorAll("button")).find(button => button.textContent === "All events")!;
+    const archiveSummary = modal.querySelector<HTMLElement>(".mango-assistant-archive-location summary")!;
+    await act(async () => { allEventsButton.focus(); allEventsButton.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true })); });
+    assert.equal(dom.window.document.activeElement, archiveSummary, "the modal's focus trap must include collapsed source and payload summaries");
+    await act(async () => { archiveSummary.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true })); });
+    assert.equal(dom.window.document.activeElement?.textContent, "Complete captured request body", "keyboard users can reach the request payload");
+    await emit(9, { type: "trace", trace: { sequence: 4, kind: "provider_request", status: "dispatched", time: "2026-09-06T00:00:03Z", data: { invocation: 1 } } });
+    assert.doesNotMatch(modal.textContent!, /Prepared; dispatch not confirmed/);
+    assert.match(modal.textContent!, /Dispatched/);
+    await act(async () => { modal.querySelector<HTMLButtonElement>("button")!.click(); });
+    await emit(9, { type: "done" });
     deferStatus = true;
     await inspect(container.querySelector('[data-assistant-turn-status="complete"]')!);
     assert.ok(pendingStatus, "inspection access remains pending");

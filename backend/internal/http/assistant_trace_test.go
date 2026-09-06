@@ -36,8 +36,8 @@ func assistantTraceRequest(user domain.User, companyID, id string) *http.Request
 	return requestWithActorForTest(httptest.NewRequest(http.MethodGet, "/v1/assistant/trace?company_id="+companyID+"&request_id="+id, nil), user, companyID)
 }
 
-func TestAssistantTraceRecoveryRequiresFreshRoleExactActorAndCompany(t *testing.T) {
-	for _, scenario := range []string{"finished", "demoted", "other actor", "other company", "not inspected", "expired", "unknown request", "invalid request"} {
+func TestAssistantTraceRecoveryRequiresCurrentCompanyAccessExactActorAndCompany(t *testing.T) {
+	for _, scenario := range []string{"finished", "demoted", "membership revoked", "other actor", "other company", "not inspected", "expired", "unknown request", "invalid request"} {
 		t.Run(scenario, func(t *testing.T) {
 			server, repo, user, id, capture := assistantTraceFixture(t)
 			capture.events = []assistantTrace{{Sequence: 1, Kind: "tool", Status: "saved", Time: time.Now().UTC().Format(time.RFC3339Nano), Data: json.RawMessage(`{"saved":"canonical result"}`)}}
@@ -59,6 +59,11 @@ func TestAssistantTraceRecoveryRequiresFreshRoleExactActorAndCompany(t *testing.
 				if _, err := repo.AddCompanyMembership(user.CognitoSubject, companyID, domain.RoleCompanyAdmin); err != nil {
 					t.Fatal(err)
 				}
+				want = http.StatusOK
+			case "membership revoked":
+				wrapper := &assistantInspectionMembershipRepo{Repository: repo}
+				wrapper.revoked.Store(true)
+				server.repo = wrapper
 				want = http.StatusForbidden
 			case "other actor":
 				other := mustRealtimeAuthUser(t, repo, companyID, "different-trace-developer", domain.RoleDevAdmin)
@@ -110,25 +115,23 @@ func TestAssistantTraceRecoveryRequiresFreshRoleExactActorAndCompany(t *testing.
 	}
 }
 
-type assistantTraceDemotionRepo struct {
+type assistantTraceRevocationRepo struct {
 	store.Repository
-	memory *store.MemoryRepo
-	calls  atomic.Int32
+	calls atomic.Int32
 }
 
-func (repo *assistantTraceDemotionRepo) ListUserMembershipsContext(ctx context.Context, id string) ([]domain.CompanyMembership, error) {
-	items, err := repo.Repository.ListUserMembershipsContext(ctx, id)
-	if repo.calls.Add(1) == 1 && err == nil {
-		_, err = repo.memory.AddCompanyMembership("assistant-user", assistantTestCompany, domain.RoleCompanyAdmin)
+func (repo *assistantTraceRevocationRepo) ListUserMembershipsContext(ctx context.Context, id string) ([]domain.CompanyMembership, error) {
+	if repo.calls.Add(1) > 1 {
+		return nil, nil
 	}
-	return items, err
+	return repo.Repository.ListUserMembershipsContext(ctx, id)
 }
 
-func TestAssistantTraceRecoveryRechecksRoleAfterWaiting(t *testing.T) {
+func TestAssistantTraceRecoveryRechecksCompanyAccessAfterWaiting(t *testing.T) {
 	server, repo, user, id, capture := assistantTraceFixture(t)
 	capture.finished = true
 	close(capture.done)
-	wrapper := &assistantTraceDemotionRepo{Repository: repo, memory: repo}
+	wrapper := &assistantTraceRevocationRepo{Repository: repo}
 	server.repo = wrapper
 	response := httptest.NewRecorder()
 	server.handleAssistantTrace(response, assistantTraceRequest(user, assistantTestCompany, id))

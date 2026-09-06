@@ -137,8 +137,8 @@ func TestAssistantOrdinaryChatInjectsCurrentUserWithoutInspection(t *testing.T) 
 	}
 }
 
-func TestAssistantContextInspectionRequiresFreshDeveloperRole(t *testing.T) {
-	for _, role := range []string{domain.RoleCompanyUser, domain.RoleCompanyAdmin, domain.RoleDevAdmin} {
+func TestAssistantContextInspectionAllowsEveryCurrentCompanyRole(t *testing.T) {
+	for _, role := range []string{domain.RoleCompanyUser, domain.RoleCompanyManager, domain.RoleCompanyAdmin, domain.RoleDevAdmin} {
 		t.Run(role, func(t *testing.T) {
 			var providerCalls atomic.Int32
 			server, repo := assistantTestServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -152,29 +152,35 @@ func TestAssistantContextInspectionRequiresFreshDeveloperRole(t *testing.T) {
 			if _, err := repo.AddCompanyMembership(user.CognitoSubject, assistantTestCompany, domain.RoleDevAdmin); err != nil {
 				t.Fatal(err)
 			}
-			// Keep stale developer privileges in the request after a possible demotion.
+			// A valid role change must not revoke inspection of this user's own request.
 			stale := ActorContext{User: user, CompanyID: assistantTestCompany, CompanyRole: domain.RoleDevAdmin, IsDevAdmin: true,
 				Memberships: []domain.CompanyMembership{{CompanyID: assistantTestCompany, UserID: user.UserID, Role: domain.RoleDevAdmin}}}
 			if _, err := repo.AddCompanyMembership(user.CognitoSubject, assistantTestCompany, role); err != nil {
 				t.Fatal(err)
 			}
-			request := assistantContextChatRequest(assistantRequest{InspectContext: true, Messages: []assistantMessage{{Role: "user", Content: "Show my context."}}})
+			id := store.NewUUIDv7String()
+			request := assistantContextChatRequest(assistantRequest{RequestID: id, InspectContext: true, Messages: []assistantMessage{{Role: "user", Content: "Show my context."}}})
 			request = request.WithContext(context.WithValue(request.Context(), actorContextKey{}, stale))
 			status := httptest.NewRecorder()
 			statusRequest := httptest.NewRequest(http.MethodGet, "/v1/assistant/status", nil).WithContext(request.Context())
 			server.handleAssistantStatus(status, statusRequest)
 			var availability map[string]bool
-			if status.Code != http.StatusOK || json.Unmarshal(status.Body.Bytes(), &availability) != nil || availability["can_inspect_context"] != (role == domain.RoleDevAdmin) {
-				t.Fatalf("stale status privileges: %d %s", status.Code, status.Body.String())
+			if status.Code != http.StatusOK || json.Unmarshal(status.Body.Bytes(), &availability) != nil || !availability["can_inspect_context"] {
+				t.Fatalf("current member cannot inspect: %d %s", status.Code, status.Body.String())
 			}
 			response := httptest.NewRecorder()
 			server.handleAssistantChat(response, request)
-			if role == domain.RoleDevAdmin {
-				if response.Code != http.StatusOK || providerCalls.Load() != 1 || len(assistantContextEvents(t, response.Body.String())) != 1 {
-					t.Fatalf("current developer inspection failed: %d %s", response.Code, response.Body.String())
-				}
-			} else if response.Code != http.StatusForbidden || providerCalls.Load() != 0 || len(assistantContextEvents(t, response.Body.String())) != 0 {
-				t.Fatalf("stale developer inspection allowed: calls=%d status=%d %s", providerCalls.Load(), response.Code, response.Body.String())
+			if response.Code != http.StatusOK || providerCalls.Load() != 1 || len(assistantContextEvents(t, response.Body.String())) != 1 || !strings.Contains(response.Body.String(), `"type":"done"`) {
+				t.Fatalf("current member inspection failed: %d %s", response.Code, response.Body.String())
+			}
+			recovery := httptest.NewRecorder()
+			server.handleAssistantTrace(recovery, assistantTraceRequest(user, assistantTestCompany, id))
+			var snapshot struct {
+				Events   []assistantTrace `json:"events"`
+				Finished bool             `json:"finished"`
+			}
+			if recovery.Code != http.StatusOK || json.Unmarshal(recovery.Body.Bytes(), &snapshot) != nil || !snapshot.Finished || len(snapshot.Events) == 0 {
+				t.Fatalf("current member cannot recover own inspection: %d %s", recovery.Code, recovery.Body.String())
 			}
 		})
 	}
@@ -242,20 +248,49 @@ func TestAssistantContextInspectionMatchesProviderInputWithoutEncryptedReasoning
 	}
 }
 
-func TestAssistantContextInspectionStopsAfterDeveloperRoleIsRevoked(t *testing.T) {
+type assistantInspectionMembershipRepo struct {
+	store.Repository
+	revoked atomic.Bool
+}
+
+func (repo *assistantInspectionMembershipRepo) ListUserMembershipsContext(ctx context.Context, id string) ([]domain.CompanyMembership, error) {
+	if repo.revoked.Load() {
+		return nil, nil
+	}
+	return repo.Repository.ListUserMembershipsContext(ctx, id)
+}
+
+func TestAssistantContextInspectionRejectsRevokedMembershipBeforeAdmission(t *testing.T) {
 	var calls atomic.Int32
-	var repo *store.MemoryRepo
 	server, memory := assistantTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		if _, err := repo.AddCompanyMembership("assistant-user", assistantTestCompany, domain.RoleCompanyAdmin); err != nil {
-			t.Error(err)
-			http.Error(w, "demotion failed", 500)
-			return
-		}
+		assistantProviderComplete(w)
+	})
+	user := mustRealtimeAuthUser(t, memory, assistantTestCompany, "assistant-user", domain.RoleDevAdmin)
+	request := requestWithActorForTest(assistantContextChatRequest(assistantRequest{InspectContext: true, Messages: []assistantMessage{{Role: "user", Content: "Show my context."}}}), user, assistantTestCompany)
+	repo := &assistantInspectionMembershipRepo{Repository: memory}
+	repo.revoked.Store(true)
+	server.repo = repo
+	status := httptest.NewRecorder()
+	server.handleAssistantStatus(status, httptest.NewRequest(http.MethodGet, "/v1/assistant/status", nil).WithContext(request.Context()))
+	response := httptest.NewRecorder()
+	server.handleAssistantChat(response, request)
+	if status.Code != http.StatusForbidden || response.Code != http.StatusForbidden || calls.Load() != 0 || len(assistantTraceEvents(t, response.Body.String())) != 0 {
+		t.Fatalf("revoked membership was admitted: status=%d chat=%d calls=%d", status.Code, response.Code, calls.Load())
+	}
+}
+
+func TestAssistantContextInspectionStopsAfterCompanyMembershipIsRevoked(t *testing.T) {
+	var calls atomic.Int32
+	var repo *assistantInspectionMembershipRepo
+	server, memory := assistantTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		repo.revoked.Store(true)
 		assistantProviderComplete(w, assistantProviderCall("revoked_get_me", "get_me", `{}`))
 	})
-	repo = memory
-	if _, err := repo.AddCompanyMembership("assistant-user", assistantTestCompany, domain.RoleDevAdmin); err != nil {
+	repo = &assistantInspectionMembershipRepo{Repository: memory}
+	server.repo = repo
+	if _, err := memory.AddCompanyMembership("assistant-user", assistantTestCompany, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
 	response := httptest.NewRecorder()

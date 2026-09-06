@@ -50,7 +50,7 @@ The developer-authorized Inspect view records the current interaction's actual f
 
 ## Optional English dictation
 
-The composer microphone records on the first click and transcribes after the next click. Nova-3 English fills the editable draft; the user still presses Send. It needs browser microphone permission and a secure page (HTTPS or localhost). Dictation uses the existing Go API directly and needs no end-user installation or additional runtime service.
+The composer microphone records on the first click and transcribes for review after the next click. Send remains available during recording: clicking it or pressing Enter stops capture, waits for Nova-3 English to insert the full transcript, and sends the complete draft once. It needs browser microphone permission and a secure page (HTTPS or localhost). Dictation uses the existing Go API directly and needs no end-user installation or additional runtime service.
 
 Supply one separate server-side Deepgram key source:
 

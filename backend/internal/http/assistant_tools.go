@@ -354,6 +354,7 @@ func (s *Server) dispatchAssistantOperation(r *http.Request, name string, args m
 		return "", errors.New("Mango request stopped before the action began.")
 	}
 	handler(result, call)
+	recordAssistantOperationSource(r, name, method, call.RequestURI, args, result.body.Bytes())
 	if result.status < 200 || result.status >= 300 {
 		// Even a failed response may follow a committed write. Stop the whole
 		// request instead of giving the model a reason to redispatch it.

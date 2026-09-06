@@ -11,21 +11,25 @@
 9. Transcription must use Deepgram recorded-audio Nova-3 with English and smart formatting, without paid add-ons or automatic retries.
 10. Transcription must require the authenticated user's current access to the selected company.
 11. The complete transcript must enter the saved draft position as plain text through one undoable insertion, preserving surrounding text and the selected Process.
-12. Dictation must never press Send or execute a Mango action.
-13. Pending microphone permission, recording, and transcription must freeze editing and every Send path.
+12. Stopping with the microphone button, silence timer, or size boundary must only insert the transcript for review.
+13. Pending microphone permission, recording, and transcription must freeze editing.
 14. Cancellation, closing, collapsing, clearing, unmounting, and account or company changes must release recording resources and prevent stale results from changing a draft.
 15. Permission, device, upload, provider, empty-speech, and size failures must preserve the existing draft and display an understandable message.
 16. Mango must stream audio to Deepgram without retaining the whole recording in backend memory or writing it to files, attachments, databases, S3, or application logs.
 17. Deepgram credentials must remain on the server and must never enter browser code or responses.
 18. Mango must not truncate or reject user chat text because of a character or input-byte limit.
+19. Send must remain available during active recording, including an empty draft, whenever the normal chat availability and request guards allow sending.
+20. Send or Enter during active recording must stop capture, wait for successful final transcription, and submit the complete draft and selected Process exactly once.
+21. Pending permission, recorder finalization, and transcription must reject additional submission attempts.
+22. Failure or cancellation must discard the queued Send intent without sending the old draft or carrying that intent into a later recording.
 
 ## Process story
 
-The user records into the existing browser MediaRecorder and clicks Stop, reaches the byte boundary, or remains silent for one minute. One Web Audio analyser reads the same microphone stream every 100 ms; an RMS sound level of at least 0.012 counts as activity and controls the waves. Browser echo cancellation and noise suppression are requested. This measures microphone sound, rather than recognizing words, so sufficiently loud background sound can reset the countdown. The timer samples current audio before checking elapsed silence, including when a background tab resumes. Stop clears sampling, disconnects audio nodes, closes the AudioContext, and releases microphone tracks. Once final recorder data arrives, the browser uploads the original audio Blob to the authenticated transcription endpoint. Mango forwards the bytes directly to Deepgram and returns progress lines every 15 seconds until a complete transcript or a safe error arrives. The user reviews the full inserted transcript before sending it.
+The user records into the existing browser MediaRecorder and stops with the microphone button, Send, the byte boundary, or one minute of silence. One Web Audio analyser reads the same microphone stream every 100 ms; an RMS sound level of at least 0.012 counts as activity and controls the waves. Browser echo cancellation and noise suppression are requested. This measures microphone sound, rather than recognizing words, so sufficiently loud background sound can reset the countdown. The timer samples current audio before checking elapsed silence, including when a background tab resumes. Stop clears sampling, disconnects audio nodes, closes the AudioContext, and releases microphone tracks. Once final recorder data arrives, the browser uploads the original audio Blob to the authenticated transcription endpoint. Mango forwards the bytes directly to Deepgram and returns progress lines every 15 seconds until a complete transcript or a safe error arrives. The composer inserts the transcript into the saved draft and returns its complete text and Process. If Send or Enter stopped the recording, that fresh draft is submitted once; other stop methods leave it for review. Failures and cancellation never submit a draft.
 
 ## Main scenarios
 
-1. **Ongoing speech:** Continue speaking beyond two minutes. Recording and activity waves continue; each detected sound restarts the one-minute silence countdown. Clicking Stop transcribes the complete recording.
+1. **Ongoing speech and Send:** Continue speaking beyond two minutes. Recording and activity waves continue; each detected sound restarts the one-minute silence countdown. Clicking the microphone transcribes for review. Clicking Send or pressing Enter stops recording, waits for every audio chunk and the complete transcript, and sends that transcript together with the existing draft once.
 2. **Silence:** After 59 seconds of silence, new activity restarts the countdown. After 60 seconds without activity, recording stops and transcribes automatically. An entirely silent recording produces the normal no-speech message and keeps the draft.
 3. **Large recording and cancellation:** Audio up to exactly 2,000,000,000 bytes is accepted. A recorder's final chunk that exceeds that boundary is rejected without corrupting or truncating it. Canceling any pending upload or transcription preserves the draft and discards late results.
 
