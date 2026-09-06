@@ -767,7 +767,6 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			InformationID:    req.InformationID,
 			ActorUserID:      actorUserID,
 			ActorDisplayName: actorLabel,
-			ExpectedNodeWork: assistantExpectedNodeWork(r),
 		}
 		item, err := s.repo.AddNodeInformationWithActor(writeInput)
 		if errors.Is(err, store.ErrVersionConflict) {

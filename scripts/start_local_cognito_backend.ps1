@@ -358,13 +358,6 @@ $localEmailFromCandidate = First-NonBlank @(
 )
 $backendContainer = Get-LatestBackendContainerDefinition -ProjectName $projectName -EnvironmentName $environmentName
 
-$assistantModel = Get-OptionalTfvarString -Name "assistant_model" -Path $tfvarsPath
-$openAIApiKeySecretArn = Get-OptionalTfvarString -Name "openai_api_key_secret_arn" -Path $tfvarsPath
-$openAIApiKey = First-NonBlank @($env:OPENAI_API_KEY)
-$assistantConfigured = -not [string]::IsNullOrWhiteSpace($assistantModel) `
-  -and (-not [string]::IsNullOrWhiteSpace($openAIApiKey) `
-    -or -not [string]::IsNullOrWhiteSpace($openAIApiKeySecretArn))
-
 $appURL = First-NonBlank @(
   $AppURL,
   $env:MANGORTS_APP_URL,
@@ -531,11 +524,6 @@ if ([string]::IsNullOrWhiteSpace($emailFromAddress)) {
 } else {
   Write-Host "SES invite email: enabled from $emailFromAddress"
 }
-if ($assistantConfigured) {
-  Write-Host "Mango chat: configured from ignored dev tfvars and the server-side key source."
-} else {
-  Write-Host "Mango chat: not configured. Set assistant_model and openai_api_key_secret_arn in infra/aws-dev/terraform.tfvars."
-}
 if ($nylasConfigured) {
   Write-Host "Nylas: configured from local env, tfvars, or deployed ECS secret references."
   Write-Host "Nylas redirect URI: $NylasRedirectURI"
@@ -557,14 +545,6 @@ Write-Host "Email SQS: using the deployed DEV work queue."
 
 Push-Location (Join-Path $repoRoot "backend")
 try {
-  Remove-Item Env:\MANGORTS_ASSISTANT_MODEL -ErrorAction SilentlyContinue
-  Remove-Item Env:\OPENAI_API_KEY_SECRET_ARN -ErrorAction SilentlyContinue
-  if ($assistantConfigured) {
-    $env:MANGORTS_ASSISTANT_MODEL = $assistantModel
-    if (-not [string]::IsNullOrWhiteSpace($openAIApiKeySecretArn)) {
-      $env:OPENAI_API_KEY_SECRET_ARN = $openAIApiKeySecretArn
-    }
-  }
   go run ./cmd/miraeopus-api
 } finally {
   Pop-Location

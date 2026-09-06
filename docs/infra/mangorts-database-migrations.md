@@ -30,13 +30,9 @@ Default mode is `migrate`. This is intentionally conservative for existing produ
 
 ## Source Of Truth Standard
 
-### 20260905 AI run inspections
+### Removed AI inspection storage
 
-`backend/db/migrations/20260905_ai_runs.sql` is the single creation migration for `public.ai_runs`. This one-time consolidation replaces the earlier create and rename migrations. For an existing database with either earlier AI archive table, pause AI Sends while a human executes the entire `scripts/reset_ai_run_inspections.sql` file and then the entire creation migration. The reset deletes all AI inspection archives and clears only `20260905_ai_runs.sql` and `20260905_z_lowercase_ai_runs.sql` from the existing migration ledger; it does not reset business data or other migration history. The drops do not use `CASCADE`, so an unexpected dependency stops the reset.
-
-A database without the archive needs only the creation migration; a fresh bootstrap from `backend/db/schema.sql` already includes it. The creation migration records its own filename when `schema_migrations` exists, so the normal migration runner skips a creation already completed in DBeaver. Both SQL files are suitable for DBeaver, report the connected server version, and stop on unsupported versions; PostgreSQL 17.7 is supported. No agent task applies them to a live database.
-
-The table defines exactly six lowercase columns in this order: `company_id`, `user_id`, `ai_runs_id`, `inspection_json`, `start_time`, and `finish_time`. `start_time` is the actual Send admission time and `finish_time` is its actual completion time; neither is the database insert time. One complete ordered event array is inserted when a foreground Send ends, preserving every event's captured timestamp. The existing request UUID is unique within its authenticated company/user scope; another save cannot overwrite that row. Foreign keys retain the exact company and user accepted by existing Send authorization, including global administrators; membership changes preserve historical archives and do not block final capture for an already admitted Send. Company or user deletion cascades dependent archives. Embedded business data remains a historical inspection snapshot, grants no access, and is never business truth. There is no retention scheduler. A crash before the final insert can lose the inspection; archive failure does not undo or repeat completed business actions and does not prevent API startup.
+The legacy assistant no longer reads or writes `public.ai_runs`. Its table definition, creation migration, and reset script have been removed from the repository. New databases do not create the archive. This source cleanup performs no live database change and supplies no destructive cleanup migration. An existing archive table and its migration ledger remain as deployed; removing those live objects requires a separately approved human database operation. No database migration is required to run the app with the assistant removed.
 
 ### 20260718 Tiptap JSON foundation
 

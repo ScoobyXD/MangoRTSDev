@@ -318,8 +318,7 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 			Document: ref, OperationID: request.OperationID, ClientID: request.ClientID,
 			ActorUserID: actor.User.UserID, BaseRevision: request.BaseRevision,
 			SchemaVersion: request.SchemaVersion, JSONDocument: request.Document,
-			Annotations:      request.Annotations,
-			ExpectedNodeWork: assistantExpectedNodeWork(r),
+			Annotations: request.Annotations,
 		})
 		if err != nil {
 			writeEditorJSONStoreError(w, err)

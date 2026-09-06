@@ -493,14 +493,6 @@ func commitPostgresEditorTextboxDocumentTx(r *PostgresRepo, ctx context.Context,
 	if err := lockPostgresProcessEditorOwnerTx(ctx, tx, input.Document); err != nil {
 		return EditorJSONCommit{}, err
 	}
-	if input.ExpectedNodeWork != nil {
-		if input.Document.ResourceType != EntityTypeNode {
-			return EditorJSONCommit{}, ErrVersionConflict
-		}
-		if err := requireNodeWorkPreconditionTx(ctx, tx, input.Document.CompanyID, input.Document.ResourceID, input.ExpectedNodeWork); err != nil {
-			return EditorJSONCommit{}, err
-		}
-	}
 	if err := requirePostgresEditorJSONFormatTx(ctx, tx, input.Document.CompanyID); err != nil {
 		return EditorJSONCommit{}, err
 	}

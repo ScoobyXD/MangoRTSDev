@@ -198,14 +198,6 @@ func (r *MemoryRepo) CommitEditorJSONDocument(input EditorJSONCommitInput) (Edit
 }
 
 func (r *MemoryRepo) commitEditorJSONDocumentLocked(input EditorJSONCommitInput) (EditorJSONCommit, error) {
-	if input.ExpectedNodeWork != nil {
-		if input.Document.ResourceType != EntityTypeNode {
-			return EditorJSONCommit{}, ErrVersionConflict
-		}
-		if err := r.requireNodeWorkPreconditionLocked(input.Document.CompanyID, input.Document.ResourceID, input.ExpectedNodeWork); err != nil {
-			return EditorJSONCommit{}, err
-		}
-	}
 	if !r.editorJSONFormatReadyLocked(input.Document.CompanyID) {
 		return EditorJSONCommit{}, ErrVersionConflict
 	}

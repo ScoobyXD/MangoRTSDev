@@ -3,8 +3,7 @@ $ErrorActionPreference = "Stop"
 # Run in a separate PowerShell process. Discard inherited service configuration
 # without reading its values; every credential used below is a synthetic fixture.
 $databaseVariables = @("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD", "DB_SSLMODE", "PGPASSWORD", "PGSSLMODE")
-$assistantVariables = @("OPENAI_API_KEY", "OPENAI_API_KEY_SECRET_ARN", "MANGORTS_ASSISTANT_MODEL")
-$discardVariables = $databaseVariables + $assistantVariables + @(
+$discardVariables = $databaseVariables + @(
   "DATABASE_URL", "PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGSERVICE", "PGSERVICEFILE", "PGPASSFILE",
   "AWS_PROFILE", "AWS_DEFAULT_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
   "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN", "AWS_SHARED_CREDENTIALS_FILE", "AWS_CONFIG_FILE", "AWS_WEB_IDENTITY_TOKEN_FILE",
@@ -23,7 +22,6 @@ $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ("mangorts-reset-launcher-" 
 $fixtureLauncher = Join-Path $fixtureRoot "scripts/start_local_cognito_backend.ps1"
 $fixtureTfvars = Join-Path $fixtureRoot "infra/aws-dev/terraform.tfvars"
 $fixtureSecretARN = "arn:aws:secretsmanager:us-west-1:000000000000:secret:fixture-reset-db"
-$fixtureAssistantSecretARN = "arn:aws:secretsmanager:us-west-1:000000000000:secret:fixture-openai-key"
 $expectedDatabase = @{
   DB_HOST = "fixture-db.invalid"; DB_PORT = "5432"; DB_NAME = "fixture_database"; DB_USER = "fixture_user"
   DB_PASSWORD = "fixture-password"; DB_SSLMODE = "require"; PGPASSWORD = "fixture-password"; PGSSLMODE = "require"
@@ -80,11 +78,6 @@ function aws {
         if ($global:LauncherFailure -eq "secret") { $global:LASTEXITCODE = 1; return }
         return '{"password":"fixture-password"}'
       }
-      if ($secretID -eq $fixtureAssistantSecretARN) {
-        Assert-Arguments $arguments @("secretsmanager", "get-secret-value", "--profile", "mangorts-dev", "--region", "us-west-1", "--secret-id", $fixtureAssistantSecretARN, "--query", "SecretString", "--output", "text") "only the fixture assistant secret may be requested for Mango chat"
-        if ($global:LauncherFailure -eq "assistant-secret") { $global:LASTEXITCODE = 1; return }
-        return 'fixture-openai-key'
-      }
       throw "Unexpected fixture secret: $secretID"
     }
     "configure export-credentials" {
@@ -120,9 +113,6 @@ function go {
     Assert-Equal $env:ALLOW_INMEMORY_FALLBACK "false" "normal database requirement"
     Assert-Equal $env:MANGORTS_APP_URL "http://fixture-local.invalid" "normal launch must load its local configuration"
     Assert-Equal $env:MANGORTS_EMAIL_WORK_QUEUE_URL "https://fixture-queue.invalid" "normal deployed queue configuration"
-    Assert-EnvironmentValue -Name "MANGORTS_ASSISTANT_MODEL" -Expected $global:ExpectedRunningAssistantModel -Because "normal assistant model configuration"
-    Assert-EnvironmentValue -Name "OPENAI_API_KEY" -Expected $global:ExpectedRunningAssistantKey -Because "normal assistant key configuration"
-    Assert-EnvironmentValue -Name "OPENAI_API_KEY_SECRET_ARN" -Expected $global:ExpectedRunningAssistantSecretArn -Because "normal assistant secret reference"
   }
   $global:LASTEXITCODE = if ($global:LauncherFailure -eq "go") { 1 } else { 0 }
 }
@@ -137,11 +127,6 @@ function Invoke-LauncherCase {
     [hashtable]$Parameters = @{ ResetProcessMap = $true },
     [string]$Failure = "",
     [string]$EnvironmentName = "dev",
-    [string]$InheritedAssistantKey = "",
-    [string]$InheritedAssistantModel = "",
-    [string]$InheritedAssistantSecretArn = "",
-    [string]$TfvarsAssistantModel = "gpt-fixture",
-    [string]$TfvarsAssistantSecretArn = $fixtureAssistantSecretARN,
     [string]$ExpectedError = "",
     [string[]]$ExpectedCalls
   )
@@ -149,16 +134,10 @@ function Invoke-LauncherCase {
   $global:LauncherFailure = $Failure
   $global:LauncherReset = [bool]$Parameters.ResetProcessMap
   $global:LauncherLocalConfigLoaded = $false
-  $global:ExpectedRunningAssistantKey = if ($InheritedAssistantKey) { $InheritedAssistantKey } else { $null }
-  $global:ExpectedRunningAssistantModel = $TfvarsAssistantModel
-  $global:ExpectedRunningAssistantSecretArn = $TfvarsAssistantSecretArn
   $global:LASTEXITCODE = 0
   foreach ($environmentVariable in $databaseVariables) {
     [Environment]::SetEnvironmentVariable($environmentVariable, $previousDatabase[$environmentVariable], "Process")
   }
-  [Environment]::SetEnvironmentVariable("OPENAI_API_KEY", $(if ($InheritedAssistantKey) { $InheritedAssistantKey } else { $null }), "Process")
-  [Environment]::SetEnvironmentVariable("OPENAI_API_KEY_SECRET_ARN", $(if ($InheritedAssistantSecretArn) { $InheritedAssistantSecretArn } else { $null }), "Process")
-  [Environment]::SetEnvironmentVariable("MANGORTS_ASSISTANT_MODEL", $(if ($InheritedAssistantModel) { $InheritedAssistantModel } else { $null }), "Process")
   # These inherited defaults must not select the reset target or cause export.
   $env:AWS_PROFILE = "fixture-other-profile"
   $env:AWS_ACCESS_KEY_ID = "fixture-previous-access"
@@ -171,14 +150,10 @@ existing_db_host = "fixture-db.invalid"
 existing_db_name = "fixture_database"
 existing_db_user = "fixture_user"
 existing_db_password_secret_arn = "$fixtureSecretARN"
-assistant_model = "$TfvarsAssistantModel"
-openai_api_key_secret_arn = "$TfvarsAssistantSecretArn"
 "@ | Set-Content -LiteralPath $fixtureTfvars
   $previousLocation = (Get-Location).Path
   $failureMessage = ""
-  $launcherOutput = ""
-  try { $launcherOutput = (& $fixtureLauncher @Parameters *>&1 | Out-String) } catch { $failureMessage = $_.Exception.Message + " at " + $_.InvocationInfo.PositionMessage }
-  if ($global:ExpectedRunningAssistantKey -and $launcherOutput -like "*$($global:ExpectedRunningAssistantKey)*") { throw "${Name}: launcher output exposed the assistant key" }
+  try { & $fixtureLauncher @Parameters *>&1 | Out-Null } catch { $failureMessage = $_.Exception.Message + " at " + $_.InvocationInfo.PositionMessage }
   if ($ExpectedError) {
     if ($failureMessage -notlike "*$ExpectedError*") { throw "${Name}: expected error '$ExpectedError', got '$failureMessage'" }
   } elseif ($failureMessage) {
@@ -190,21 +165,12 @@ openai_api_key_secret_arn = "$TfvarsAssistantSecretArn"
   })
   Assert-Arguments $actualCalls $ExpectedCalls "$Name command sequence"
   Assert-Equal $global:LauncherLocalConfigLoaded (-not $global:LauncherReset) "$Name local configuration isolation"
-  $expectedAssistantKey = if ($InheritedAssistantKey) { $InheritedAssistantKey } else { $null }
-  Assert-EnvironmentValue -Name "OPENAI_API_KEY" -Expected $expectedAssistantKey -Because "$Name must preserve the caller's assistant key"
   if ($global:LauncherReset) {
-    $expectedAssistantModel = if ($InheritedAssistantModel) { $InheritedAssistantModel } else { $null }
-    $expectedAssistantSecretArn = if ($InheritedAssistantSecretArn) { $InheritedAssistantSecretArn } else { $null }
-    Assert-EnvironmentValue -Name "OPENAI_API_KEY_SECRET_ARN" -Expected $expectedAssistantSecretArn -Because "$Name must preserve the caller's assistant secret reference"
-    Assert-EnvironmentValue -Name "MANGORTS_ASSISTANT_MODEL" -Expected $expectedAssistantModel -Because "$Name must preserve the caller's assistant model"
     Assert-DatabaseEnvironment $previousDatabase
     Assert-Equal $env:AWS_PROFILE "fixture-other-profile" "$Name must preserve the shell profile"
     Assert-Equal $env:AWS_ACCESS_KEY_ID "fixture-previous-access" "$Name must preserve AWS access key"
     Assert-Equal $env:AWS_SECRET_ACCESS_KEY "fixture-previous-secret" "$Name must preserve AWS secret"
     Assert-Equal $env:AWS_SESSION_TOKEN "fixture-previous-session" "$Name must preserve AWS session"
-  } else {
-    Assert-EnvironmentValue -Name "OPENAI_API_KEY_SECRET_ARN" -Expected $global:ExpectedRunningAssistantSecretArn -Because "$Name must retain the non-secret assistant secret reference for a later Go run"
-    Assert-EnvironmentValue -Name "MANGORTS_ASSISTANT_MODEL" -Expected $global:ExpectedRunningAssistantModel -Because "$Name must retain the assistant model for a later Go run"
   }
   Write-Host "PASS $Name"
 }
@@ -227,9 +193,6 @@ $MangoLocalAppURL = "http://fixture-local.invalid"
   Invoke-LauncherCase -Name "reject non-dev configuration" -EnvironmentName "prod" -ExpectedError "requires the dev database configuration" -ExpectedCalls @()
   Invoke-LauncherCase -Name "reject stopping backend" -Parameters @{ ResetProcessMap = $true; StopExisting = $true } -ExpectedError "without -StopExisting" -ExpectedCalls @()
   Invoke-LauncherCase -Name "normal backend launch" -Parameters @{ AwsProfile = "mangorts-dev"; SkipNylas = $true } -ExpectedCalls @("configure export-credentials", "secretsmanager get-secret-value", "ecs list-task-definitions", "ecs describe-task-definition", "go")
-  Invoke-LauncherCase -Name "inherited assistant key preserved" -Parameters @{ AwsProfile = "mangorts-dev"; SkipNylas = $true } -InheritedAssistantKey "fixture-inherited-openai-key" -ExpectedCalls @("configure export-credentials", "secretsmanager get-secret-value", "ecs list-task-definitions", "ecs describe-task-definition", "go")
-  Invoke-LauncherCase -Name "retained assistant references refreshed" -Parameters @{ AwsProfile = "mangorts-dev"; SkipNylas = $true } -InheritedAssistantModel "stale-model" -InheritedAssistantSecretArn "arn:aws:secretsmanager:us-west-1:000000000000:secret:stale-openai-key" -ExpectedCalls @("configure export-credentials", "secretsmanager get-secret-value", "ecs list-task-definitions", "ecs describe-task-definition", "go")
-  Invoke-LauncherCase -Name "blank tfvars clear retained assistant references" -Parameters @{ AwsProfile = "mangorts-dev"; SkipNylas = $true } -InheritedAssistantModel "stale-model" -InheritedAssistantSecretArn "arn:aws:secretsmanager:us-west-1:000000000000:secret:stale-openai-key" -TfvarsAssistantModel "" -TfvarsAssistantSecretArn "" -ExpectedCalls @("configure export-credentials", "secretsmanager get-secret-value", "ecs list-task-definitions", "ecs describe-task-definition", "go")
   Write-Host "Process Map launcher tests passed. No external commands or services were called."
 } finally {
   $resolvedFixture = [IO.Path]::GetFullPath($fixtureRoot)

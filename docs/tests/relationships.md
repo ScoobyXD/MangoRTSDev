@@ -11,19 +11,15 @@
 
 After verified sign-in, Mango resolves the existing user identity and company memberships. A user with none receives one company and a company-admin membership in the same transaction as its default setup. Only verified ownership of an allowlisted email permits developer bootstrap. An accepted invitation already supplies its target membership. Later ordinary removals preserve at least one membership; explicit identity deletion follows the established complete cleanup path.
 
-# Current AI Inspection Ownership Business Logic Laws
+# Current AI Removal Business Logic Laws
 
-1. `public.ai_runs` records the exact authenticated company and user accepted by the existing Send authorization rules and uses that owner's existing request UUID as `ai_runs_id`.
-2. One company, user, and request UUID has at most one immutable inspection archive; repeated saves never overwrite it.
-3. Membership changes preserve historical archives and allow an already admitted Send to save its final inspection; existing global administrator access requires no new company membership.
-4. Permanently deleting the exact company or user cascades its dependent archives and preserves unrelated owners' archives.
-5. Captured resource identities and contents remain historical diagnostic data; they grant no permission, create no live resource relationship, and never become business truth.
-6. Recycling, editing, or deleting a business resource does not rewrite the historical inspection snapshot or create an archive restore relationship.
-7. Every currently authorized user may inspect only their own captured conversations in the selected company; a request UUID never grants access across users or companies.
+1. The app must create no AI inspection archive, archive owner relationship, or AI-generated resource relationship.
+2. Ordinary resource ownership, permission, assignment, and recycle behavior must remain governed by the existing typed relationship laws.
+3. Removing the legacy AI source must not delete live database records or business resources.
 
-## AI Inspection Ownership Story
+## AI Removal Story
 
-A foreground Send captures the existing inspection events under its authenticated company and user. Every authorized user can inspect their own conversations in the selected company. When the Send ends, one archive stores that same request UUID and ordered timestamped event array, even if membership changed while it ran. Later membership or business-resource changes leave the snapshot historical. Deleting its exact company or user removes the dependent archives; no captured resource is deleted or restored through the archive.
+The retained chat panel cannot execute actions. The app no longer writes inspection archives or injects AI work preconditions into ordinary resource commands. Existing business relationships retain their canonical identities and normal transaction rules; this source cleanup does not change live databases.
 
 # Current Process Step Relationship Business Logic Laws
 
@@ -44,25 +40,24 @@ A foreground Send captures the existing inspection events under its authenticate
 15. Layout never creates, replaces, or changes a Step owner, operational endpoint, Explorer parent, Node assignment, policy, or Board order.
 16. Step and edge deletion prune their dependent layout entries in the same transaction; Process deletion cascades its layout, and recycle/restore preserves exact surviving references in dependency order.
 17. Creating a Process in a chosen Folder checks current destination Edit access inside the same transaction that creates its one Explorer placement.
-18. A Process AI text write, chat, or move requires the exact expected Process, Step, Node status, and assignment version inside the mutation transaction; a mismatch saves no text, chat, or placement change.
-19. Save Process atomically creates its exact Process, chosen Explorer Folder placement, company-map placement, Steps, directed Step edges, layout, chosen RACI assignments, SOP document, and committed events through the existing workspace batch command.
-20. Process creation accepts only one new Process in an existing editable Folder and only Step endpoints listed in that creation request.
-21. Process creation allocates each Process, Step, and edge UUID once; an existing identity rejects the entire save without updating records or creating another Process.
-22. New Process RACI uses only the existing typed policy settings and assignments.
-23. Omitted new Process assignments or assignments equal to the current Folder policy keep live inheritance.
-24. New Process assignments that differ from the current Folder policy customize that exact Process.
-25. A new Process SOP uses the existing canonical `logic-gate-overview` editor document under that exact Process ID and the normal editor JSON validation rules.
-26. No new Process, policy, editor document, placement, Step, or edge is stored before Save Process.
-27. Leaving Process creation discards its unsaved contents.
-28. A Step's canonical SOP body and editor revision live on its exact `process_steps` row; the editor uses `process_step` and that exact Step UUID without a second textbox or translated identity.
-29. Step editor access follows the Step's existing immutable Process owner; editor content creates no new policy or permission ancestry.
-30. Images and selection-created resources in a Step editor use the existing owning Process attachment and source rules, without a Step attachment or source relationship.
-31. Recycling and restoring a Process preserves its exact Step bodies; permanently deleting a Step removes its live body without recreating it through the editor API.
-32. Process history distinguishes overview and Step snapshots by their canonical type and exact identity; historical Step content grants no access, and restoring text never recreates a deleted Step or changes its owner.
+18. Save Process atomically creates its exact Process, chosen Explorer Folder placement, company-map placement, Steps, directed Step edges, layout, chosen RACI assignments, SOP document, and committed events through the existing workspace batch command.
+19. Process creation accepts only one new Process in an existing editable Folder and only Step endpoints listed in that creation request.
+20. Process creation allocates each Process, Step, and edge UUID once; an existing identity rejects the entire save without updating records or creating another Process.
+21. New Process RACI uses only the existing typed policy settings and assignments.
+22. Omitted new Process assignments or assignments equal to the current Folder policy keep live inheritance.
+23. New Process assignments that differ from the current Folder policy customize that exact Process.
+24. A new Process SOP uses the existing canonical `logic-gate-overview` editor document under that exact Process ID and the normal editor JSON validation rules.
+25. No new Process, policy, editor document, placement, Step, or edge is stored before Save Process.
+26. Leaving Process creation discards its unsaved contents.
+27. A Step's canonical SOP body and editor revision live on its exact `process_steps` row; the editor uses `process_step` and that exact Step UUID without a second textbox or translated identity.
+28. Step editor access follows the Step's existing immutable Process owner; editor content creates no new policy or permission ancestry.
+29. Images and selection-created resources in a Step editor use the existing owning Process attachment and source rules, without a Step attachment or source relationship.
+30. Recycling and restoring a Process preserves its exact Step bodies; permanently deleting a Step removes its live body without recreating it through the editor API.
+31. Process history distinguishes overview and Step snapshots by their canonical type and exact identity; historical Step content grants no access, and restoring text never recreates a deleted Step or changes its owner.
 
 ## Process Step Relationship Story
 
-A user starts creating a Process from the company map, chooses its Folder, arranges its Steps, sets RACI, and writes the overview and Step SOPs before Save Process. One transaction stores the exact Process, Steps with their bodies, connections, layout, placements, policy, and overview document. Untouched RACI follows the Folder live. Board, Editor, and Map edit those same records; Step editor access follows the existing Process owner. Leaving before Save stores nothing. AI Process text writes, chats, and moves recheck the tracked Node's exact work state inside their mutation transaction. Deleting a Step removes its body, incident edges, and geometry while Nodes retain their Process and status. Process recycle restores exact Steps, bodies, and edges before layout; restoring a historical text version changes only surviving text and never recreates a Step.
+A user starts creating a Process from the company map, chooses its Folder, arranges its Steps, sets RACI, and writes the overview and Step SOPs before Save Process. One transaction stores the exact Process, Steps with their bodies, connections, layout, placements, policy, and overview document. Untouched RACI follows the Folder live. Board, Editor, and Map edit those same records; Step editor access follows the existing Process owner. Leaving before Save stores nothing. Deleting a Step removes its body, incident edges, and geometry while Nodes retain their Process and status. Process recycle restores exact Steps, bodies, and edges before layout; restoring a historical text version changes only surviving text and never recreates a Step.
 
 # Current Huddle Relationship Business Logic Laws
 
@@ -331,8 +326,6 @@ Deleting a selected trace still removes its exact operational edge and dependent
 An explicitly invoked company-map operator reset validates a fresh layout from Explorer, checks Edit access across the affected resources, and commits that layout together with removal of the company's Folder/Process operational edges and dependent traces; it preserves source resources, Explorer organization, policies, and other relationship meanings.
 
 Within a Process, each Node keeps its Process assignment and optionally names one exact step. Step moves preserve status. Add next step stores its new step immediately after the selected source and creates the exact incoming connection in the same mutation. Same-Process step connections use the operational relationship table without map geometry. Deleting a step clears only its Node step references and incident connections; Nodes keep their Process membership and status. The company-map reset preserves these step connections.
-
-When AI works on its newly created Node, ordinary assignment and editor commands check that Node's expected Process, Step, status, and assignment version in the same transaction as the write. A concurrent human move stops the AI action without restoring the old placement or adding text after the move.
 
 Last updated: 2026-09-03
 

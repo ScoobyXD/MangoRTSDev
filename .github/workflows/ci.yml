@@ -95,9 +95,5 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Install Pi runtime dependencies
-        working-directory: ai/runtime
-        run: npm ci --ignore-scripts
-
       - name: Run repo tests
         run: node scripts/run_all_tests.mjs

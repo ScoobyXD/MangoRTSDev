@@ -111,15 +111,14 @@ type EditorJSONAnnotation struct {
 }
 
 type EditorJSONCommitInput struct {
-	Document         EditorJSONDocumentRef
-	OperationID      string
-	ClientID         string
-	ActorUserID      string
-	BaseRevision     int64
-	SchemaVersion    int
-	JSONDocument     json.RawMessage
-	Annotations      []EditorJSONAnnotation
-	ExpectedNodeWork *NodeWorkPrecondition
+	Document      EditorJSONDocumentRef
+	OperationID   string
+	ClientID      string
+	ActorUserID   string
+	BaseRevision  int64
+	SchemaVersion int
+	JSONDocument  json.RawMessage
+	Annotations   []EditorJSONAnnotation
 }
 
 type EditorJSONCommit struct {
