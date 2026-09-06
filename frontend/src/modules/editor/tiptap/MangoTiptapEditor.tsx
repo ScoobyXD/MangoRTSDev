@@ -1008,15 +1008,17 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     const tableFrame = rootRef.current ? readActiveMangoTiptapTableFrame(editor, rootRef.current) : null;
     setTableActive(Boolean(tableFrame));
     setActiveTableFrame(tableFrame);
-    callbacksRef.current.onSelectionFontSizeChange?.(state.fontSize);
-    callbacksRef.current.onSelectionHighlightColorChange?.(state.highlightColor);
-    callbacksRef.current.onSelectionTextAlignmentChange?.(state.textAlignment);
-    callbacksRef.current.onSelectionInlineFormatChange?.({
-      bold: state.bold,
-      underline: state.underline,
-      italic: state.italic,
-      strikethrough: state.strikethrough,
-    });
+    if (editor.isFocused || formattingControllerActiveRef.current) {
+      callbacksRef.current.onSelectionFontSizeChange?.(state.fontSize);
+      callbacksRef.current.onSelectionHighlightColorChange?.(state.highlightColor);
+      callbacksRef.current.onSelectionTextAlignmentChange?.(state.textAlignment);
+      callbacksRef.current.onSelectionInlineFormatChange?.({
+        bold: state.bold,
+        underline: state.underline,
+        italic: state.italic,
+        strikethrough: state.strikethrough,
+      });
+    }
     const selection = editor.state.selection;
     if (selectionPointerDownRef.current || selection.empty || !(selection instanceof TextSelection)) {
       setSelectionAction(null);
@@ -1321,8 +1323,10 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     return registerMangoTiptapFlusher({ companyID, resourceType, resourceID, documentID }, async () => {
       await prepare();
       await syncRef.current?.flush();
-    });
-  }, [companyID, documentID, prepare, resourceID, resourceType, saveMode]);
+    }, resourceType === "process_step" && attachmentContext?.resourceType === "logic_gate"
+      ? { companyID, resourceType: "logic_gate", resourceID: attachmentContext.resourceID }
+      : undefined);
+  }, [attachmentContext?.resourceID, attachmentContext?.resourceType, companyID, documentID, prepare, resourceID, resourceType, saveMode]);
 
   const attachmentExtension = useMemo(
     () => attachmentNodeViewExtension(attachmentContextRef, imageActionsRef),
@@ -1461,7 +1465,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     ? EMPTY_LINK_TARGET_TYPES
     : resourceType === "node"
       ? NODE_LINK_TARGET_TYPES
-    : resourceType === "logic_gate"
+    : resourceType === "logic_gate" || resourceType === "process_step"
       ? LOGIC_GATE_LINK_TARGET_TYPES
       : resourceType === "project"
         ? PROJECT_LINK_TARGET_TYPES
@@ -1691,7 +1695,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         "tiptap.callback",
         () => {
           const controller = formattingControllerInstanceRef.current;
-          if (formattingControllerRef && controller) formattingControllerRef.current = controller;
+          if (formattingControllerRef && controller) formattingControllerRef.current = editable ? controller : null;
           updateSelectionState(focusedEditor);
           callbacksRef.current.onFocus?.();
         },
@@ -1745,6 +1749,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           lifecycleRef.current.markDirty();
           if (resourceType === "node" || resourceType === "project" || resourceType === "logic_gate") {
             markEditorHistoryChanged({ companyID, resourceType, resourceID });
+          } else if (resourceType === "process_step" && attachmentContextRef.current?.resourceType === "logic_gate") {
+            markEditorHistoryChanged({ companyID, resourceType: "logic_gate", resourceID: attachmentContextRef.current.resourceID });
           }
           syncRef.current?.schedule(() => compactMangoTiptapDocument({
             format: "mango-tiptap-json",
@@ -1833,7 +1839,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       readFormatState: () => readMangoTiptapSelectionState(editor),
     };
     formattingControllerInstanceRef.current = controller;
-    if (formattingControllerRef && formattingControllerActiveRef.current) formattingControllerRef.current = controller;
+    if (formattingControllerRef && formattingControllerActiveRef.current && editable) formattingControllerRef.current = controller;
     updateSelectionState(editor);
     return () => {
       if (formattingControllerRef?.current === controller) formattingControllerRef.current = null;
@@ -1856,12 +1862,12 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   useEffect(() => {
     const controller = formattingControllerInstanceRef.current;
     if (!formattingControllerRef || !controller) return undefined;
-    if (formattingControllerActive) formattingControllerRef.current = controller;
+    if (formattingControllerActive && editable) formattingControllerRef.current = controller;
     else if (formattingControllerRef.current === controller) formattingControllerRef.current = null;
     return () => {
       if (formattingControllerRef.current === controller) formattingControllerRef.current = null;
     };
-  }, [activeEditor, formattingControllerActive, formattingControllerRef]);
+  }, [activeEditor, editable, formattingControllerActive, formattingControllerRef]);
 
   useEffect(() => {
     const positionSource = editorRef.current
@@ -1979,10 +1985,17 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       if (owner !== actionItemOwnerRef.current || action.to > editor.state.doc.content.size || editor.state.doc.textBetween(action.from, action.to, "\n", "\n") !== action.quote) {
         throw new Error("The highlighted text changed. Select the text again.");
       }
+      const processContext = attachmentContextRef.current;
+      const source = resourceType === "process_step"
+        ? processContext?.resourceType === "logic_gate"
+          ? { resourceType: "logic_gate" as const, resourceID: processContext.resourceID }
+          : null
+        : { resourceType, resourceID };
+      if (!source) throw new Error("The owning Process is unavailable.");
       const entity = await createActionItemEntityFromSelection({
         companyID,
         requestJSON,
-        source: { resourceType, resourceID },
+        source,
       }, action.quote, color);
       setSelectionAction(null);
       if (owner !== actionItemOwnerRef.current || editor !== editorRef.current || editor.isDestroyed) {
@@ -2171,7 +2184,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         <UniversalEntityPicker
           companyID={companyID}
           requestJSON={requestJSON}
-          sourceType={resourceType === "huddle_logic_gate" || resourceType === "kpi" ? "logic_gate" : resourceType === "huddle_node" ? "node" : resourceType}
+          sourceType={resourceType === "huddle_logic_gate" || resourceType === "kpi" || resourceType === "process_step" ? "logic_gate" : resourceType === "huddle_node" ? "node" : resourceType}
           linkTargetTypes={linkTargetTypes}
           anchor={universalPickerDraft.anchor}
           onChoose={chooseUniversalPickerEntity}

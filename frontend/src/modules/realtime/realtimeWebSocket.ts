@@ -536,7 +536,7 @@ export function realtimeEditorScope(resourceType: "node" | "logic_gate" | "proje
 }
 
 export function realtimeEditorJSONScope(
-  resourceType: "node" | "logic_gate" | "project" | "huddle_logic_gate" | "huddle_node" | "kpi" | "email_draft" | "email_signature",
+  resourceType: "node" | "logic_gate" | "process_step" | "project" | "huddle_logic_gate" | "huddle_node" | "kpi" | "email_draft" | "email_signature",
   resourceID: string,
   documentID: string,
 ): string {

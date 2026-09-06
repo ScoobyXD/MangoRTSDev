@@ -409,6 +409,9 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
   installGlobal("fetch", async (input: RequestInfo | URL) => {
     const url = String(input);
     imageFetchURLs.push(url);
+    if (url.includes("/v2/logic-gates/logic-gate-host/work")) {
+      return new NativeResponse(JSON.stringify({ logic_gate: { logic_gate_id: "logic-gate-host", header: "Host Process" }, permissions: { can_edit: true, can_resolve_requests: true }, steps: [], relationships: [], nodes: [] }), { headers: { "Content-Type": "application/json" } });
+    }
     if (url.includes("/v1/communications/threads/")) {
       storedThreadRequests.push(url);
       if (url.includes(MISSING_EMAIL_THREAD_ID)) {
@@ -1473,6 +1476,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
           />
           <React.Suspense fallback={<div aria-label="Loading Logic Gate JSON host" />}>
             <LogicGateTiptapEditorSurface
+              apiBase={pageHostBaseProps.apiBase}
               value={JSON.stringify(pageHostDocument)}
               editable
               companyID="company-hosts"

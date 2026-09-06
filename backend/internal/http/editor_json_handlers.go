@@ -172,12 +172,20 @@ func (s *Server) authorizeEditorJSON(w http.ResponseWriter, r *http.Request, act
 			return false
 		}
 		return true
-	case store.EntityTypeKPI:
+	case store.EntityTypeKPI, store.EntityTypeProcessStep:
 		if !isCanonicalUUID(ref.ResourceID) || ref.DocumentID != ref.ResourceID {
 			writeError(w, http.StatusNotFound, "editor_document_route_not_found")
 			return false
 		}
-		kpi, err := s.repo.GetKPI(ref.CompanyID, ref.ResourceID)
+		var logicGateID string
+		var err error
+		if ref.ResourceType == store.EntityTypeKPI {
+			kpi, loadErr := s.repo.GetKPI(ref.CompanyID, ref.ResourceID)
+			logicGateID, err = kpi.LogicGateID, loadErr
+		} else {
+			step, loadErr := s.repo.GetProcessStep(ref.CompanyID, ref.ResourceID)
+			logicGateID, err = step.LogicGateID, loadErr
+		}
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "editor_document_route_not_found")
 			return false
@@ -186,7 +194,7 @@ func (s *Server) authorizeEditorJSON(w http.ResponseWriter, r *http.Request, act
 			writeError(w, http.StatusInternalServerError, "failed_to_authorize_editor_document")
 			return false
 		}
-		authorized, rejectCode, err := s.authorizeRealtimeEntityScope(actor, ref.CompanyID, store.EntityTypeLogicGate, kpi.LogicGateID, store.EntityPermissionEdit)
+		authorized, rejectCode, err := s.authorizeRealtimeEntityScope(actor, ref.CompanyID, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionEdit)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_authorize_editor_document")
 			return false
@@ -215,6 +223,15 @@ func (s *Server) authorizeEditorJSONRealtime(actor ActorContext, ref store.Edito
 			return false, "resource_not_found", err
 		}
 		return s.authorizeRealtimeEntityScope(actor, ref.CompanyID, store.EntityTypeLogicGate, kpi.LogicGateID, store.EntityPermissionEdit)
+	case store.EntityTypeProcessStep:
+		step, err := s.repo.GetProcessStep(ref.CompanyID, ref.ResourceID)
+		if errors.Is(err, store.ErrNotFound) {
+			return false, "resource_not_found", nil
+		}
+		if err != nil {
+			return false, "", err
+		}
+		return s.authorizeRealtimeEntityScope(actor, ref.CompanyID, store.EntityTypeLogicGate, step.LogicGateID, store.EntityPermissionEdit)
 	default:
 		return false, "unsupported_scope", nil
 	}

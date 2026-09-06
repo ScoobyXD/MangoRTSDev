@@ -94,7 +94,7 @@ func (r *MemoryRepo) ResolveEffectiveUsersForResource(ctx context.Context, compa
 	resourceID = strings.TrimSpace(resourceID)
 	resourceType = strings.ToLower(strings.TrimSpace(resourceType))
 	_, typeOK := NormalizeEntityType(resourceType)
-	if resourceType == EntityTypeKPI {
+	if resourceType == EntityTypeKPI || resourceType == EntityTypeProcessStep {
 		typeOK = true
 	}
 	accessLevel, accessOK := NormalizeEntityPermission(accessLevel)
@@ -119,6 +119,13 @@ func (r *MemoryRepo) ResolveEffectiveUsersForResource(ctx context.Context, compa
 		}
 		resourceType = EntityTypeLogicGate
 		resourceID = kpi.LogicGateID
+	} else if resourceType == EntityTypeProcessStep {
+		step, ok := r.processSteps[key(companyID, resourceID)]
+		if !ok {
+			return false, []string{}, nil
+		}
+		resourceType = EntityTypeLogicGate
+		resourceID = step.LogicGateID
 	} else {
 		resourceType, _ = NormalizeEntityType(resourceType)
 	}

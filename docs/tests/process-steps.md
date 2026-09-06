@@ -50,7 +50,7 @@
 48. Deleting a Step or connection removes its dependent layout entries and advances the layout revision; surviving resources and geometry remain unchanged.
 49. Process recycle and restore preserve exact surviving Step geometry and routes, and permanent Process deletion removes its layout.
 50. Layout reads and writes require current access to the exact owning Process and reject references to another Process.
-51. SOP text provides written Step explanations; the map introduces no separate instruction fields or inferred Step identities.
+51. Each Step stores its own SOP in `process_steps.body_json`; the map and editor use the same exact Step identity.
 52. Pan, zoom, Board scrolling, and the selected view are local presentation state and never write layout or resource records.
 53. Create Process on the company map opens an unsaved new Process inside the shared map pane.
 54. Save Process requires a nonblank name and an existing destination Folder selected through its breadcrumb path.
@@ -120,10 +120,25 @@
 117. Kanban mode groups the same authorized assigned Nodes by `nodes.status` without assigning or clearing a step.
 118. Moving a Node into In Progress or Review through Kanban may leave it without a step, which Steps mode must show under No step assigned.
 119. Both Board modes share canonical work data, assignment positions, saved grouping, cache invalidation, and mutation commands without restoring legacy Kanban tables or identities.
+120. The Process editor shows its general overview first and one full-width elevated instruction card for each Step underneath it.
+121. Instruction cards follow saved Board order and show consecutive numbers, the current Step name, and that Step's editable rich text.
+122. Creating, renaming, reordering, or deleting a Step updates its instruction card without copying instructions into the Process overview.
+123. The overview and Step cards share one vertical scroll area and the existing toolbar formats the focused editor.
+124. A new Step starts with an empty valid Mango editor JSON document.
+125. Saved Step instructions use the existing revisioned editor API with `process_step` and the exact Step UUID as both resource and document ID.
+126. Editing a Step's instructions never changes its name, order, flow connections, Node assignments, or owning Process.
+127. Step instruction reads and writes require the existing access rules of the exact owning Process; a read-only editor supplies no formatting or save controls.
+128. Step instructions use the existing editor's autosave, local recovery, stale-revision conflict handling, and rich-text controls.
+129. The shared Process save indicator includes every current Step editor and keeps a save failure visible for the page session while that Step exists.
+130. Flushing a Process waits for its overview and all mounted Step editors to finish saving.
+131. New Process Step instructions stay in memory until the existing atomic Save Process command stores them with the Process.
+132. Process text limits include the overview and every owned Step body; attachments retain the existing Process ownership and do not count as editor text.
+133. Process Save version includes typed Step instruction snapshots; restore updates surviving same-Process Steps without recreating deleted Steps or changing flow.
+134. A saved version includes an empty overview when the Process overview is untouched, so restoring it leaves a usable blank overview editor.
 
 ## Process Story
 
-A user creates a Process, chooses a Folder, and arranges connected Steps on the map before saving its RACI, SOP, and Steps together. The Process editor opens Board in Kanban mode for status-based work and can switch locally to Steps mode. Status moves retain saved steps; Steps-mode Start work chooses a step, and step moves retain status. Map edits the same Steps and connections beside the SOP. Deleting a Step preserves every Node and status.
+A user creates a Process, chooses a Folder, and arranges connected Steps on the map. The editor shows the general overview above numbered Step instruction cards in Board order, using the shared toolbar. Save Process stores new instructions with the Process; existing instructions autosave. Board opens in Kanban mode and can switch locally to Steps mode. Status moves retain saved steps; Steps-mode Start work chooses a step, and step moves retain status. Map edits the same Steps and connections. Deleting a Step preserves every Node and status. Save version captures the overview and Step instructions; restore changes surviving text without rebuilding the flow.
 
 ## Main Scenarios
 
@@ -136,3 +151,5 @@ A user creates a Process, chooses a Folder, and arranges connected Steps on the 
 The repository migration is `backend/db/migrations/20260903_process_steps.sql`. A human operator must stop application writers, run this forward-only migration against PostgreSQL 17 or 18, and deploy the matching application before reopening writes. It also corrects the outdated RACI assignment constraint that blocked folder inheritance. It reports the connected version and stops on an unsupported version, incompatible starting schema, or unsupported existing status/resource type. Agents must not apply it to a live database. Disposable integration tests exercise the conversion and lifecycle without using live credentials.
 
 The Step-map addition is `backend/db/migrations/20260904_process_step_map_layouts.sql`, applied after the Step migration by a human operator before deploying this feature. It adds Process-owned layout storage and dependent cleanup; existing Steps need no geometry backfill. No live database is modified by this task.
+
+Step instructions require a human operator to apply `backend/db/migrations/20260905_process_step_sop_bodies.sql` before deploying the matching application. It adds `process_steps.body_json` and `revision`, distinguishes Step and overview history, includes Step bodies in the existing Process text limit, and updates captured recycle payloads to the current shape. Existing Steps start with empty instructions. The script supports PostgreSQL 17 and 18, checks the exact starting Step columns without depending on column order, and runs transactionally. Agents must not apply it to a live database.

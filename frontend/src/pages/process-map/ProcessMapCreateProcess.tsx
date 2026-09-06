@@ -12,6 +12,7 @@ import { ProcessMapActions } from "./ProcessMapActions.js";
 import { ProcessMapDetails, type ProcessMapDetailsContents } from "./ProcessMapDetails.js";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_FIND_REQUESTED } from "../../modules/dashboardEvents.js";
 import type { CompanyExplorerWorkspaceEntityBatchResponse } from "../../modules/company-explorer/CompanyExplorerContentModel.js";
+import type { MangoTiptapDocument } from "../../modules/editor/tiptap/mangoTiptapDocument.js";
 
 type ProcessContents = { steps: ProcessStep[]; relationships: ProcessStepRelationship[]; layout: ProcessStepMapLayout };
 export type SavedMapProcess = { processID: string; name: string; folderID: string };
@@ -32,6 +33,11 @@ export function ProcessMapCreateProcess({ apiBase, companyID, processID, firstSt
     return { steps, relationships: [], layout: completeStepMapLayout({ revision: 0, steps: [], routes: [] }, steps, []) };
   });
   const current = useRef(contents);
+  const updateStepBody = useCallback((stepID: string, body: MangoTiptapDocument) => {
+    const next = { ...current.current, steps: current.current.steps.map((step) => step.process_step_id === stepID ? { ...step, body_json: body } : step) };
+    current.current = next;
+    setContents(next);
+  }, []);
   const details = useRef<ProcessMapDetailsContents>({});
   const updateDetails = useCallback((next: ProcessMapDetailsContents) => { details.current = next; }, []);
   const [detailsBusy, setDetailsBusy] = useState(true);
@@ -104,7 +110,7 @@ export function ProcessMapCreateProcess({ apiBase, companyID, processID, firstSt
       const response = await createWorkspaceEntityBatchCommand<CompanyExplorerWorkspaceEntityBatchResponse>({
         companyID, entityKind: "logic_gate", folderID, mutationOrigin: "company_explorer",
         items: [{ client_id: processID, title: name.trim() }],
-        processDefinition: { logic_gate_id: processID, steps: process.steps.map(({ process_step_id, name: stepName }) => ({ process_step_id, name: stepName })), relationships: process.relationships, layout: { steps: process.layout.steps, routes: process.layout.routes }, ...details.current },
+        processDefinition: { logic_gate_id: processID, steps: process.steps.map(({ process_step_id, name: stepName, body_json }) => ({ process_step_id, name: stepName, body_json })), relationships: process.relationships, layout: { steps: process.layout.steps, routes: process.layout.routes }, ...details.current },
         requestJSON: (path, init) => requestJSON(apiBase, path, init),
       });
       created.current = true;
@@ -154,7 +160,7 @@ export function ProcessMapCreateProcess({ apiBase, companyID, processID, firstSt
         }
       }} /> : <button ref={filenameRef} type="button" className="process-map-workspace__filename" aria-label="Name Process" title="Rename Process" disabled={saving} onClick={() => setEditingName(true)}>{name.trim() || "Untitled Process"}<span aria-hidden="true"> ✎</span></button>}
     </div>
-    <ProcessMapDetails key={processID} apiBase={apiBase} companyID={companyID} processID={processID} isNew folderID={folderID} canEdit={active && !saving} disabled={saving} onChange={updateDetails} onBusyChange={setDetailsBusy} />
+    <ProcessMapDetails key={processID} apiBase={apiBase} companyID={companyID} processID={processID} isNew folderID={folderID} canEdit={active && !saving} disabled={saving} onChange={updateDetails} onBusyChange={setDetailsBusy} steps={contents.steps} onStepBodyChange={updateStepBody} />
     {error && <div role="alert" className="process-map-authoring-error">{error} Your changes are still here. If Save already completed, find the saved Process; later changes will be left behind. <button type="button" disabled={saving || editorBusy || detailsBusy} onClick={() => { void openSavedVersion(); }}>Find saved Process</button></div>}
     <ProcessStepMapEditor steps={contents.steps} relationships={contents.relationships} canEdit={active && !saving} commands={commands} onBusyChange={setEditorBusy} saveMode="new" processName={name} initialEditingStepID={firstStep ? contents.steps[0]?.process_step_id : undefined} hoverModeEnabled={hoverModeEnabled}
       renderActions={({ createStep, disabled, busy }) => <ProcessMapActions onCreateStep={createStep} disabled={saving || busy || !active} stepDisabled={disabled} hoverModeEnabled={hoverModeEnabled} onHoverModeChange={onHoverModeChange}>

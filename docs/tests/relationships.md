@@ -40,10 +40,15 @@ A foreground Send captures the existing inspection events under its authenticate
 25. A new Process SOP uses the existing canonical `logic-gate-overview` editor document under that exact Process ID and the normal editor JSON validation rules.
 26. No new Process, policy, editor document, placement, Step, or edge is stored before Save Process.
 27. Leaving Process creation discards its unsaved contents.
+28. A Step's canonical SOP body and editor revision live on its exact `process_steps` row; the editor uses `process_step` and that exact Step UUID without a second textbox or translated identity.
+29. Step editor access follows the Step's existing immutable Process owner; editor content creates no new policy or permission ancestry.
+30. Images and selection-created resources in a Step editor use the existing owning Process attachment and source rules, without a Step attachment or source relationship.
+31. Recycling and restoring a Process preserves its exact Step bodies; permanently deleting a Step removes its live body without recreating it through the editor API.
+32. Process history distinguishes overview and Step snapshots by their canonical type and exact identity; historical Step content grants no access, and restoring text never recreates a deleted Step or changes its owner.
 
 ## Process Step Relationship Story
 
-A user starts creating a Process from the company map, chooses its Folder, arranges its Steps, sets RACI, and writes its SOP before Save Process. One transaction stores the exact Process, Steps, connections, layout, Explorer and company-map placements, policy, and canonical editor document. Untouched RACI follows the Folder live. Board, Editor, and Map then edit those same records. Leaving before Save stores nothing. AI Process text writes, chats, and moves recheck the tracked Node's exact work state inside their mutation transaction; chats retain their existing exact Node/textbox ownership and mention rules. Deleting a Step removes its incident edges and geometry while Nodes retain their Process and status; restore puts exact Steps and edges back before their layout.
+A user starts creating a Process from the company map, chooses its Folder, arranges its Steps, sets RACI, and writes the overview and Step SOPs before Save Process. One transaction stores the exact Process, Steps with their bodies, connections, layout, placements, policy, and overview document. Untouched RACI follows the Folder live. Board, Editor, and Map edit those same records; Step editor access follows the existing Process owner. Leaving before Save stores nothing. AI Process text writes, chats, and moves recheck the tracked Node's exact work state inside their mutation transaction. Deleting a Step removes its body, incident edges, and geometry while Nodes retain their Process and status. Process recycle restores exact Steps, bodies, and edges before layout; restoring a historical text version changes only surviving text and never recreates a Step.
 
 # Current Huddle Relationship Business Logic Laws
 

@@ -37,13 +37,25 @@ func editorJSONMemoryKey(ref EditorJSONDocumentRef) string {
 
 func (r *MemoryRepo) editorJSONOwnerTextLimitExceededLocked(ref EditorJSONDocumentRef, nextDocumentBytes int64) bool {
 	var otherCurrentBytes int64
+	ownerType, ownerID := ref.ResourceType, ref.ResourceID
+	if ref.ResourceType == EntityTypeProcessStep {
+		ownerType = EntityTypeLogicGate
+		ownerID = r.processSteps[key(ref.CompanyID, ref.ResourceID)].LogicGateID
+	}
 	targetKey := editorJSONMemoryKey(ref)
 	for key, document := range r.editorJSONDocuments {
 		if key == targetKey || document.Deleted || document.Ref.CompanyID != ref.CompanyID ||
-			document.Ref.ResourceType != ref.ResourceType || document.Ref.ResourceID != ref.ResourceID {
+			document.Ref.ResourceType != ownerType || document.Ref.ResourceID != ownerID {
 			continue
 		}
 		otherCurrentBytes += int64(len(document.JSONDocument))
+	}
+	if ownerType == EntityTypeLogicGate {
+		for _, step := range r.processSteps {
+			if step.CompanyID == ref.CompanyID && step.LogicGateID == ownerID && (ref.ResourceType != EntityTypeProcessStep || step.ProcessStepID != ref.ResourceID) {
+				otherCurrentBytes += int64(len(step.BodyJSON))
+			}
+		}
 	}
 	return EditorOwnerTextLimitExceeded(otherCurrentBytes, nextDocumentBytes)
 }
@@ -67,6 +79,9 @@ func (r *MemoryRepo) editorJSONFormatReadyLocked(companyID string) bool {
 
 func (r *MemoryRepo) editorJSONResourceExistsLocked(ref EditorJSONDocumentRef) bool {
 	switch ref.ResourceType {
+	case EntityTypeProcessStep:
+		_, ok := r.processSteps[key(ref.CompanyID, ref.ResourceID)]
+		return ok && ref.DocumentID == ref.ResourceID
 	case EntityTypeNode, EntityTypeProject, EntityTypeLogicGate:
 		return r.editorResourceExistsLocked(EditorDocumentRef{
 			CompanyID: ref.CompanyID, ResourceType: ref.ResourceType,
@@ -84,6 +99,19 @@ func (r *MemoryRepo) editorJSONResourceExistsLocked(ref EditorJSONDocumentRef) b
 	default:
 		return false
 	}
+}
+
+func (r *MemoryRepo) editorJSONDocumentLocked(ref EditorJSONDocumentRef) (memoryEditorJSONDocument, bool, error) {
+	if ref.ResourceType != EntityTypeProcessStep {
+		document, exists := r.editorJSONDocuments[editorJSONMemoryKey(ref)]
+		return document, exists, nil
+	}
+	step, exists := r.processSteps[key(ref.CompanyID, ref.ResourceID)]
+	if !exists {
+		return memoryEditorJSONDocument{}, false, ErrNotFound
+	}
+	document, annotations, err := decodeEditorTextboxBody(step.BodyJSON)
+	return memoryEditorJSONDocument{Ref: ref, Revision: step.Revision, SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: document, Annotations: annotations, UpdatedTimestamp: step.UpdatedTimestamp}, true, err
 }
 
 func memoryEditorJSONSnapshot(ref EditorJSONDocumentRef, document memoryEditorJSONDocument) EditorJSONSnapshot {
@@ -117,7 +145,10 @@ func (r *MemoryRepo) GetEditorJSONSnapshot(ref EditorJSONDocumentRef) (EditorJSO
 	if !r.editorJSONResourceExistsLocked(ref) {
 		return EditorJSONSnapshot{}, ErrNotFound
 	}
-	document, exists := r.editorJSONDocuments[editorJSONMemoryKey(ref)]
+	document, exists, err := r.editorJSONDocumentLocked(ref)
+	if err != nil {
+		return EditorJSONSnapshot{}, err
+	}
 	if !exists {
 		document = memoryEditorJSONDocument{
 			Ref: ref, SchemaVersion: MangoTiptapSchemaVersion,
@@ -142,7 +173,10 @@ func (r *MemoryRepo) EnsureEditorJSONCollaborationDocument(ref EditorJSONDocumen
 		return EditorJSONSnapshot{}, ErrNotFound
 	}
 	key := editorJSONMemoryKey(ref)
-	document, exists := r.editorJSONDocuments[key]
+	document, exists, err := r.editorJSONDocumentLocked(ref)
+	if err != nil {
+		return EditorJSONSnapshot{}, err
+	}
 	if !exists {
 		document = memoryEditorJSONDocument{
 			Ref: ref, CollaborationEpoch: newUUIDv7String(), SchemaVersion: MangoTiptapSchemaVersion,
@@ -160,6 +194,10 @@ func (r *MemoryRepo) CommitEditorJSONDocument(input EditorJSONCommitInput) (Edit
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.commitEditorJSONDocumentLocked(input)
+}
+
+func (r *MemoryRepo) commitEditorJSONDocumentLocked(input EditorJSONCommitInput) (EditorJSONCommit, error) {
 	if input.ExpectedNodeWork != nil {
 		if input.Document.ResourceType != EntityTypeNode {
 			return EditorJSONCommit{}, ErrVersionConflict
@@ -174,8 +212,8 @@ func (r *MemoryRepo) CommitEditorJSONDocument(input EditorJSONCommitInput) (Edit
 	if !r.editorJSONResourceExistsLocked(input.Document) {
 		return EditorJSONCommit{}, ErrNotFound
 	}
-	key := editorJSONMemoryKey(input.Document)
-	for _, operation := range r.editorJSONOperations[key] {
+	documentKey := editorJSONMemoryKey(input.Document)
+	for _, operation := range r.editorJSONOperations[documentKey] {
 		if operation.OperationID != input.OperationID {
 			continue
 		}
@@ -190,7 +228,10 @@ func (r *MemoryRepo) CommitEditorJSONDocument(input EditorJSONCommitInput) (Edit
 			CommittedAt:  operation.CommittedAt, Deduplicated: true,
 		}, nil
 	}
-	document, exists := r.editorJSONDocuments[key]
+	document, exists, err := r.editorJSONDocumentLocked(input.Document)
+	if err != nil {
+		return EditorJSONCommit{}, err
+	}
 	if !exists {
 		document = memoryEditorJSONDocument{
 			Ref: input.Document, CollaborationEpoch: newUUIDv7String(), SchemaVersion: MangoTiptapSchemaVersion,
@@ -233,19 +274,29 @@ func (r *MemoryRepo) CommitEditorJSONDocument(input EditorJSONCommitInput) (Edit
 	document.Revision = revision
 	document.SchemaVersion = MangoTiptapSchemaVersion
 	document.JSONDocument = append(json.RawMessage(nil), input.JSONDocument...)
-	document.Annotations = append([]EditorJSONAnnotation(nil), input.Annotations...)
+	document.Annotations = append([]EditorJSONAnnotation{}, input.Annotations...)
 	document.UpdatedTimestamp = now
-	r.editorJSONDocuments[key] = document
+	if input.Document.ResourceType == EntityTypeProcessStep {
+		body, err := encodeEditorTextboxBody(document.JSONDocument, document.Annotations)
+		if err != nil {
+			return EditorJSONCommit{}, err
+		}
+		step := r.processSteps[key(input.Document.CompanyID, input.Document.ResourceID)]
+		step.BodyJSON, step.Revision, step.UpdatedTimestamp = body, revision, now
+		r.processSteps[key(input.Document.CompanyID, input.Document.ResourceID)] = step
+	} else {
+		r.editorJSONDocuments[documentKey] = document
+	}
 	if err := r.syncHuddleActionItemRelationshipsLocked(input.Document.CompanyID, input.Document.ResourceType, input.Document.ResourceID); err != nil {
 		return EditorJSONCommit{}, err
 	}
-	r.editorJSONOperations[key] = append(r.editorJSONOperations[key], memoryEditorJSONOperation{
+	r.editorJSONOperations[documentKey] = append(r.editorJSONOperations[documentKey], memoryEditorJSONOperation{
 		OperationID: input.OperationID, ClientID: input.ClientID, BaseRevision: input.BaseRevision,
 		JSONDocument: append(json.RawMessage(nil), input.JSONDocument...),
 		Annotations:  append([]EditorJSONAnnotation(nil), input.Annotations...),
 		EventID:      eventID, Revision: revision, CommittedAt: now,
 	})
-	r.editorJSONVersions[key] = append(r.editorJSONVersions[key], EditorJSONVersion{
+	r.editorJSONVersions[documentKey] = append(r.editorJSONVersions[documentKey], EditorJSONVersion{
 		Revision: revision, SchemaVersion: MangoTiptapSchemaVersion,
 		JSONDocument: append(json.RawMessage(nil), input.JSONDocument...),
 		Annotations:  append([]EditorJSONAnnotation(nil), input.Annotations...),
@@ -272,6 +323,9 @@ func editorJSONAnnotationsEqual(left, right []EditorJSONAnnotation) bool {
 }
 
 func (r *MemoryRepo) DeleteEditorJSONDocument(input EditorJSONDeleteInput) (EditorJSONCommit, error) {
+	if input.Document.ResourceType == EntityTypeProcessStep {
+		return EditorJSONCommit{}, ErrInvalid
+	}
 	ref, err := NormalizeEditorJSONDocumentRef(input.Document)
 	if err != nil {
 		return EditorJSONCommit{}, err
@@ -282,6 +336,12 @@ func (r *MemoryRepo) DeleteEditorJSONDocument(input EditorJSONDeleteInput) (Edit
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	input.Document = ref
+	return r.deleteEditorJSONDocumentLocked(input)
+}
+
+func (r *MemoryRepo) deleteEditorJSONDocumentLocked(input EditorJSONDeleteInput) (EditorJSONCommit, error) {
+	ref := input.Document
 	if !r.editorJSONFormatReadyLocked(ref.CompanyID) {
 		return EditorJSONCommit{}, ErrVersionConflict
 	}

@@ -200,12 +200,16 @@ func (r *PostgresRepo) ResolveEffectiveUsersForResource(ctx context.Context, com
 	if ctx == nil || companyID == "" || resourceID == "" || !accessOK || EntityPermissionRank(accessLevel) == 0 {
 		return false, nil, ErrInvalid
 	}
-	if resourceType == EntityTypeKPI {
+	if resourceType == EntityTypeKPI || resourceType == EntityTypeProcessStep {
 		var logicGateID string
-		err := r.db.QueryRowContext(ctx, `
+		ownerQuery := `
 select logic_gate_id::text
 from kpis
-where company_id=$1::uuid and kpi_id=$2::uuid`, companyID, resourceID).Scan(&logicGateID)
+where company_id=$1::uuid and kpi_id=$2::uuid`
+		if resourceType == EntityTypeProcessStep {
+			ownerQuery = `select logic_gate_id::text from process_steps where company_id=$1::uuid and process_step_id=$2::uuid`
+		}
+		err := r.db.QueryRowContext(ctx, ownerQuery, companyID, resourceID).Scan(&logicGateID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, []string{}, nil
 		}

@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const backendDir = join(repoRoot, "backend");
 const adminHost = "127.0.0.1";
-const testPattern = "^TestPostgres(MyWork|ActionItem|Huddle|RetiredRACITabs|ProcessSteps|ProcessStepMap|ProcessMap|ObsoleteOperationalTables|CompanyMembershipProcessMap|PendingInvitationDowngradeInvalidatesGlobalDevAdmin)";
+const testPattern = process.argv[2] || "^TestPostgres(MyWork|ActionItem|Huddle|RetiredRACITabs|ProcessStep|ProcessEditor|ProcessMap|ObsoleteOperationalTables|CompanyMembershipProcessMap|PendingInvitationDowngradeInvalidatesGlobalDevAdmin)";
 
 function postgresBinary(name) {
   const suffix = process.platform === "win32" ? ".exe" : "";

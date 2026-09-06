@@ -9,6 +9,7 @@ export type MangoTiptapResourceRef = Omit<MangoTiptapFlushRef, "documentID">;
 
 type RegisteredFlusher = {
   ref: MangoTiptapFlushRef;
+  owner?: MangoTiptapResourceRef;
   flush: () => Promise<void>;
 };
 
@@ -18,9 +19,9 @@ function key(ref: MangoTiptapFlushRef): string {
   return [ref.companyID, ref.resourceType, ref.resourceID, ref.documentID].map(encodeURIComponent).join(":");
 }
 
-export function registerMangoTiptapFlusher(ref: MangoTiptapFlushRef, flush: () => Promise<void>): () => void {
+export function registerMangoTiptapFlusher(ref: MangoTiptapFlushRef, flush: () => Promise<void>, owner?: MangoTiptapResourceRef): () => void {
   const registryKey = key(ref);
-  const registered = { ref, flush };
+  const registered = { ref, flush, owner };
   flushers.set(registryKey, registered);
   return () => {
     if (flushers.get(registryKey) !== registered) return;
@@ -35,11 +36,10 @@ export async function flushMangoTiptapDocument(ref: MangoTiptapFlushRef): Promis
 }
 
 export async function flushMangoTiptapResource(ref: MangoTiptapResourceRef): Promise<void> {
+  const matches = (candidate: MangoTiptapResourceRef | undefined) => candidate?.companyID === ref.companyID
+    && candidate.resourceType === ref.resourceType
+    && candidate.resourceID === ref.resourceID;
   await Promise.all([...flushers.values()]
-    .filter((registered) => (
-      registered.ref.companyID === ref.companyID
-      && registered.ref.resourceType === ref.resourceType
-      && registered.ref.resourceID === ref.resourceID
-    ))
+    .filter((registered) => matches(registered.ref) || matches(registered.owner))
     .map((registered) => registered.flush()));
 }

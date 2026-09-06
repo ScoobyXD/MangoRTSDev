@@ -1,0 +1,41 @@
+.mango-process-instructions {
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.mango-process-instructions__steps {
+  display: grid;
+  gap: 18px;
+  padding: 16px 10px 28px;
+}
+
+.mango-process-instructions__step {
+  min-width: 0;
+  border: 1px solid var(--mango-process-step-border, rgba(148, 163, 184, 0.25));
+  border-radius: 12px;
+  background: var(--mango-process-step-surface, rgba(255, 255, 255, 0.68));
+  box-shadow: 0 3px 12px rgba(30, 41, 59, 0.09);
+}
+
+.mango-process-instructions__heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 14px 7px;
+}
+
+.mango-process-instructions__heading h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.mango-process-instructions__number { opacity: 0.55; font-variant-numeric: tabular-nums; }
+.mango-process-instructions__error { padding: 12px; color: #b91c1c; }
+.mango-process-instructions__loading { padding: 12px; font-size: 13px; opacity: 0.7; }

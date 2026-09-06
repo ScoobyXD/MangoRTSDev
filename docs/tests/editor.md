@@ -43,6 +43,13 @@
 41. Before Process creation, the shared editor keeps normal Tiptap JSON only in the current creation form and makes no document save, recovery-storage, history, or realtime request for the nonexistent Process.
 42. Closing and reopening the Editor preserves its current content; a saved Process editor flushes pending writes before closing.
 43. A new Process editor allows normal text, formatting, tables, mentions, and references but exposes no upload, relationship, or resource-creation action requiring a saved owner.
+44. A Process editor shows its overview above one elevated instruction card per Step in saved Board order, using the same Tiptap editor and one shared scroll area.
+45. Only the focused editor or the editor owning the shared toolbar may publish formatting state to that toolbar; preparing another editor must not change it.
+46. A read-only editor never supplies an active formatting controller to the shared toolbar.
+47. Step editor JSON uses the exact `process_step` resource and Step UUID, while attachments and selection-created Action Item Source use its existing owning Process.
+48. Process save status and save flushing include its overview and owned Step editors.
+49. Process Save version and restore use one server transaction for the overview and surviving Step instructions without changing Step topology.
+50. Callbacks from a removed Step or closed Process editor must not change the current Process errors or save status.
 
 Last updated: 2026-09-05
 

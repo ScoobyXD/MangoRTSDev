@@ -8,11 +8,18 @@ import (
 	"strings"
 )
 
-const processStepSelectColumns = `company_id::text,process_step_id::text,logic_gate_id::text,name,position,created_timestamp,updated_timestamp`
+const processStepSelectColumns = `company_id::text,process_step_id::text,logic_gate_id::text,name,position,body_json,revision,created_timestamp,updated_timestamp`
+
+func (r *PostgresRepo) GetProcessStep(companyID, processStepID string) (domain.ProcessStep, error) {
+	if cleanUUIDText(companyID) == "" || cleanUUIDText(processStepID) == "" {
+		return domain.ProcessStep{}, ErrInvalid
+	}
+	return scanProcessStep(r.db.QueryRow(`select `+processStepSelectColumns+` from process_steps where company_id=$1::uuid and process_step_id=$2::uuid`, companyID, processStepID))
+}
 
 func scanProcessStep(row interface{ Scan(...any) error }) (domain.ProcessStep, error) {
 	var step domain.ProcessStep
-	err := row.Scan(&step.CompanyID, &step.ProcessStepID, &step.LogicGateID, &step.Name, &step.Position, &step.CreatedTimestamp, &step.UpdatedTimestamp)
+	err := row.Scan(&step.CompanyID, &step.ProcessStepID, &step.LogicGateID, &step.Name, &step.Position, &step.BodyJSON, &step.Revision, &step.CreatedTimestamp, &step.UpdatedTimestamp)
 	if errors.Is(err, sql.ErrNoRows) {
 		return step, ErrNotFound
 	}
@@ -86,6 +93,10 @@ func (r *PostgresRepo) commitProcessStepMutation(ctx context.Context, tx *sql.Tx
 	return result, nil
 }
 func (r *PostgresRepo) CreateProcessStep(input ProcessStepCreateInput) (ProcessStepMutationResult, error) {
+	body, err := normalizeProcessStepBody(input.BodyJSON)
+	if err != nil {
+		return ProcessStepMutationResult{}, err
+	}
 	input.Name = strings.TrimSpace(input.Name)
 	if !validProcessStepName(input.Name) {
 		return ProcessStepMutationResult{}, ErrInvalid
@@ -115,9 +126,9 @@ func (r *PostgresRepo) CreateProcessStep(input ProcessStepCreateInput) (ProcessS
 			return ProcessStepMutationResult{}, err
 		}
 	}
-	step, err := scanProcessStep(tx.QueryRowContext(ctx, `insert into process_steps(company_id,process_step_id,logic_gate_id,name,position) values($1::uuid,$2::uuid,$3::uuid,$4,$5) returning `+processStepSelectColumns, input.CompanyID, newUUIDv7String(), input.LogicGateID, input.Name, position))
+	step, err := scanProcessStep(tx.QueryRowContext(ctx, `insert into process_steps(company_id,process_step_id,logic_gate_id,name,position,body_json) values($1::uuid,$2::uuid,$3::uuid,$4,$5,$6::jsonb) returning `+processStepSelectColumns, input.CompanyID, newUUIDv7String(), input.LogicGateID, input.Name, position, body))
 	if err != nil {
-		return ProcessStepMutationResult{}, err
+		return ProcessStepMutationResult{}, mapEditorOwnerTextLimitError(err)
 	}
 	result := ProcessStepMutationResult{Step: &step, PositionUpdates: positionUpdates}
 	if input.AfterProcessStepID != nil {

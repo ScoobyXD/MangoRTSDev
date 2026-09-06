@@ -843,12 +843,15 @@ on conflict do nothing`, columnList, strings.Join(qualifiedColumns, ", "))
 		}
 		selectColumns = strings.Join(selected, ", ")
 	}
-	if tableName == "email_drafts" {
+	if tableName == "email_drafts" || tableName == "process_steps" {
 		selected := make([]string, len(columns))
 		for index, column := range columns {
 			switch column {
 			case `"revision"`:
 				selected[index] = `greatest(restored_row."revision" + 1, 2)`
+				if tableName == "process_steps" {
+					selected[index] = `restored_row."revision" + 1`
+				}
 			case `"updated_timestamp"`:
 				selected[index] = `clock_timestamp()`
 			default:

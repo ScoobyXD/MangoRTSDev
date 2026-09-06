@@ -669,7 +669,14 @@ func mergeMemoryRecycleSnapshot(destination *memoryRecycleBinSnapshot, delta mem
 	mergeRecycleMap(destination.folders, delta.folders)
 	mergeRecycleMap(destination.folderItems, delta.folderItems)
 	mergeRecycleMap(destination.folderShares, delta.folderShares)
-	mergeRecycleMap(destination.processSteps, delta.processSteps)
+	for stepKey, step := range delta.processSteps {
+		if _, exists := destination.processSteps[stepKey]; exists {
+			continue
+		}
+		step.Revision++
+		step.UpdatedTimestamp = time.Now().UTC()
+		destination.processSteps[stepKey] = cloneProcessStep(step)
+	}
 	mergeRecycleMap(destination.processStepMaps, delta.processStepMaps)
 	for relationshipKey, relationship := range delta.resourceOperationalRelationships {
 		if _, exists := destination.resourceOperationalRelationships[relationshipKey]; exists {

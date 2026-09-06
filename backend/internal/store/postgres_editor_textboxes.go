@@ -26,6 +26,8 @@ func postgresEditorTextboxStorageFor(ref EditorJSONDocumentRef) (postgresEditorT
 		return postgresEditorTextboxStorage{"project_textboxes", "project_id", "textbox_id", false, true}, true
 	case EntityTypeLogicGate:
 		return postgresEditorTextboxStorage{"logic_gate_textboxes", "logic_gate_id", "textbox_id", false, false}, true
+	case EntityTypeProcessStep:
+		return postgresEditorTextboxStorage{"process_steps", "process_step_id", "process_step_id", true, false}, true
 	case EntityTypeHuddleLogicGate:
 		return postgresEditorTextboxStorage{"huddle_logic_gates", "huddle_logic_gate_id", "huddle_logic_gate_id", true, false}, true
 	case EntityTypeHuddleNode:
@@ -202,12 +204,19 @@ func getPostgresEditorTextboxSnapshot(r *PostgresRepo, ref EditorJSONDocumentRef
 		JSONDocument: append(json.RawMessage(nil), emptyMangoTiptapDocument...),
 		Annotations:  []EditorJSONAnnotation{}, UpdatedTimestamp: time.Now().UTC(),
 	}
-	query := fmt.Sprintf(`select revision,body_json,deleted_timestamp is not null,updated_timestamp
+	deletedExpression := "deleted_timestamp is not null"
+	if ref.ResourceType == EntityTypeProcessStep {
+		deletedExpression = "false"
+	}
+	query := fmt.Sprintf(`select revision,body_json,%s,updated_timestamp
 		from %s where company_id=$1::uuid and %s=$2::uuid and %s=%s`,
-		storage.table, storage.ownerColumn, storage.textboxColumn, postgresEditorTextboxIDExpression(storage, "$3"))
+		deletedExpression, storage.table, storage.ownerColumn, storage.textboxColumn, postgresEditorTextboxIDExpression(storage, "$3"))
 	var body []byte
 	err = tx.QueryRowContext(ctx, query, ref.CompanyID, ref.ResourceID, ref.DocumentID).
 		Scan(&snapshot.Revision, &body, &snapshot.Deleted, &snapshot.UpdatedTimestamp)
+	if errors.Is(err, sql.ErrNoRows) && ref.ResourceType == EntityTypeProcessStep {
+		return EditorJSONSnapshot{}, ErrNotFound
+	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return EditorJSONSnapshot{}, err
 	}
@@ -224,6 +233,17 @@ func getPostgresEditorTextboxSnapshot(r *PostgresRepo, ref EditorJSONDocumentRef
 }
 
 func insertEmptyPostgresEditorTextboxTx(ctx context.Context, tx *sql.Tx, storage postgresEditorTextboxStorage, ref EditorJSONDocumentRef) error {
+	if ref.ResourceType == EntityTypeProcessStep {
+		// The step command alone creates a step and its fixed editor section.
+		var exists bool
+		if err := tx.QueryRowContext(ctx, `select exists(select 1 from process_steps where company_id=$1::uuid and process_step_id=$2::uuid)`, ref.CompanyID, ref.ResourceID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return ErrNotFound
+		}
+		return nil
+	}
 	body := emptyEditorTextboxBody()
 	if ref.ResourceType == EntityTypeHuddleLogicGate || ref.ResourceType == EntityTypeKPI {
 		if ref.DocumentID != ref.ResourceID {
@@ -408,6 +428,10 @@ func mergeMangoTiptapDocuments(server, local json.RawMessage) (json.RawMessage, 
 }
 
 func updatePostgresEditorTextboxTx(ctx context.Context, tx *sql.Tx, storage postgresEditorTextboxStorage, ref EditorJSONDocumentRef, body json.RawMessage, revision int64, now time.Time) error {
+	if ref.ResourceType == EntityTypeProcessStep {
+		_, err := tx.ExecContext(ctx, `update process_steps set body_json=$3::jsonb,revision=$4,updated_timestamp=$5 where company_id=$1::uuid and process_step_id=$2::uuid`, ref.CompanyID, ref.ResourceID, body, revision, now)
+		return mapEditorOwnerTextLimitError(err)
+	}
 	if ref.ResourceType == EntityTypeNode {
 		_, err := tx.ExecContext(ctx, `update node_textboxes
 			set body_json=$4::jsonb,revision=$5,deleted_timestamp=null,updated_timestamp=$6
@@ -422,7 +446,42 @@ func updatePostgresEditorTextboxTx(ctx context.Context, tx *sql.Tx, storage post
 	return mapEditorOwnerTextLimitError(err)
 }
 
+func lockPostgresProcessEditorOwnerTx(ctx context.Context, tx *sql.Tx, ref EditorJSONDocumentRef) error {
+	if ref.ResourceType != EntityTypeLogicGate && ref.ResourceType != EntityTypeProcessStep {
+		return nil
+	}
+	ownerQuery := `select logic_gate_id::text from logic_gates where company_id=$1::uuid and logic_gate_id=$2::uuid for update`
+	if ref.ResourceType == EntityTypeProcessStep {
+		ownerQuery = `select logic_gate_id::text from logic_gates where company_id=$1::uuid and logic_gate_id=(select logic_gate_id from process_steps where company_id=$1::uuid and process_step_id=$2::uuid) for update`
+	}
+	var ownerID string
+	if err := tx.QueryRowContext(ctx, ownerQuery, ref.CompanyID, ref.ResourceID).Scan(&ownerID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	return nil
+}
+
 func commitPostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONCommitInput) (EditorJSONCommit, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return EditorJSONCommit{}, err
+	}
+	defer tx.Rollback()
+	commit, err := commitPostgresEditorTextboxDocumentTx(r, ctx, tx, input)
+	if err != nil {
+		return EditorJSONCommit{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return EditorJSONCommit{}, err
+	}
+	return commit, nil
+}
+
+func commitPostgresEditorTextboxDocumentTx(r *PostgresRepo, ctx context.Context, tx *sql.Tx, input EditorJSONCommitInput) (EditorJSONCommit, error) {
 	storage, ok := postgresEditorTextboxStorageFor(input.Document)
 	if !ok {
 		return EditorJSONCommit{}, ErrInvalid
@@ -431,12 +490,9 @@ func commitPostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONCommit
 	if err != nil {
 		return EditorJSONCommit{}, err
 	}
-	ctx := context.Background()
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
+	if err := lockPostgresProcessEditorOwnerTx(ctx, tx, input.Document); err != nil {
 		return EditorJSONCommit{}, err
 	}
-	defer tx.Rollback()
 	if input.ExpectedNodeWork != nil {
 		if input.Document.ResourceType != EntityTypeNode {
 			return EditorJSONCommit{}, ErrVersionConflict
@@ -454,9 +510,13 @@ func commitPostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONCommit
 	if err := insertEmptyPostgresEditorTextboxTx(ctx, tx, storage, input.Document); err != nil {
 		return EditorJSONCommit{}, err
 	}
-	query := fmt.Sprintf(`select revision,body_json,deleted_timestamp is not null,
+	deletedExpression := "deleted_timestamp is not null"
+	if input.Document.ResourceType == EntityTypeProcessStep {
+		deletedExpression = "false"
+	}
+	query := fmt.Sprintf(`select revision,body_json,%s,
 		greatest(clock_timestamp(),created_timestamp) from %s
-		where company_id=$1::uuid and %s=$2::uuid and %s=%s for update`, storage.table,
+		where company_id=$1::uuid and %s=$2::uuid and %s=%s for update`, deletedExpression, storage.table,
 		storage.ownerColumn, storage.textboxColumn, postgresEditorTextboxIDExpression(storage, "$3"))
 	var revision int64
 	var currentBody []byte
@@ -464,6 +524,9 @@ func commitPostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONCommit
 	var now time.Time
 	if err := tx.QueryRowContext(ctx, query, input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID).
 		Scan(&revision, &currentBody, &deleted, &now); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return EditorJSONCommit{}, ErrNotFound
+		}
 		return EditorJSONCommit{}, err
 	}
 	if deleted && input.BaseRevision != revision {
@@ -474,9 +537,6 @@ func commitPostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONCommit
 		return EditorJSONCommit{}, err
 	}
 	if input.BaseRevision != revision && editorJSONValuesEqual(currentBody, requestedBody) {
-		if err := tx.Commit(); err != nil {
-			return EditorJSONCommit{}, err
-		}
 		return EditorJSONCommit{OperationID: input.OperationID, Revision: revision,
 			SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: currentDocument,
 			Annotations: currentAnnotations, CommittedAt: now, Deduplicated: true}, nil
@@ -525,25 +585,39 @@ func commitPostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONCommit
 	}); err != nil {
 		return EditorJSONCommit{}, err
 	}
-	if err := tx.Commit(); err != nil {
-		return EditorJSONCommit{}, err
-	}
 	return EditorJSONCommit{OperationID: input.OperationID, EventID: eventID, Revision: nextRevision,
 		SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: nextDocument,
 		Annotations: nextAnnotations, CommittedAt: now}, nil
 }
 
 func deletePostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONDeleteInput) (EditorJSONCommit, error) {
-	storage, ok := postgresEditorTextboxStorageFor(input.Document)
-	if !ok {
-		return EditorJSONCommit{}, ErrInvalid
-	}
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return EditorJSONCommit{}, err
 	}
 	defer tx.Rollback()
+	commit, err := deletePostgresEditorTextboxDocumentTx(r, ctx, tx, input)
+	if err != nil {
+		return EditorJSONCommit{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return EditorJSONCommit{}, err
+	}
+	return commit, nil
+}
+
+func deletePostgresEditorTextboxDocumentTx(r *PostgresRepo, ctx context.Context, tx *sql.Tx, input EditorJSONDeleteInput) (EditorJSONCommit, error) {
+	if input.Document.ResourceType == EntityTypeProcessStep {
+		return EditorJSONCommit{}, ErrInvalid
+	}
+	storage, ok := postgresEditorTextboxStorageFor(input.Document)
+	if !ok {
+		return EditorJSONCommit{}, ErrInvalid
+	}
+	if err := lockPostgresProcessEditorOwnerTx(ctx, tx, input.Document); err != nil {
+		return EditorJSONCommit{}, err
+	}
 	if err := requirePostgresEditorJSONFormatTx(ctx, tx, input.Document.CompanyID); err != nil {
 		return EditorJSONCommit{}, err
 	}
@@ -570,9 +644,6 @@ func deletePostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONDelete
 		return EditorJSONCommit{}, err
 	}
 	if deleted {
-		if err := tx.Commit(); err != nil {
-			return EditorJSONCommit{}, err
-		}
 		return EditorJSONCommit{OperationID: input.OperationID, Revision: revision,
 			SchemaVersion: MangoTiptapSchemaVersion, JSONDocument: document,
 			Annotations: annotations, CommittedAt: now, Deduplicated: true}, nil
@@ -642,9 +713,6 @@ where company_id=$1::uuid and resource_type='project' and resource_id=$2::uuid a
 		ResourceID: input.Document.ResourceID, Permission: EntityPermissionEdit,
 		ResourceRevision: nextRevision, Payload: payload,
 	}); err != nil {
-		return EditorJSONCommit{}, err
-	}
-	if err := tx.Commit(); err != nil {
 		return EditorJSONCommit{}, err
 	}
 	return EditorJSONCommit{OperationID: input.OperationID, EventID: eventID, Revision: nextRevision,

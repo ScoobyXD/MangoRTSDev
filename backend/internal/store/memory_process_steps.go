@@ -7,6 +7,16 @@ import (
 	"time"
 )
 
+func (r *MemoryRepo) GetProcessStep(companyID, processStepID string) (domain.ProcessStep, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	step, exists := r.processSteps[key(companyID, processStepID)]
+	if !exists {
+		return domain.ProcessStep{}, ErrNotFound
+	}
+	return cloneProcessStep(step), nil
+}
+
 func (r *MemoryRepo) processStepBelongsLocked(companyID, logicGateID string, stepID *string) bool {
 	if stepID == nil {
 		return true
@@ -19,7 +29,7 @@ func (r *MemoryRepo) processStepsLocked(companyID, logicGateID string) []domain.
 	steps := []domain.ProcessStep{}
 	for _, step := range r.processSteps {
 		if step.CompanyID == companyID && step.LogicGateID == logicGateID {
-			steps = append(steps, step)
+			steps = append(steps, cloneProcessStep(step))
 		}
 	}
 	sort.Slice(steps, func(i, j int) bool {
@@ -45,6 +55,10 @@ func (r *MemoryRepo) processStepRelationshipsLocked(companyID, logicGateID strin
 }
 
 func (r *MemoryRepo) CreateProcessStep(input ProcessStepCreateInput) (ProcessStepMutationResult, error) {
+	body, err := normalizeProcessStepBody(input.BodyJSON)
+	if err != nil {
+		return ProcessStepMutationResult{}, err
+	}
 	input.Name = strings.TrimSpace(input.Name)
 	if input.CompanyID == "" || input.LogicGateID == "" || !validProcessStepName(input.Name) {
 		return ProcessStepMutationResult{}, ErrInvalid
@@ -57,12 +71,15 @@ func (r *MemoryRepo) CreateProcessStep(input ProcessStepCreateInput) (ProcessSte
 	if !r.processStepBelongsLocked(input.CompanyID, input.LogicGateID, input.AfterProcessStepID) {
 		return ProcessStepMutationResult{}, ErrInvalid
 	}
+	if r.editorJSONOwnerTextLimitExceededLocked(EditorJSONDocumentRef{CompanyID: input.CompanyID, ResourceType: EntityTypeLogicGate, ResourceID: input.LogicGateID}, int64(len(body))) {
+		return ProcessStepMutationResult{}, ErrEditorOwnerTextLimit
+	}
 	now := time.Now().UTC()
 	position, positionUpdates, ok := planProcessStepInsertion(r.processStepsLocked(input.CompanyID, input.LogicGateID), input.AfterProcessStepID)
 	if !ok {
 		return ProcessStepMutationResult{}, ErrInvalid
 	}
-	step := domain.ProcessStep{CompanyID: input.CompanyID, LogicGateID: input.LogicGateID, ProcessStepID: newUUIDv7String(), Name: input.Name, Position: position, CreatedTimestamp: now, UpdatedTimestamp: now}
+	step := domain.ProcessStep{CompanyID: input.CompanyID, LogicGateID: input.LogicGateID, ProcessStepID: newUUIDv7String(), Name: input.Name, Position: position, BodyJSON: body, CreatedTimestamp: now, UpdatedTimestamp: now}
 	result := ProcessStepMutationResult{Step: &step, PositionUpdates: positionUpdates}
 	if input.AfterProcessStepID != nil {
 		edge := domain.ResourceOperationalRelationship{CompanyID: input.CompanyID, ResourceOperationalRelationshipID: newUUIDv7String(), Source: domain.ProcessMapResourceRef{ResourceType: "process_step", ResourceID: *input.AfterProcessStepID}, Target: domain.ProcessMapResourceRef{ResourceType: "process_step", ResourceID: step.ProcessStepID}, CreatedTimestamp: now}
@@ -78,7 +95,7 @@ func (r *MemoryRepo) CreateProcessStep(input ProcessStepCreateInput) (ProcessSte
 		existing.UpdatedTimestamp = now
 		r.processSteps[key(input.CompanyID, stepID)] = existing
 	}
-	r.processSteps[key(input.CompanyID, step.ProcessStepID)] = step
+	r.processSteps[key(input.CompanyID, step.ProcessStepID)] = cloneProcessStep(step)
 	if result.Relationship != nil {
 		r.resourceOperationalRelationships[key(input.CompanyID, result.Relationship.ResourceOperationalRelationshipID)] = *result.Relationship
 	}
@@ -108,11 +125,15 @@ func (r *MemoryRepo) UpdateProcessStep(input ProcessStepUpdateInput) (ProcessSte
 		return ProcessStepMutationResult{}, err
 	}
 	r.processSteps[key(input.CompanyID, input.ProcessStepID)] = step
-	return ProcessStepMutationResult{Step: &step, Events: events}, nil
+	resultStep := cloneProcessStep(step)
+	return ProcessStepMutationResult{Step: &resultStep, Events: events}, nil
 }
 
 func (r *MemoryRepo) deleteProcessStepLocked(companyID, stepID string) {
 	delete(r.processSteps, key(companyID, stepID))
+	editorKey := editorJSONMemoryKey(EditorJSONDocumentRef{CompanyID: companyID, ResourceType: EntityTypeProcessStep, ResourceID: stepID, DocumentID: stepID})
+	delete(r.editorJSONOperations, editorKey)
+	delete(r.editorJSONVersions, editorKey)
 	for assignmentKey, assignment := range r.nodeLogicGateAssignments {
 		if assignment.CompanyID == companyID && assignment.ProcessStepID != nil && *assignment.ProcessStepID == stepID {
 			assignment.ProcessStepID = nil

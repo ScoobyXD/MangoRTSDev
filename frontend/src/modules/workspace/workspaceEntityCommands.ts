@@ -7,7 +7,7 @@ export type WorkspaceEntityCommandRequest = <T>(path: string, init?: RequestInit
 
 export type WorkspaceProcessDefinition = {
   logic_gate_id: string;
-  steps: Array<{ process_step_id: string; name: string }>;
+  steps: Array<{ process_step_id: string; name: string; body_json?: MangoTiptapDocument }>;
   relationships: ProcessStepRelationship[];
   layout: Omit<ProcessStepMapLayout, "revision">;
   gvic_assignments?: Array<{ role: LogicGateRACIRole; principal_type: LogicGateRACIPrincipalType; principal_id: string }>;

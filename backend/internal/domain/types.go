@@ -1192,6 +1192,7 @@ type LogicGateDetails struct {
 type EditorSaveVersionItem struct {
 	InformationID       string    `json:"information_id"`
 	SourceInformationID string    `json:"source_information_id"`
+	ProcessStepID       *string   `json:"process_step_id,omitempty"`
 	Type                string    `json:"type"`
 	Information         string    `json:"information"`
 	CreatedTimestamp    time.Time `json:"created_timestamp"`
@@ -1342,13 +1343,15 @@ type LogicGateWorkPermissions struct {
 }
 
 type ProcessStep struct {
-	CompanyID        string    `json:"company_id"`
-	ProcessStepID    string    `json:"process_step_id"`
-	LogicGateID      string    `json:"logic_gate_id"`
-	Name             string    `json:"name"`
-	Position         int       `json:"position"`
-	CreatedTimestamp time.Time `json:"created_timestamp"`
-	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+	CompanyID        string          `json:"company_id"`
+	ProcessStepID    string          `json:"process_step_id"`
+	LogicGateID      string          `json:"logic_gate_id"`
+	Name             string          `json:"name"`
+	Position         int             `json:"position"`
+	BodyJSON         json.RawMessage `json:"body_json"`
+	Revision         int64           `json:"revision"`
+	CreatedTimestamp time.Time       `json:"created_timestamp"`
+	UpdatedTimestamp time.Time       `json:"updated_timestamp"`
 }
 
 type LogicGateWorkNode struct {

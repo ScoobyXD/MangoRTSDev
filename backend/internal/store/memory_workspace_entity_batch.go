@@ -305,8 +305,8 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 		result.ProcessSteps = make([]domain.ProcessStep, 0, len(definition.Steps))
 		result.StepRelationships = make([]domain.ResourceOperationalRelationship, 0, len(definition.Relationships))
 		for index, source := range definition.Steps {
-			step := domain.ProcessStep{CompanyID: input.CompanyID, ProcessStepID: source.ProcessStepID, LogicGateID: definition.LogicGateID, Name: source.Name, Position: (index + 1) * processStepPositionStride, CreatedTimestamp: now, UpdatedTimestamp: now}
-			r.processSteps[key(input.CompanyID, step.ProcessStepID)] = step
+			step := domain.ProcessStep{CompanyID: input.CompanyID, ProcessStepID: source.ProcessStepID, LogicGateID: definition.LogicGateID, Name: source.Name, Position: (index + 1) * processStepPositionStride, BodyJSON: source.BodyJSON, CreatedTimestamp: now, UpdatedTimestamp: now}
+			r.processSteps[key(input.CompanyID, step.ProcessStepID)] = cloneProcessStep(step)
 			result.ProcessSteps = append(result.ProcessSteps, step)
 		}
 		for _, source := range definition.Relationships {

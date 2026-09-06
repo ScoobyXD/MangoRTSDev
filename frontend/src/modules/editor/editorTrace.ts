@@ -1,4 +1,4 @@
-export type EditorTraceResourceType = "node" | "project" | "logic_gate" | "huddle_logic_gate" | "huddle_node" | "kpi";
+export type EditorTraceResourceType = "node" | "project" | "logic_gate" | "process_step" | "huddle_logic_gate" | "huddle_node" | "kpi";
 
 export type EditorTraceDataValue = string | number | boolean | null;
 export type EditorTraceData = Readonly<Record<string, EditorTraceDataValue | undefined>>;
@@ -616,6 +616,7 @@ export function createEditorTraceContext(input: {
     resourceType: input.resourceType,
     documentLabel: input.resourceType === "logic_gate"
       ? "Process editor"
+      : input.resourceType === "process_step" ? "Process step editor"
       : input.resourceType === "project" ? "Project editor" : "Node editor",
     inputSequence: 0,
     currentInputID: 0,

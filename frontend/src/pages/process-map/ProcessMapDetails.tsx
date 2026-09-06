@@ -14,6 +14,7 @@ import { logicGateDisplayRACIAssignments, type LogicGateResourceRACIPayload } fr
 import type { LogicGateRACIAssignment, LogicGateRACIPrincipalType, LogicGateRACIRole } from "../../modules/logic-gates/types.js";
 import { canEditResourceAccess } from "../../modules/nodes/types.js";
 import type { EditorTabID } from "../../modules/editor/editorTabs.js";
+import type { ProcessStep } from "../../modules/kanban/processWork.js";
 import "./processMapDetails.css";
 
 export type ProcessMapDetailsContents = {
@@ -32,9 +33,11 @@ export type ProcessMapDetailsProps = {
   refreshVersion?: number;
   onChange?: (contents: ProcessMapDetailsContents) => void;
   onBusyChange?: (busy: boolean) => void;
+  steps?: readonly ProcessStep[];
+  onStepBodyChange?: (stepID: string, body: MangoTiptapDocument) => void;
 };
 
-export function ProcessMapDetails({ apiBase, companyID, processID, isNew = false, folderID = "", canEdit = true, disabled = false, refreshVersion = 0, onChange, onBusyChange }: ProcessMapDetailsProps) {
+export function ProcessMapDetails({ apiBase, companyID, processID, isNew = false, folderID = "", canEdit = true, disabled = false, refreshVersion = 0, onChange, onBusyChange, steps, onStepBodyChange }: ProcessMapDetailsProps) {
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const [users, setUsers] = useState<CompanyUser[]>([]);
   const [groups, setGroups] = useState<CompanyUserGroupsResponse>({ groups: [], members: [] });
@@ -237,7 +240,8 @@ export function ProcessMapDetails({ apiBase, companyID, processID, isNew = false
     {editorOpen && <section id={panelID} className="process-map-details__editor" aria-label="Process SOP editor">
       <BareMangoEditorToolbar controls={controls} activeTab={editorTab} onSelectTab={setEditorTab} formattingDisabled={!writeEnabled} />
       <Suspense fallback={<div role="status">Loading editor…</div>}>
-        <LogicGateTiptapEditorSurface key={`${processID}:${documentID}`} companyID={companyID} resourceID={processID} documentID={documentID}
+        <LogicGateTiptapEditorSurface key={`${processID}:${documentID}`} apiBase={apiBase} companyID={companyID} resourceID={processID} documentID={documentID}
+          steps={steps} onStepBodyChange={onStepBodyChange}
           dataAttributes={{ "data-process-sop-document-id": documentID }}
           value={isNew && contents.current.editor_document ? JSON.stringify(contents.current.editor_document) : undefined}
           saveMode={isNew ? "local" : "server"} requestJSON={requestJSON} editable={writeEnabled}
