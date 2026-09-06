@@ -122,6 +122,9 @@
 .mango-assistant .mango-assistant-collapse svg,
 .mango-assistant .mango-assistant-expand svg { width: 16px; height: 16px; }
 .mango-assistant .mango-assistant-send { min-height: 32px; background: #475569; color: #fff; }
+.mango-assistant .mango-assistant-microphone { display: grid; place-items: center; width: 32px; height: 32px; padding: 6px; flex-shrink: 0; }
+.mango-assistant-microphone svg { width: 18px; height: 18px; }
+.mango-assistant .mango-assistant-microphone[aria-pressed="true"] { color: #b91c1c; background: #fee2e2; border-color: #fca5a5; }
 .mango-assistant-transcript { border-bottom: 1px solid rgba(148, 163, 184, 0.25); }
 .mango-assistant-header { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 9px 10px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); font-size: 12px; }
 .mango-assistant-header .mango-assistant-clear { margin-left: auto; }

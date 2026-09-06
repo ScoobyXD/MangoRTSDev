@@ -22,10 +22,11 @@ const (
 	assistantRequestRetention = 15 * time.Minute
 )
 
-// AssistantConfig is server-only. Both settings are required to enable chat.
+// AssistantConfig is server-only. APIKey and Model enable chat; DeepgramAPIKey enables dictation.
 type AssistantConfig struct {
-	APIKey string
-	Model  string
+	APIKey         string
+	Model          string
+	DeepgramAPIKey string
 }
 
 type mangoAssistant struct {

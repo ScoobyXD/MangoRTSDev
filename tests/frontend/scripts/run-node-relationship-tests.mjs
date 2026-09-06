@@ -178,6 +178,10 @@ const componentTests = [
     file: resolve(frontendRoot, ".test-dist/tests/frontend/app/appAssistant.test.js"),
   },
   {
+    source: resolve(repoRoot, "tests/frontend/app/appAssistantDictation.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/app/appAssistantDictation.test.js"),
+  },
+  {
     source: resolve(repoRoot, "tests/frontend/app/appModalPortal.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/app/appModalPortal.test.js"),
   },

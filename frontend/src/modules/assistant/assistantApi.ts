@@ -39,6 +39,35 @@ export function getAssistantStatus(apiBase: string, companyID: string, signal: A
   return requestJSON(apiBase, `/v1/assistant/status?company_id=${encodeURIComponent(companyID)}`, { signal });
 }
 
+export async function transcribeAssistantAudio(apiBase: string, companyID: string, audio: Blob, signal: AbortSignal): Promise<string> {
+  const body = new FormData();
+  body.append("audio", audio, "dictation");
+  let result: { text: string };
+  try {
+    result = await requestJSON(apiBase, `/v1/assistant/transcriptions?company_id=${encodeURIComponent(companyID)}`, {
+      method: "POST", body, signal, timeoutMs: 40_000,
+    });
+  } catch (error) {
+    if (isTerminalAuthFailureError(error) || error instanceof RealtimeMutationBlockedError) throw error;
+    if (error instanceof Error && error.name === "TimeoutError") throw new Error("Transcription timed out. Please try a shorter recording.");
+    if (error instanceof APIHTTPError) {
+      if (error.status === 403) throw new Error("Dictation is unavailable for this company or account.");
+      if (error.status === 503) throw new Error("Dictation is unavailable. Ask your administrator to configure Deepgram.");
+      if (error.status === 413) throw new Error("The recording is too large. Record a shorter message (maximum 8 MiB).");
+      if (error.status === 415) throw new Error("This recording format is unsupported. Try another browser.");
+      if (error.status === 422) throw new Error(error.bodyText.includes("transcription_text_too_long")
+        ? "The transcript exceeds 8,000 characters. Please record a shorter message."
+        : "No speech was heard. Please try recording again.");
+      if (error.status === 408 || error.status === 504) throw new Error("Transcription timed out. Please try a shorter recording.");
+    }
+    throw new Error("The recording could not be transcribed. Check your connection and try again.");
+  }
+  if (!result || typeof result.text !== "string") throw new Error("Transcription returned an invalid response. Please try again.");
+  const text = result.text.trim();
+  if (!text) throw new Error("No speech was heard. Please try recording again.");
+  return text;
+}
+
 export async function getAssistantTrace(apiBase: string, companyID: string, requestID: string, signal: AbortSignal): Promise<AssistantTraceSnapshot> {
   const snapshot = await requestJSON<AssistantTraceSnapshot>(apiBase, `/v1/assistant/trace?company_id=${encodeURIComponent(companyID)}&request_id=${encodeURIComponent(requestID)}`, { signal, timeoutMs: 7_000 });
   if (!isAssistantResult(snapshot) || !Array.isArray(snapshot.events)

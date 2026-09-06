@@ -48,6 +48,32 @@ Use Mango's existing authenticated app setup and selected `company_id` query sco
 
 The developer-authorized Inspect view records the current interaction's actual final provider requests and native skill/tool activity, including failures and Stop. Clearing or reloading browser chat loses its visible history. Server capture recovery lasts until the next Send by the same actor/company, fifteen minutes, or backend restart; saved Process/Node link receipts remain available for fifteen minutes with fresh permission checks. Provider credentials, authentication headers, and hidden private reasoning are omitted explicitly. No MCP server, general shell/filesystem tool, automatic retry, compaction, or durable trace database is enabled.
 
+## Optional English dictation
+
+The composer microphone records on the first click and transcribes after the next click. Nova-3 English fills the editable draft; the user still presses Send. It needs browser microphone permission and a secure page (HTTPS or localhost). Dictation uses the existing Go API directly and needs no end-user installation or additional runtime service.
+
+Supply one separate server-side Deepgram key source:
+
+| Setting | Value |
+| --- | --- |
+| `DEEPGRAM_API_KEY` | A Deepgram API key injected into the server environment; takes precedence when nonempty. |
+| `DEEPGRAM_API_KEY_SECRET_ARN` | An alternative Secrets Manager ARN resolved once into backend memory at startup through the AWS credential chain. |
+
+For dev deployment, an operator creates a separate Secrets Manager secret containing only the raw Deepgram key and sets the non-secret GitHub repository variable `TF_DEEPGRAM_API_KEY_SECRET_ARN` to its ARN. The optional Terraform setting is `deepgram_api_key_secret_arn`; it requires configured dev Mango chat. ECS injects `DEEPGRAM_API_KEY` into the API task only. Neither GitHub nor frontend configuration receives the key. Apply and deploy through the existing authorized dev release process, then replace running tasks after key rotation. These repository changes do not provision a secret, grant cloud access, or deploy anything.
+
+For cloud-integrated localhost, set the non-secret ARN in the backend PowerShell session before using the existing launcher:
+
+```powershell
+$env:DEEPGRAM_API_KEY_SECRET_ARN = "arn:aws:secretsmanager:REGION:ACCOUNT:secret:NAME"
+.\scripts\start_local_cognito_backend.ps1 -AwsProfile mangorts-dev -StopExisting
+```
+
+The backend's AWS identity needs `secretsmanager:GetSecretValue` for that exact secret. The launcher does not load the Deepgram Terraform setting. Do not paste provider keys into chat or save them in frontend files or local plaintext configuration. Missing configuration returns `503 transcription_unavailable` while ordinary chat remains available; an explicitly configured ARN that cannot be resolved fails startup. Restart the backend after changing the key.
+
+The authenticated endpoint is `POST /v1/assistant/transcriptions?company_id=...`, accepts one multipart `audio` file, and returns `{ "text": "..." }`. Server options are fixed to `model=nova-3`, `language=en`, and `smart_format=true`, with no paid add-ons. Browser recording stops at two minutes; uploads allow 8 MiB of audio plus 64 KiB of multipart overhead. The browser gives permission 30 seconds and recorder finalization 5 seconds. The upload read limit is 10 seconds, provider timeout 20 seconds, handler context 32 seconds, endpoint write deadline 35 seconds, and browser request timeout 40 seconds. A transcript exceeding the remaining 8,000-character draft allowance is rejected without truncation. Audio is temporary in application memory; Mango does not create durable recordings. This describes Mango storage, not the provider account's retention policy.
+
+The checked-in dev CloudFront configuration serves the top-level frontend from S3, forwards `/v1/*` POST requests uncached, and allows that path before WAF managed body rules. It defines no frontend microphone-blocking Permissions-Policy; the Go API's `microphone=()` response header is not the top-level HTML policy. Source inspection is not live deployment verification. After secure key provisioning and an authorized deployment, verify microphone access and Stop-to-draft timing through the deployed HTTPS app with a real short recording, including a larger upload and preserved draft/Process reference. Controlled provider and recorder tests do not prove live credentials, browser codecs, billing, or CloudFront/WAF behavior.
+
 [AI & MCP](tests/AI%26MCP.md) is the single current record for business rules, CRUD/HTTP tool mappings, permissions, request limits, confirmation behavior, Process execution, attachment constraints, and verification coverage. Keep setup and credential instructions here; update tool behavior and the inventory there.
 
 Runtime references: [Pi SDK](https://github.com/earendil-works/pi/blob/v0.85.0/packages/coding-agent/docs/sdk.md), [Pi native skills](https://github.com/earendil-works/pi/blob/v0.85.0/packages/coding-agent/docs/skills.md), and the installed `ai/runtime/node_modules/@earendil-works/pi-ai/dist/providers/data/openai.json` model catalog.

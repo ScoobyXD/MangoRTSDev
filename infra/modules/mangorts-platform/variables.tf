@@ -491,6 +491,12 @@ variable "openai_api_key_secret_arn" {
   default     = ""
 }
 
+variable "deepgram_api_key_secret_arn" {
+  description = "Optional AWS Secrets Manager ARN containing the plaintext Deepgram API key for dev Mango chat dictation."
+  type        = string
+  default     = ""
+}
+
 variable "nylas_client_id" {
   description = "Nylas application client/application ID for Hosted OAuth. Leave empty to disable Communications email integration."
   type        = string

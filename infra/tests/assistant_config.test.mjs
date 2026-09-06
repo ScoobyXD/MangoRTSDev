@@ -60,3 +60,27 @@ test("DEV deployment passes only the OpenAI secret ARN through GitHub", () => {
   assert.doesNotMatch(devWorkflow, /secrets\.OPENAI_API_KEY|secrets\.TF_OPENAI_API_KEY/);
   assert.doesNotMatch(qaWorkflow + prodWorkflow, /TF_ASSISTANT_MODEL|TF_OPENAI_API_KEY_SECRET_ARN/);
 });
+
+test("dictation is optional and can only be configured alongside DEV chat", () => {
+  assert.match(moduleVariables, /variable "deepgram_api_key_secret_arn"[\s\S]*?default\s*=\s*""/);
+  assert.match(devVariables, /variable "deepgram_api_key_secret_arn"[\s\S]*?default\s*=\s*""/);
+  assert.match(moduleLocals, /dictation_enabled\s*=\s*local\.assistant_enabled && trimspace\(var\.deepgram_api_key_secret_arn\) != ""/);
+  assert.match(moduleECS, /condition\s*=\s*trimspace\(var\.deepgram_api_key_secret_arn\) == "" \|\| local\.assistant_enabled/);
+  assert.match(devMain, /deepgram_api_key_secret_arn\s*=\s*var\.deepgram_api_key_secret_arn/);
+});
+
+test("Deepgram key injection and retrieval permission are confined to the API execution role", () => {
+  assert.match(moduleECS, /local\.dictation_enabled \? \[\s*\{ name = "DEEPGRAM_API_KEY", valueFrom = trimspace\(var\.deepgram_api_key_secret_arn\) \}\s*\] : \[\]/);
+  assert.match(moduleIAM, /data "aws_iam_policy_document" "ecs_execution_secrets"[\s\S]*?actions = \["secretsmanager:GetSecretValue"\][\s\S]*?var\.deepgram_api_key_secret_arn/);
+  const apiEnvironment = moduleECS.slice(moduleECS.indexOf("environment = concat("), moduleECS.indexOf("secrets = concat("));
+  assert.doesNotMatch(apiEnvironment, /DEEPGRAM|deepgram/);
+  assert.doesNotMatch(moduleEmailSQS + moduleRealtimeValkey, /DEEPGRAM|deepgram/);
+  assert.doesNotMatch(moduleIAM.slice(moduleIAM.indexOf('data "aws_iam_policy_document" "email_worker_execution_secrets"')), /deepgram_api_key_secret_arn/);
+});
+
+test("DEV deployment passes only an optional Deepgram secret ARN through GitHub", () => {
+  assert.match(devWorkflow, /TF_DEEPGRAM_API_KEY_SECRET_ARN: \$\{\{ vars\.TF_DEEPGRAM_API_KEY_SECRET_ARN \|\| '' \}\}/);
+  assert.match(devWorkflow, /deepgram_api_key_secret_arn = \$\(json_string "\$TF_DEEPGRAM_API_KEY_SECRET_ARN"\)/);
+  assert.doesNotMatch(devWorkflow, /secrets\.(?:TF_)?DEEPGRAM|TF_DEEPGRAM_API_KEY_SECRET_ARN:\?/);
+  assert.doesNotMatch(qaWorkflow + prodWorkflow, /DEEPGRAM|deepgram/);
+});
