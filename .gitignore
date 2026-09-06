@@ -1,12 +1,13 @@
 docs/MangoOS.txt
 .env
 .agent-state/
+# Installed JavaScript dependencies
+node_modules/
 # Frontend build artifacts
 frontend/.test-dist/
 frontend/.mangorts-realtime-production-path-*/
 frontend/dist/
 frontend/tsconfig.tsbuildinfo
-frontend/node_modules/
 backend/go-build-cache/
 backend/api-dev.log
 backend/api-dev.err.log
