@@ -18,7 +18,3 @@
 16. Deepgram credentials remain on the server and must never enter browser code, responses, or logs.
 17. Missing Deepgram configuration must return a transcription-unavailable error while leaving typed drafts usable.
 18. Transcription must use the shared authenticated API transport and remain independent of agent and realtime mutation availability.
-
-## Process story
-
-The user types into Mango chat, places the caret, and clicks the microphone. Recording turns the microphone red; detected sound animates the waves. Clicking it again or reaching one minute of silence releases the microphone and transcribes the completed recording. Nova-3 returns text that is inserted at the saved position, then typing resumes. Closing the chat cancels pending work. Send always remains disabled.
