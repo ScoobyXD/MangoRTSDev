@@ -356,7 +356,11 @@ function AssistantSession({ apiBase, companyID, userID, bottomInset }: Props & {
           </button>
           {running
             ? <button type="button" className="mango-assistant-send" onClick={stop}>Stop</button>
-            : <button type="submit" className="mango-assistant-send" disabled={!available || Boolean(historyError) || pickerOpen || (dictation.phase !== "recording" && (!draft.trim() || dictation.busy))}>Send</button>}
+            : <button type="submit" className="mango-assistant-send" aria-label="Send" title="Send" disabled={!available || Boolean(historyError) || pickerOpen || (dictation.phase !== "recording" && (!draft.trim() || dictation.busy))}>
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 19V5M5 12l7-7 7 7" />
+              </svg>
+            </button>}
         </form>
         {dictation.message && <p className="mango-assistant-availability" role="status">{dictation.message}</p>}
         {(availabilityMessage || historyError) && <p className="mango-assistant-availability" role="status">{availabilityMessage || historyError}</p>}
