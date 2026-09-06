@@ -114,6 +114,20 @@
 .mango-assistant .mango-assistant-send { min-height: 32px; background: #475569; color: #fff; }
 .mango-assistant .mango-assistant-send-icon { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; flex-shrink: 0; border-radius: 50%; border-color: #000; background: #000; }
 .mango-assistant-send-icon svg { width: 20px; height: 20px; }
+.mango-assistant .mango-assistant-microphone { position: relative; display: grid; place-items: center; width: 32px; height: 32px; padding: 6px; flex-shrink: 0; }
+.mango-assistant-microphone svg { width: 18px; height: 18px; }
+.mango-assistant .mango-assistant-microphone[aria-pressed="true"] { color: #b91c1c; background: #fee2e2; border-color: #fca5a5; }
+.mango-assistant-sound-waves { position: absolute; inset: -4px; pointer-events: none; opacity: 0; transform: scale(.8); transition: opacity 120ms, transform 100ms; }
+.mango-assistant-sound-waves svg { width: 100%; height: 100%; }
+.mango-assistant-sound-waves[data-active="true"] { opacity: calc(.45 + var(--voice-level) * .55); transform: scale(calc(.8 + var(--voice-level) * .3)); }
+.mango-assistant-sound-waves[data-active="true"] path { transform-origin: center; animation: mango-voice-wave 650ms ease-in-out infinite alternate; }
+.mango-assistant-sound-waves[data-active="true"] path + path { animation-delay: -325ms; }
+@keyframes mango-voice-wave { to { transform: scaleX(1.12); } }
+@media (prefers-reduced-motion: reduce) {
+  .mango-assistant-sound-waves { transition: none; }
+  .mango-assistant-sound-waves[data-active="true"] { opacity: 1; transform: none; }
+  .mango-assistant-sound-waves[data-active="true"] path { animation: none; }
+}
 .mango-assistant-header { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 9px 10px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); font-size: 12px; }
 .mango-assistant-availability { padding: 0 12px 8px; max-height: 40px; overflow-y: auto; font-size: 11px; line-height: 16px; color: #64748b; }
 
