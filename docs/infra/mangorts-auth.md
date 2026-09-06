@@ -18,7 +18,7 @@ A new recipient opens the link and chooses a password. The valid invitation prov
 
 Existing users gain the new company membership and keep their previous memberships, profile, and company roles. Settings selects and switches companies. Ordinary removal cannot remove a final company membership. Only dev-admin can delete another whole account and its Cognito identity; self-deletion is prohibited.
 
-The server's explicit `MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS` allowlist is the sole initial dev-admin exception. Keep it limited to Jonat's controlled identity and clear it after bootstrap. Public forms and invitations cannot request dev-admin.
+The server's explicit `MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS` allowlist is the sole initial dev-admin exception. Bootstrap also requires a signed boolean `email_verified=true` claim; an unverified or missing claim cannot grant developer access. Both Cognito pools require email changes to be verified before the new address takes effect. Keep the allowlist limited to Jonat's controlled identity and clear it after bootstrap. Public forms and invitations cannot request dev-admin.
 
 ## Mailbox boundary
 
@@ -38,7 +38,7 @@ A read-only check on 2026-09-06 found `ProductionAccessEnabled=false` and `Sendi
 
 1. Use the designated human-run schema process to apply `backend/db/migrations/20260906_user_mailbox_access.sql` before starting the new backend. It adds the flag with true for existing rows, then changes the insert default to false. Run it once, on supported PostgreSQL 17.x or later under the repository's database procedures.
 2. Deploy the backend and frontend together with the matching schema. The canonical schema already gives newly initialized databases the false default.
-3. Review and apply the appropriate Terraform environment separately. The shared module covers dev/QA; production uses `infra/aws-prod/cognito.tf`. This enables self-signup and creates the verification-link domain. Do not recreate the existing pool or app client.
+3. Review and apply the appropriate Terraform environment separately. The shared module covers dev/QA; production uses `infra/aws-prod/cognito.tf`. This enables self-signup, requires verification before email changes, and creates the verification-link domain. Do not recreate the existing pool or app client.
 4. Confirm real delivery to an ordinary external address for both Cognito confirmation/reset mail and Mango SES invitation mail. Cognito's default email delivery is quota-limited; inspect the deployed sending configuration and quota before a public launch. SES sandbox recipient restrictions, if present, must be removed through the normal human-operated setup.
 5. Verify confirmation on another device signs in the waiting browser, a new user receives one company with no mailbox calls, an invitee joins the right company, and an existing mailbox user can still use Mail.
 
@@ -56,3 +56,4 @@ For cloud-integrated local development use `scripts/start_local_cognito_backend.
 
 - [Cognito signup and confirmation](https://docs.aws.amazon.com/cognito/latest/developerguide/signing-up-users-in-your-app.html)
 - [Cognito verification links and message templates](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pool-settings-message-customizations.html)
+- [Cognito verification before email changes](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_UserAttributeUpdateSettingsType.html)

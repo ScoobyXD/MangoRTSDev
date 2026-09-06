@@ -5,7 +5,7 @@
 3. The original signup page may hold the submitted password only in memory while waiting up to ten minutes for confirmation; cancellation, timeout, or leaving the page must stop that wait.
 4. After confirmation, the waiting browser must authenticate with the submitted password; a closed or refreshed page must require ordinary sign-in.
 5. The first authenticated request by a user without memberships must create exactly one company and a company-admin membership atomically across retries and concurrent requests.
-6. Public company setup must use the fixed company-admin role; only the explicit server bootstrap allowlist may grant dev-admin.
+6. Public company setup must use the fixed company-admin role; dev-admin bootstrap requires both the explicit server email allowlist and a signed `email_verified` claim equal to boolean `true`.
 7. Additional manual company creation must require dev-admin authority.
 8. New Mango users must have mailbox access disabled, regardless of signup path or later company invitations.
 9. Signup and product access must not require Google Audience, a Google account, Nylas, a mailbox grant, or an invitation.

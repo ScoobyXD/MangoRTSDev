@@ -24,12 +24,13 @@ var (
 const maxTokenIssuedAtClockSkew = 5 * time.Minute
 
 type Claims struct {
-	Subject  string
-	Email    string
-	Name     string
-	Issuer   string
-	Client   string
-	IssuedAt time.Time
+	Subject       string
+	Email         string
+	EmailVerified bool
+	Name          string
+	Issuer        string
+	Client        string
+	IssuedAt      time.Time
 }
 
 type ValidatorConfig struct {
@@ -131,13 +132,15 @@ func (v *Validator) Validate(ctx context.Context, token string) (Claims, error) 
 		return Claims{}, ErrInvalidToken
 	}
 
+	emailVerified, _ := raw["email_verified"].(bool)
 	return Claims{
-		Subject:  subject,
-		Email:    getString(raw, "email"),
-		Name:     displayNameFromClaims(raw),
-		Issuer:   getString(raw, "iss"),
-		Client:   client,
-		IssuedAt: time.Unix(issuedAtUnix, 0).UTC(),
+		Subject:       subject,
+		Email:         getString(raw, "email"),
+		EmailVerified: emailVerified,
+		Name:          displayNameFromClaims(raw),
+		Issuer:        getString(raw, "iss"),
+		Client:        client,
+		IssuedAt:      time.Unix(issuedAtUnix, 0).UTC(),
 	}, nil
 }
 

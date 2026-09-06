@@ -7,6 +7,10 @@ resource "aws_cognito_user_pool" "main" {
 
   auto_verified_attributes = ["email"]
 
+  user_attribute_update_settings {
+    attributes_require_verification_before_update = ["email"]
+  }
+
   username_attributes = ["email"]
 
   verification_message_template {

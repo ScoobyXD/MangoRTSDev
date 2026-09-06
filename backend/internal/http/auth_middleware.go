@@ -357,7 +357,7 @@ func isAuthResolutionTimeout(err error) bool {
 func (s *Server) maybeBootstrapDevAdmin(ctx context.Context, claims auth.Claims) (bool, error) {
 	config := s.bootstrapDevAdmin
 	email := normalizeEmailForCompare(claims.Email)
-	if email == "" || len(config.Emails) == 0 {
+	if !claims.EmailVerified || email == "" || len(config.Emails) == 0 {
 		return false, nil
 	}
 	allowed := false

@@ -21,9 +21,10 @@
 19. Concurrent current-membership checks for one user must share one in-flight database read while realtime admission and Process Map subscription still use current membership.
 20. Request cancellation must reach auth reads, transactions, membership reads, and lock acquisition; one auth resolution and its reads must have a six-second deadline, write transactions a five-second deadline, statements inside those transactions a four-second limit, and lock waits a one-second limit.
 21. An authentication-resolution or realtime-admission timeout must roll back its transaction, release its database connection, and return `504 authentication_timeout`; a non-timeout storage failure on those paths must return `503 authentication_unavailable`.
-22. Initial company creation must atomically recheck memberships under a cross-process lock and create one company plus membership; public signup grants company-admin, and dev-admin bootstrap requires the explicit server allowlist.
+22. Initial company creation must atomically recheck memberships under a cross-process lock and create one company plus membership; public signup grants company-admin, and dev-admin bootstrap requires an allowlisted email with the signed token's `email_verified` claim equal to boolean `true`.
 23. A new Mango user must have mailbox_enabled=false; auth refresh, invitations, and company switching must preserve that stored account policy.
 24. A mailbox-disabled actor must be denied personal and shared mailbox HTTP and realtime access without contacting the provider; ordinary product authentication must remain available.
+25. Cognito must verify a replacement email before changing the user's current email attribute.
 
 ## Process Story
 
