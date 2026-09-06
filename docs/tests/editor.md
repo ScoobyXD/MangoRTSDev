@@ -51,6 +51,8 @@
 49. Process Save version and restore use one server transaction for the overview and surviving Step instructions without changing Step topology.
 50. Callbacks from a removed Step or closed Process editor must not change the current Process errors or save status.
 51. A visible Step editor must accept its exact `editor-json:process_step:<step ID>:<step ID>` realtime subscription and decode its canonical editor events through the shared client.
+52. Renaming a Step must preserve its active editor, pending text and formatting, focus, caret, and undo history.
+53. Opening a Step mention notification must scroll to and highlight its exact mention and instruction card inside the owning Process.
 
 Last updated: 2026-09-05
 

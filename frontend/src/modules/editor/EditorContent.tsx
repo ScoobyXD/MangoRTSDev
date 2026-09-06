@@ -97,7 +97,6 @@ import { LogicGateTiptapEditorSurface } from "./LogicGateTiptapEditorSurface.js"
 import { LogicGateKPISection } from "../huddles/LogicGateKPISection";
 import { LogicGateQDTracker } from "../logic-gates/LogicGateQDTracker";
 import { logicGateDisplayRACIAssignments, type LogicGateResourceRACIPayload } from "../logic-gates/raciPresentation.js";
-import { scheduleTransientInformationFocus } from "./transientInformationFocus.js";
 import { parseMangoTiptapDocument } from "./tiptap/mangoTiptapDocument.js";
 import type { EditorEntityLink } from "./editorEntityLinks.js";
 
@@ -592,7 +591,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const queuedSaveRef = useRef<DocumentSaveRequest | null>(null);
   const saveInFlightRef = useRef(false);
   const editorRootRef = useRef<HTMLDivElement | null>(null);
-  const handledTransientFocusRequestRef = useRef("");
   const lastAppliedSelectionChangedAtRef = useRef(0);
   const shouldFocusEditorForSelectionRef = useRef(true);
   const pendingEditorFontSizeRef = useRef<number | null>(null);
@@ -2264,15 +2262,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setRelationshipTabAnchorCenterPx(anchor.left + (anchor.width / 2) - rootRect.left);
   }, []);
 
-  useEffect(() => {
-    const informationID = focusInformationID?.trim() ?? "";
-    if (linkedEntityKind !== "logic_gate" || !informationID || documentInformationID !== informationID) return undefined;
-    const requestKey = `${linkedNodeID}:${informationID}:${focusMentionUserID ?? ""}:${focusRequestID ?? 0}`;
-    if (handledTransientFocusRequestRef.current === requestKey) return undefined;
-    handledTransientFocusRequestRef.current = requestKey;
-    return scheduleTransientInformationFocus({ root: () => editorRootRef.current, informationID, mentionUserID: focusMentionUserID });
-  }, [documentInformationID, focusInformationID, focusMentionUserID, focusRequestID, linkedEntityKind, linkedNodeID]);
-
   const logicGateConversionAction = {
     id: "convert-to-huddle",
     label: "Turn into Huddle Board",
@@ -2587,6 +2576,9 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               companyID={companyID}
               resourceID={linkedNodeID}
               documentID={documentInformationID}
+              focusInformationID={focusInformationID}
+              focusMentionUserID={focusMentionUserID}
+              focusRequestID={focusRequestID}
               currentUserID={currentUserID}
               requestJSON={requestJSON}
               attachmentContext={editorImageAttachmentContext}

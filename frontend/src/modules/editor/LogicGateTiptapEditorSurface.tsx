@@ -8,6 +8,7 @@ import { clearProcessWorkCache, getCachedProcessWork, getProcessWorkSingleFlight
 import { orderedProcessSteps, type ProcessStep, type ProcessWorkSnapshot } from "../kanban/processWork.js";
 import { createCoalescedCanonicalRefresh } from "../realtime/coalescedCanonicalRefresh.js";
 import { subscribeRealtimeScope } from "../realtime/realtimeWebSocket.js";
+import { scheduleTransientInformationFocus } from "./transientInformationFocus.js";
 import "./processStepInstructions.css";
 
 const LazyMangoTiptapEditor = React.lazy(async () => {
@@ -19,16 +20,21 @@ export type LogicGateTiptapEditorSurfaceProps = Omit<MangoTiptapEditorProps, "re
   apiBase: string;
   steps?: readonly ProcessStep[];
   onStepBodyChange?: (stepID: string, body: MangoTiptapDocument) => void;
+  focusInformationID?: string;
+  focusMentionUserID?: string;
+  focusRequestID?: number;
 };
 
 export const LogicGateTiptapEditorSurface: React.FC<LogicGateTiptapEditorSurfaceProps> = ({
-  apiBase, steps: localSteps, onStepBodyChange, leadingContent, className, style, onSaveStateChange, onFocus, ...props
+  apiBase, steps: localSteps, onStepBodyChange, focusInformationID, focusMentionUserID, focusRequestID,
+  leadingContent, className, style, onSaveStateChange, onFocus, ...props
 }) => {
   const { companyID, resourceID: processID, documentID, saveMode = "server" } = props;
   const [snapshot, setSnapshot] = useState<ProcessWorkSnapshot | null>(() => saveMode === "local" ? null : getCachedProcessWork(apiBase, companyID, processID)?.contents ?? null);
   const [loadError, setLoadError] = useState("");
   const [unavailable, setUnavailable] = useState(false);
   const [activeDocument, setActiveDocument] = useState(documentID);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const saveStates = useRef(new Map<string, MangoTiptapSaveState>());
   const mounted = useRef(true);
   const currentDocumentIDs = useRef<ReadonlySet<string>>(new Set([documentID]));
@@ -76,6 +82,12 @@ export const LogicGateTiptapEditorSurface: React.FC<LogicGateTiptapEditorSurface
   const steps = useMemo(() => orderedProcessSteps(saveMode === "local" ? localSteps ?? [] : snapshot?.steps ?? []), [localSteps, saveMode, snapshot?.steps]);
   const documentIDs = useMemo(() => new Set([documentID, ...steps.map((step) => step.process_step_id)]), [documentID, steps]);
   currentDocumentIDs.current = documentIDs;
+  const informationID = focusInformationID?.trim() ?? "";
+  const focusDocumentAvailable = !unavailable && documentIDs.has(informationID);
+  useEffect(() => {
+    if (!focusDocumentAvailable) return undefined;
+    return scheduleTransientInformationFocus({ root: () => rootRef.current, informationID, mentionUserID: focusMentionUserID });
+  }, [focusDocumentAvailable, focusMentionUserID, focusRequestID, informationID, processID]);
   const isCurrentDocument = useCallback((id: string) => mounted.current && currentDocumentIDs.current.has(id), []);
   const publishSaveState = useCallback(() => {
     if (!mounted.current) return;
@@ -119,7 +131,7 @@ export const LogicGateTiptapEditorSurface: React.FC<LogicGateTiptapEditorSurface
 
   if (unavailable) return <div className="mango-process-instructions" style={style}><div role="alert" className="mango-process-instructions__error">This Process is unavailable.</div></div>;
 
-  return <div className={["mango-process-instructions", className].filter(Boolean).join(" ")} style={style}>
+  return <div ref={rootRef} className={["mango-process-instructions", className].filter(Boolean).join(" ")} style={style}>
     {leadingContent}
     <LazyMangoTiptapEditor {...props} resourceType="logic_gate" ariaLabel="Process editor"
       {...documentCallbacks(documentID)}
@@ -139,7 +151,7 @@ export const LogicGateTiptapEditorSurface: React.FC<LogicGateTiptapEditorSurface
           currentUserID={props.currentUserID} requestJSON={props.requestJSON} saveMode={saveMode}
           value={step.body_json ? JSON.stringify(step.body_json) : undefined}
           editable={canEdit}
-          ariaLabel={`Instructions for ${step.name}`} placeholder="Write instructions for this step…"
+          ariaLabel="Step instructions" placeholder="Write instructions for this step…"
           style={{ minHeight: 112 }} attachmentContext={attachmentContext} mentionUsers={props.mentionUsers}
           formattingControllerActive={activeDocument === step.process_step_id}
           onFocus={() => { setActiveDocument(step.process_step_id); onFocus?.(); }}

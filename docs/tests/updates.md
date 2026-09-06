@@ -102,8 +102,8 @@ U31 - An urgent ! mention in a Node text box creates an urgent mention update fo
 U32 - A normal @ mention in Node chat creates a mention update for the mentioned user and uses current effective Node RACI routing.
 U33 - An urgent ! mention in Node chat creates an urgent mention update for the mentioned user and uses current effective Node RACI routing.
 U34 - Any new Node chat message creates a chat-message update for current effective Node RACI users even when it contains no @ mention or ! mention. Parent Logic Gate-only users are not Node chat recipients, and a mentioned user receives the mention row instead of a duplicate chat row.
-U35 - A normal @ mention in the Logic Gate text editor creates a mention update for the mentioned user using that Logic Gate's current effective RACI role.
-U36 - An urgent ! mention in the Logic Gate text editor creates an urgent mention update for the mentioned user using that Logic Gate's current effective RACI role.
+U35 - A normal @ mention in a Process overview or Step instructions creates a mention update through the owning Logic Gate's existing access and current effective RACI rules, retaining the exact editor document ID for navigation.
+U36 - An urgent ! mention in a Process overview or Step instructions creates an urgent mention update through the same owning Logic Gate rules as U35.
 U37 - Logic Gates do not have a chat surface for Updates purposes; only the Logic Gate text editor can create Logic Gate mention updates.
 U38 - Attaching an email directly to a node creates an attached-email update.
 U39 - Dropping or merging an email-node card onto an existing node creates the same attached-email update as a direct node email attachment.
@@ -126,7 +126,7 @@ U55 - Entity icons shown inside update rows must come from a shared app icon reg
 U56 - Assignment and permission tones follow the exact action subtype: newly assigned, newly granted, or newly attached uses blue; changed or updated uses purple; removed or revoked uses dark mellow red.
 U57 - The canonical row wording in the Update Row Copy table is the source of truth for update display text; changing row wording requires updating this file.
 U58 - A mention inserted in a node text editor or Logic Gate text editor becomes a committed inline mention chip when the user selects the mention target; later typing near that chip must edit surrounding text, not mutate the committed mention target.
-U59 - Text editor mention notifications are idempotent per committed mention occurrence, mention kind, mentioned user, entity, and information block; autosaves or later character edits around an existing committed mention must not send duplicate mention notifications.
+U59 - Text editor mention notifications are idempotent per committed mention occurrence, mention kind, mentioned user, canonical resource type, entity, and information block; autosaves or later character edits around an existing committed mention must not send duplicate mention notifications. A Step and overview remain distinct even when their document and operation IDs match.
 U60 - If a user adds a new committed mention occurrence to the same information block later, that new occurrence can create one new mention notification.
 U61 - Seeing a single update removes that notification from Updates for the current user; it must not reappear on refresh as a merely read row.
 U62 - The Updates header has a Seen all action that asks for confirmation before removing all current-user Updates notifications in the current company.

@@ -22,6 +22,7 @@
   align-items: center;
   gap: 12px;
   padding: 13px 14px 7px;
+  border-bottom: 1px solid var(--mango-process-step-border, rgba(148, 163, 184, 0.25));
 }
 
 .mango-process-instructions__heading h3 {

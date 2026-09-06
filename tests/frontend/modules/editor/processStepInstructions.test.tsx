@@ -5,6 +5,7 @@ import { JSDOM } from "jsdom";
 import { IDBKeyRange, indexedDB } from "fake-indexeddb";
 import React, { act } from "react";
 import { Simulate } from "react-dom/test-utils";
+import type { TiptapEditorHTMLElement } from "@tiptap/core";
 import type { ProcessStep, ProcessWorkSnapshot } from "../../../../frontend/src/modules/kanban/processWork.js";
 import type { MangoTiptapFormattingController } from "../../../../frontend/src/modules/editor/tiptap/MangoTiptapEditor.js";
 import type { MangoTiptapDocument } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapDocument.js";
@@ -180,7 +181,10 @@ test("saved Process instruction cards follow canonical step events and stop edit
     close() { this.readyState = 3; }
     send() {}
   });
-  dom.window.HTMLElement.prototype.scrollIntoView = () => undefined;
+  const scrolledTargets: HTMLElement[] = [];
+  const flashedTargets: HTMLElement[] = [];
+  dom.window.HTMLElement.prototype.scrollIntoView = function () { scrolledTargets.push(this); };
+  dom.window.HTMLElement.prototype.animate = function () { flashedTargets.push(this); return {} as Animation; };
   dom.window.Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
   dom.window.Range.prototype.getBoundingClientRect = () => new dom.window.DOMRect();
   const apiBase = "http://saved-instructions.test";
@@ -188,6 +192,8 @@ test("saved Process instruction cards follow canonical step events and stop edit
   const processID = "44444444-4444-4444-8444-444444444444";
   const stepA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   const stepB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const stepBMentionBody = body("Ship instructions");
+  stepBMentionBody.document.content![0].content!.push({ type: "mention", attrs: { userId: "step-reader", label: "Step reader", kind: "urgent" } });
   let snapshot: ProcessWorkSnapshot = {
     logic_gate: { logic_gate_id: processID, header: "Saved Process" },
     permissions: { can_edit: true, can_resolve_requests: true },
@@ -253,6 +259,7 @@ test("saved Process instruction cards follow canonical step events and stop edit
     await act(async () => root.render(<React.Suspense fallback={<div>Loading editor</div>}>
       <button onMouseDown={(event) => event.preventDefault()} onClick={() => controllerRef.current?.insertTable()}>Insert table</button>
       <LogicGateTiptapEditorSurface apiBase={apiBase} companyID={companyID} resourceID={processID} documentID="logic-gate-overview"
+        focusInformationID={stepB} focusMentionUserID="step-reader" focusRequestID={1}
         value={JSON.stringify(body("Overview snapshot"))} editable requestJSON={requestJSON} formattingControllerRef={controllerRef}
         onError={(message) => reportedErrors.push(message)} onSaveStateChange={(state) => reportedSaveStates.push(state.status)} />
     </React.Suspense>));
@@ -270,12 +277,36 @@ test("saved Process instruction cards follow canonical step events and stop edit
     assert.match(JSON.stringify(canonicalBodies.get(stepA)), /"textAlign":"right"/);
     assert.equal(documentRequests.filter((request) => request.method === "POST").length, 1);
 
-    snapshot = { ...snapshot, steps: [...snapshot.steps, { process_step_id: stepB, logic_gate_id: processID, name: "Ship", position: 20, body_json: body("Ship instructions") }] };
+    assert.equal(scrolledTargets.length, 0, "a notification for an unloaded Step must wait for that exact Step");
+    snapshot = { ...snapshot, steps: [...snapshot.steps, { process_step_id: stepB, logic_gate_id: processID, name: "Ship", position: 20, body_json: stepBMentionBody }] };
     await refresh();
     await waitFor(() => Boolean(card(stepB)), "creating a step did not add its instruction card");
+    await waitFor(() => scrolledTargets.some((target) => target.getAttribute("data-mango-user-id") === "step-reader"), "a Step mention notification must scroll to its exact mention after the Step loads");
+    assert.equal(flashedTargets.includes(card(stepB)!), true, "a Step mention notification must also highlight its instruction card");
+    assert.equal(scrolledTargets.some((target) => target.closest("[data-process-step-id]")?.getAttribute("data-process-step-id") === stepA), false, "a Step notification must not focus another Step");
+    const activeStepDOM = stepEditor.querySelector<TiptapEditorHTMLElement>(".mango-tiptap-prosemirror")!;
+    const activeStepEditor = activeStepDOM.editor!;
+    const activeStepController = controllerRef.current;
+    await act(async () => {
+      controllerRef.current!.applyTextAlignment("center");
+      activeStepEditor.commands.insertContentAt(1, "Pending instructions. ");
+    });
+    const selectionBeforeRename = activeStepEditor.state.selection.toJSON();
+    assert.match(stepEditor.textContent ?? "", /Pending instructions/);
+    assert.equal(documentRequests.filter((request) => request.method === "POST").length, 1, "the rename must arrive while the edit is still pending");
     snapshot = { ...snapshot, steps: snapshot.steps.map((step) => step.process_step_id === stepA ? { ...step, name: "Prepare shipment" } : step) };
     await refresh();
     await waitFor(() => card(stepA)?.getAttribute("aria-label") === "Step 1: Prepare shipment", "renaming a step did not update its instruction heading");
+    assert.equal(activeStepDOM === stepEditor.querySelector(".mango-tiptap-prosemirror"), true, "a canonical rename must preserve the active Step editor");
+    assert.equal(controllerRef.current === activeStepController, true, "a rename must preserve the shared toolbar's editor");
+    assert.equal(dom.window.document.activeElement === activeStepDOM, true, "a rename must preserve focus");
+    assert.deepEqual(activeStepEditor.state.selection.toJSON(), selectionBeforeRename, "a rename must preserve the caret");
+    assert.match(stepEditor.textContent ?? "", /Pending instructions/);
+    await act(async () => { controllerRef.current!.insertTable(); });
+    await act(async () => { await flushMangoTiptapResource({ companyID, resourceType: "logic_gate", resourceID: processID }); });
+    assert.match(JSON.stringify(canonicalBodies.get(stepA)), /Pending instructions/, "the next edit after a rename must save the pending text");
+    assert.match(JSON.stringify(canonicalBodies.get(stepA)), /"textAlign":"center"/, "the next edit after a rename must save the pending formatting");
+    assert.equal(activeStepEditor.can().undo(), true, "a rename must preserve undo history");
     holdStepID = stepA;
     await act(async () => { controllerRef.current!.applyTextAlignment("center"); });
     const removedStepSave = assert.rejects(flushMangoTiptapResource({ companyID, resourceType: "logic_gate", resourceID: processID }), /removed_step_save/);
@@ -299,7 +330,7 @@ test("saved Process instruction cards follow canonical step events and stop edit
     assert.equal(controllerRef.current, null, "read-only instructions must not hand a writable editor to the shared toolbar");
     assert.equal(container.querySelector('[contenteditable="true"]'), null);
     await act(async () => { await flushMangoTiptapResource({ companyID, resourceType: "logic_gate", resourceID: processID }); });
-    assert.equal(documentRequests.filter((request) => request.method === "POST").length, 2, "read-only selection and toolbar interaction must not autosave");
+    assert.equal(documentRequests.filter((request) => request.method === "POST").length, 3, "read-only selection and toolbar interaction must not autosave");
     denied = true;
     await refresh();
     await waitFor(() => Boolean(container.querySelector('[role="alert"]')) && !card(stepB), "denied Process must hide previously loaded step contents");
