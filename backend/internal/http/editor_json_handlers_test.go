@@ -150,11 +150,13 @@ func TestEditorJSONHTTPOnlyCreatesUpdatesForNewMentionsAcrossResources(t *testin
 		}
 	}
 	mentionContent := func(kind string, suffix ...string) []any {
+		attrs := map[string]any{"userId": mentioned.UserID, "label": mentioned.DisplayName}
+		if kind != "" {
+			attrs["kind"] = kind
+		}
 		content := []any{
 			map[string]any{"type": "text", "text": "Please review "},
-			map[string]any{"type": "mention", "attrs": map[string]any{
-				"userId": mentioned.UserID, "label": mentioned.DisplayName, "kind": kind,
-			}},
+			map[string]any{"type": "mention", "attrs": attrs},
 		}
 		if len(suffix) > 0 && suffix[0] != "" {
 			content = append(content, map[string]any{"type": "text", "text": suffix[0]})
@@ -295,6 +297,61 @@ func TestEditorJSONHTTPOnlyCreatesUpdatesForNewMentionsAcrossResources(t *testin
 	}
 	if logicGateNotifications != 1 {
 		t.Fatalf("logic gate urgent notifications=%d items=%+v", logicGateNotifications, items)
+	}
+
+	stepResult, err := repo.CreateProcessStep(store.ProcessStepCreateInput{
+		CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Name: "Review", ActorUserID: actor.UserID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stepID := stepResult.Step.ProcessStepID
+	// The editor API distinguishes these documents by resource type even when
+	// their literal document IDs and operation IDs are equal.
+	overviewPath := "/v1/editor-json/logic_gate/" + logicGate.LogicGateID + "/documents/" + stepID + "?company_id=" + companyID
+	if response := post(overviewPath, "step-regular-operation", 0, mentionContent("normal")); response.Code != http.StatusOK {
+		t.Fatalf("overview with matching document ID status=%d body=%s", response.Code, response.Body.String())
+	}
+	waitNotifications(6)
+	stepPath := "/v1/editor-json/process_step/" + stepID + "/documents/" + stepID + "?company_id=" + companyID
+	if response := post(stepPath, "step-regular-operation", 0, mentionContent("")); response.Code != http.StatusOK {
+		t.Fatalf("step mention status=%d body=%s", response.Code, response.Body.String())
+	}
+	items = waitNotifications(7)
+	stepNotification := items[0]
+	if stepNotification.Type != domain.NotificationEventMentionCreated || stepNotification.EntityType != store.EntityTypeLogicGate || stepNotification.EntityID != logicGate.LogicGateID || stepNotification.LogicGateID != logicGate.LogicGateID || stepNotification.InformationID != stepID {
+		t.Fatalf("step mention must target its exact document under the owning Process: %+v", stepNotification)
+	}
+	if response := post(stepPath, "step-regular-operation", 0, mentionContent("")); response.Code != http.StatusOK {
+		t.Fatalf("step mention retry status=%d body=%s", response.Code, response.Body.String())
+	}
+	waitNotifications(7)
+	if response := post(stepPath, "step-unrelated-operation", 1, mentionContent("normal", " with more instructions")); response.Code != http.StatusOK {
+		t.Fatalf("step unrelated edit status=%d body=%s", response.Code, response.Body.String())
+	}
+	waitNotifications(7)
+	if response := post(stepPath, "step-urgent-operation", 2, regularAndUrgent); response.Code != http.StatusOK {
+		t.Fatalf("step urgent mention status=%d body=%s", response.Code, response.Body.String())
+	}
+	items = waitNotifications(8)
+	if items[0].Type != domain.NotificationEventUrgentMentionCreated || items[0].InformationID != stepID || items[0].EntityID != logicGate.LogicGateID {
+		t.Fatalf("step urgent mention=%+v", items[0])
+	}
+
+	otherStep, err := repo.CreateProcessStep(store.ProcessStepCreateInput{
+		CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Name: "Ship", ActorUserID: actor.UserID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherStepID := otherStep.Step.ProcessStepID
+	otherStepPath := "/v1/editor-json/process_step/" + otherStepID + "/documents/" + otherStepID + "?company_id=" + companyID
+	if response := post(otherStepPath, "step-regular-operation", 0, mentionContent("normal")); response.Code != http.StatusOK {
+		t.Fatalf("second step mention status=%d body=%s", response.Code, response.Body.String())
+	}
+	items = waitNotifications(9)
+	if items[0].InformationID != otherStepID || items[0].EntityID != logicGate.LogicGateID {
+		t.Fatalf("second step mention must remain distinct: %+v", items[0])
 	}
 }
 

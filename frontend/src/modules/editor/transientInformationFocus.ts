@@ -7,6 +7,7 @@ const INFORMATION_TARGET_ATTRIBUTES = [
   "data-project-text-block-id",
   "data-email-message-id",
   "data-logic-gate-information-id",
+  "data-process-step-id",
 ] as const;
 
 const MENTION_TARGET_ATTRIBUTES = [
@@ -19,6 +20,7 @@ const EDITOR_TEXTBOX_TARGET_ATTRIBUTES = [
   "data-project-text-box-row",
   "data-project-text-block-id",
   "data-logic-gate-information-id",
+  "data-process-step-id",
 ] as const;
 
 function findElementByAttributeValue(

@@ -131,6 +131,12 @@
 128. Process text limits include the overview and every owned Step body; attachments retain the existing Process ownership and do not count as editor text.
 129. Process Save version includes typed Step instruction snapshots; restore updates surviving same-Process Steps without recreating deleted Steps or changing flow.
 130. A saved version includes an empty overview when the Process overview is untouched, so restoring it leaves a usable blank overview editor.
+131. Renaming a Step updates its instruction heading while preserving its active editor and pending changes.
+132. Each instruction card has a thin full-width divider between its title and body.
+133. Normal and urgent Step mentions follow the owning Process's existing access and RACI notification rules.
+134. A Step mention notification opens its owning Process and targets the exact Step UUID and mentioned user.
+135. Autosaving unchanged Step mentions or retrying the same save must not create duplicate notifications.
+136. A saved mention with its default kind omitted counts as a normal mention when creating or comparing notifications.
 
 ## Process Story
 

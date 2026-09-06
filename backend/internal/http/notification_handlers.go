@@ -820,6 +820,15 @@ func (s *Server) recordMentionNotificationsWithIdempotencyScope(r *http.Request,
 	if companyID == "" || entityType == "" || entityID == "" || informationID == "" || !isMentionNotificationInformationType(infoType) {
 		return
 	}
+	processStepMention := entityType == store.EntityTypeProcessStep
+	if processStepMention {
+		step, err := s.repo.GetProcessStep(companyID, entityID)
+		if err != nil {
+			log.Printf("failed to resolve step mention owner company_id=%s process_step_id=%s: %v", companyID, entityID, err)
+			return
+		}
+		entityType, entityID = store.EntityTypeLogicGate, step.LogicGateID
+	}
 	regularMentionedUserIDs, regularErr := s.notifications.ResolveMentionedUserIDOccurrencesByKind(companyID, information, "regular")
 	urgentMentionedUserIDs, urgentErr := s.notifications.ResolveMentionedUserIDOccurrencesByKind(companyID, information, "urgent")
 	if regularErr != nil || urgentErr != nil || (len(regularMentionedUserIDs) == 0 && len(urgentMentionedUserIDs) == 0) {
@@ -844,6 +853,9 @@ func (s *Server) recordMentionNotificationsWithIdempotencyScope(r *http.Request,
 		eventType = store.LogicGateMentionCreatedEventType
 		streamID = "logic_gate:" + entityID
 		idempotencyEntityKey = "logic-gate"
+		if processStepMention {
+			idempotencyEntityKey = "process-step"
+		}
 		payloadResourceKey = "logic_gate_id"
 	case store.EntityTypeProject:
 		eventType = store.ProjectMentionCreatedEventType

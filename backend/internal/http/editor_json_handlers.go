@@ -42,7 +42,7 @@ func mangoTiptapMentionOccurrences(raw json.RawMessage) []mangoTiptapMentionOccu
 			userID = strings.TrimSpace(userID)
 			label = strings.TrimSpace(label)
 			kind = strings.TrimSpace(kind)
-			if kind == "normal" {
+			if kind == "" || kind == "normal" {
 				kind = "regular"
 			}
 			if userID != "" && label != "" && (kind == "regular" || kind == "urgent") {
@@ -325,7 +325,7 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 			writeEditorJSONStoreError(w, err)
 			return
 		}
-		if ref.ResourceType == store.EntityTypeNode || ref.ResourceType == store.EntityTypeProject || ref.ResourceType == store.EntityTypeLogicGate {
+		if ref.ResourceType == store.EntityTypeNode || ref.ResourceType == store.EntityTypeProject || ref.ResourceType == store.EntityTypeLogicGate || ref.ResourceType == store.EntityTypeProcessStep {
 			addedMentions := mangoTiptapAddedMentionNotificationHTML(beforeCommit.JSONDocument, commit.JSONDocument)
 			if addedMentions != "" {
 				s.recordMentionNotificationsWithIdempotencyScope(
