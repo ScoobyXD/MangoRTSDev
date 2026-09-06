@@ -1,11 +1,11 @@
 ---
 name: mango-process
-description: Execute an explicitly requested saved Mango Process by creating one Node, appending canonical work text, and moving through its authored Steps. Load before Process execution.
+description: Read the Mango process SOP on the editor and read through all of it's process steps. Then do them sequentially one at a time.
 ---
 
 # Work with a saved Mango Process
 
-Use the bound Process's live SOP JSON, textbox revisions, Step identities/order, and directed connections. Map coordinates never define execution order. Check execution_blocked_reason: missing SOP or Steps prevent execution.
+Use the Process's live SOP JSON, textbox revisions, Step identities/order, and directed connections. Map coordinates never define execution order. Check execution_blocked_reason: missing SOP or Steps prevent execution.
 
 1. Create this interaction's one Node at the authored starting Step with create_process_node.
 2. Add the work for its current Step with write_process_node. Each call creates a fresh canonical textbox and returns its saved document; earlier text is preserved. If the authored Step requires a Node chat or mention, load mango-node-chat and send the actual chat to that returned textbox before advancing.
