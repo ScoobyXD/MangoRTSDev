@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { findPackageJSON } from 'node:module';
+import { dirname, relative, resolve, sep } from 'node:path';
 import { test } from 'node:test';
-import { inspectable, LIMITS, runInteraction } from './runtime.mjs';
+import { AI_ROOT, inspectable, LIMITS, runInteraction } from './runtime.mjs';
 import { PROVIDER_RESPONSE_MAX_BYTES, validateResponse } from './response-validation.mjs';
 
 const functionTool = name => ({ type: 'function', name, description: `Fixture ${name}`, parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false } });
@@ -95,6 +99,47 @@ test('Pi loads the advertised Node chat skill before dispatching a message actio
   assert.match(JSON.stringify(f.requests[1]), /urgent_user_ids/);
   assert.equal(f.dispatches.length, 1);
   assert.equal(f.captured.at(-1).status, 'completed');
+});
+
+test('each invocation records current prompt sources without sending audit metadata to the model', async t => {
+	const f = await fixture(t, (response, call) => reply(response, call === 1
+		? [toolItem('bind_process', { text: 'exact-process' })]
+		: call === 2 ? [toolItem('read', { path: 'skills/mango-process/SKILL.md' }, 'call_2')]
+		: [textItem('The saved Process is available for discussion.')]));
+	f.start.deploy_revision = 'fixture-deployed-revision';
+	f.start.audit_sources = [{ kind: 'database', label: 'AUDIT_ONLY_IDENTITY_SOURCE', delivery: 'context message', table: 'public.users', key: { user_id: 'exact-user' } }];
+	f.start.tools = [functionTool('bind_process')];
+	f.start.tool_sources = [{ kind: 'file', label: 'bind_process', delivery: 'tool schema', path: 'backend/internal/http/assistant_binding.go' }];
+	f.transport.tool = async () => ({
+		result: { process_id: 'exact-process', sop: 'Saved Process SOP.' },
+		tools: [functionTool('create_process_node')],
+		tool_sources: [{ kind: 'file', label: 'create_process_node', delivery: 'tool schema', path: 'backend/internal/http/assistant_process.go' }],
+		audit_sources: [{ kind: 'database', label: 'AUDIT_ONLY_SOP_SOURCE', delivery: 'tool output', table: 'public.logic_gate_textboxes', key: { logic_gate_id: 'exact-process', textbox_id: 'exact-textbox' }, revision: 7 }],
+	});
+	await runInteraction(f.start, f.transport);
+	const prepared = f.captured.filter(event => event.kind === 'provider_request' && event.status === 'prepared').map(event => event.data);
+	assert.equal(prepared.length, 3);
+	assert.deepEqual(prepared.map(event => event.body), f.requests);
+	assert.ok(prepared.every(event => event.deploy_revision === 'fixture-deployed-revision'));
+	assert.doesNotMatch(JSON.stringify(f.requests), /AUDIT_ONLY|backend\/internal\/http|audit_sources|tool_sources/);
+	assert.ok(prepared[0].sources.some(source => source.label === 'bind_process' && source.delivery === 'tool schema'));
+	assert.ok(!prepared[1].sources.some(source => source.label === 'bind_process' && source.delivery === 'tool schema'));
+	assert.ok(prepared[1].sources.some(source => source.label === 'create_process_node' && source.delivery === 'tool schema'));
+	assert.ok(prepared[1].sources.some(source => source.table === 'public.logic_gate_textboxes' && source.key.textbox_id === 'exact-textbox' && source.revision === 7));
+	const metadata = prepared[0].sources.find(source => source.path === 'ai/skills/mango-process/SKILL.md');
+	assert.equal(metadata.delivery, 'system prompt skill metadata');
+	assert.match(metadata.sha256, /^[a-f0-9]{64}$/);
+	assert.ok(!prepared[1].sources.some(source => source.delivery === 'tool output retained in model history'));
+	assert.ok(prepared[2].sources.some(source => source.path === metadata.path && source.delivery === 'tool output retained in model history' && source.sha256 === metadata.sha256));
+	assert.ok(prepared[0].sources.some(source => source.symbol === 'buildSystemPrompt' && source.path.endsWith('/dist/core/system-prompt.js')));
+	const providerPackage = findPackageJSON('@earendil-works/pi-ai', new URL('./core/model-runtime.js', import.meta.resolve('@earendil-works/pi-coding-agent')));
+	const providerEntry = resolve(dirname(providerPackage), JSON.parse(await readFile(providerPackage, 'utf8')).exports['.'].import);
+	const providerPath = resolve(dirname(providerEntry), 'api/openai-responses.js');
+	const providerSource = prepared[0].sources.find(source => source.symbol === 'buildParams');
+	assert.equal(providerSource.runtime_path, providerPath);
+	assert.equal(providerSource.path, 'ai/' + relative(AI_ROOT, providerPath).split(sep).join('/'));
+	assert.equal(providerSource.sha256, createHash('sha256').update(await readFile(providerPath, 'utf8')).digest('hex'));
+	assert.match(prepared[0].sources.find(source => source.label === 'Conversation memory').note, /No ai_runs/);
 });
 
 test('discussion has no mutations and differently named/changed Process content reaches the provider', async t => {

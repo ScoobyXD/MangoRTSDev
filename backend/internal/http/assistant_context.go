@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 )
 
@@ -103,7 +102,7 @@ func (s *Server) captureAssistant(r *http.Request, capture *assistantCapture, em
 	if capture.inspect && emit != nil && r.Context().Err() == nil {
 		actor, ok := authenticatedActor(r)
 		role, err := s.currentActorRoleForCompanyContext(r.Context(), actor, actor.CompanyID)
-		if !ok || err != nil || role != domain.RoleDevAdmin {
+		if !ok || err != nil || role == "" {
 			return assistantActionError{errors.New("Context inspection is no longer available for this account.")}
 		}
 		return emit(assistantEvent{Type: "trace", Trace: &event})
@@ -169,7 +168,7 @@ func (s *Server) finishAssistantCapture(r *http.Request, request assistantReques
 }
 
 // One bounded recovery read preserves an already entered action's outcome after
-// Stop. Only the same actor/company with current developer access can read it.
+// Stop. Only the same actor/company with current company access can read it.
 func (s *Server) handleAssistantTrace(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -180,10 +179,6 @@ func (s *Server) handleAssistantTrace(w http.ResponseWriter, r *http.Request) {
 	}
 	actor, ok := s.requireAssistantActor(w, r)
 	if !ok {
-		return
-	}
-	if actor.CompanyRole != domain.RoleDevAdmin {
-		writeError(w, http.StatusForbidden, "assistant_context_inspection_denied")
 		return
 	}
 	id := r.URL.Query().Get("request_id")
@@ -216,12 +211,8 @@ func (s *Server) handleAssistantTrace(w http.ResponseWriter, r *http.Request) {
 	if r.Context().Err() != nil {
 		return
 	}
-	actor, ok = s.requireAssistantActor(w, r)
+	_, ok = s.requireAssistantActor(w, r)
 	if !ok {
-		return
-	}
-	if actor.CompanyRole != domain.RoleDevAdmin {
-		writeError(w, http.StatusForbidden, "assistant_context_inspection_denied")
 		return
 	}
 	if r.Context().Err() != nil {

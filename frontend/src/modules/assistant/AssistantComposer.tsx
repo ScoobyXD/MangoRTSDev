@@ -11,7 +11,7 @@ export type AssistantProcess = { id: string; label: string };
 export type AssistantDraft = { text: string; process: AssistantProcess | null };
 export type AssistantComposerHandle = {
   clear: () => void; clearMessage: () => void; bindProcess: (process: AssistantProcess) => void;
-  beginDictation: () => boolean; finishDictation: (text?: string) => void;
+  beginDictation: () => boolean; finishDictation: (text?: string) => AssistantDraft | undefined;
 };
 type Props = {
   companyID: string;
@@ -139,11 +139,18 @@ export const AssistantComposer = React.forwardRef<AssistantComposerHandle, Props
       if (!editor.state.doc.eq(saved.doc)) throw new Error("The draft changed. Please record again.");
       const transaction = closeHistory(editor.state.tr.insertText(text, saved.position, saved.position));
       editor.view.dispatch(transaction);
+      return readDraft(editor);
     },
   }), [editor]);
 
   return <>
-    <EditorContent editor={editor} className="mango-assistant-editor" />
+    <EditorContent editor={editor} className="mango-assistant-editor" onKeyDown={(event) => {
+      // ProseMirror skips its keyboard handlers while capture makes the editor read-only.
+      if (dictation.current && event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && !editor?.view.composing) {
+        event.preventDefault();
+        latest.current.onSubmit();
+      }
+    }} />
     {picker && editor && <UniversalEntityPicker
       companyID={props.companyID}
       requestJSON={props.requestJSON}

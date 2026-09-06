@@ -6,10 +6,11 @@
 4. Permanently deleting the exact company or user cascades its dependent archives and preserves unrelated owners' archives.
 5. Captured resource identities and contents remain historical diagnostic data; they grant no permission, create no live resource relationship, and never become business truth.
 6. Recycling, editing, or deleting a business resource does not rewrite the historical inspection snapshot or create an archive restore relationship.
+7. Every currently authorized user may inspect only their own captured conversations in the selected company; a request UUID never grants access across users or companies.
 
 ## AI Inspection Ownership Story
 
-A foreground Send captures the existing inspection events under its authenticated company and user. When the Send ends, one archive stores that same request UUID and ordered timestamped event array, even if membership changed while it ran. Later membership or business-resource changes leave the snapshot historical. Deleting its exact company or user removes the dependent archives; no captured resource is deleted or restored through the archive.
+A foreground Send captures the existing inspection events under its authenticated company and user. Every authorized user can inspect their own conversations in the selected company. When the Send ends, one archive stores that same request UUID and ordered timestamped event array, even if membership changed while it ran. Later membership or business-resource changes leave the snapshot historical. Deleting its exact company or user removes the dependent archives; no captured resource is deleted or restored through the archive.
 
 # Current Process Step Relationship Business Logic Laws
 

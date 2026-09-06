@@ -128,6 +128,8 @@ func (s *Server) runAssistant(r *http.Request, request assistantRequest, emit fu
 	record := func(kind, status string, data any) error {
 		return s.captureAssistant(r, capture, emit, kind, status, data)
 	}
+	operationSources := []assistantInputSource{}
+	r = r.WithContext(context.WithValue(r.Context(), assistantOperationSourcesKey{}, &operationSources))
 	trackedEmit := func(event assistantEvent) error {
 		a.recordAssistantResult(key, event)
 		if event.Type == "node" {
@@ -146,7 +148,8 @@ func (s *Server) runAssistant(r *http.Request, request assistantRequest, emit fu
 		}
 		inputContext["process"] = process.definition
 	}
-	if err = record("context", "completed", inputContext); err != nil {
+	contextSources := assistantContextSources(actor, process)
+	if err = record("context", "completed", map[string]any{"identity": inputContext["identity"], "process": inputContext["process"], "sources": contextSources}); err != nil {
 		return err
 	}
 	command := exec.CommandContext(ctx, a.nodePath, a.runtimePath)
@@ -176,7 +179,9 @@ func (s *Server) runAssistant(r *http.Request, request assistantRequest, emit fu
 		"type": "start", "api_key": a.apiKey, "model": a.model, "base_url": a.baseURL,
 		"reasoning_effort": request.ReasoningEffort, "messages": clean["messages"],
 		"context": clean["context"], "tools": assistantCatalog(process),
-		"limits": map[string]int{"tools": assistantMaxSteps, "responses": assistantMaxSteps + 1, "output_bytes": assistantMaxOutputBytes, "trace_bytes": assistantTraceLimit},
+		"audit_sources": contextSources, "tool_sources": assistantToolSources(process),
+		"deploy_revision": os.Getenv("MANGORTS_DEPLOY_REVISION"),
+		"limits":          map[string]int{"tools": assistantMaxSteps, "responses": assistantMaxSteps + 1, "output_bytes": assistantMaxOutputBytes, "trace_bytes": assistantTraceLimit},
 	}
 	if err = encoder.Encode(start); err != nil {
 		return err
@@ -213,6 +218,7 @@ func (s *Server) runAssistant(r *http.Request, request assistantRequest, emit fu
 				return err
 			}
 		case "tool":
+			operationSources = nil
 			data := map[string]any{"call_id": frame.CallID, "name": frame.Name, "arguments": frame.Arguments}
 			if err = record("tool", "prepared", data); err != nil {
 				return err
@@ -278,6 +284,10 @@ func (s *Server) runAssistant(r *http.Request, request assistantRequest, emit fu
 			} else {
 				result, err = s.dispatchAssistantTool(r, frame.Name, string(frame.Arguments))
 			}
+			data["sources"] = operationSources
+			if frame.Name == "bind_process" && err == nil {
+				data["sources"] = append(operationSources, assistantProcessSources(actor.CompanyID, process)...)
+			}
 			if err != nil {
 				data["error"] = err.Error()
 				var saved *assistantSavedResultError
@@ -311,9 +321,10 @@ func (s *Server) runAssistant(r *http.Request, request assistantRequest, emit fu
 			if err = emit(assistantEvent{Type: "tool", Name: frame.Name, Status: "completed"}); err != nil {
 				return err
 			}
-			reply := map[string]any{"type": "tool_result", "id": frame.ID, "result": value}
+			reply := map[string]any{"type": "tool_result", "id": frame.ID, "result": value, "audit_sources": data["sources"]}
 			if frame.Name == "bind_process" {
 				reply["tools"] = assistantCatalog(process)
+				reply["tool_sources"] = assistantToolSources(process)
 			}
 			if err = encoder.Encode(reply); err != nil {
 				return err

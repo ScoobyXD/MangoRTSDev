@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { findPackageJSON } from 'node:module';
 import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -16,6 +17,7 @@ const ASSETS = ['AGENTS.md', ...SKILL_PATHS];
 const SAFE_ERROR = 'Chat stopped. Check Mango before repeating an action; completed changes may remain.';
 const bytes = value => Buffer.byteLength(typeof value === 'string' ? value : JSON.stringify(value), 'utf8');
 const sha256 = value => createHash('sha256').update(value).digest('hex');
+const assetSource = (asset, label, delivery) => ({ kind: 'file', label, delivery, path: 'ai/' + relative(AI_ROOT, asset.path).split(sep).join('/'), runtime_path: asset.path, sha256: asset.sha256 });
 const SECRET_URL = /https?:\/\/[^\s"<>]*(?:[?&](?:x-amz-signature|x-amz-credential|token|access_token|key|sig|signature)=)[^\s"<>]*/gi;
 
 function omitSecretURLs(value, omissions = [], path = '$') {
@@ -103,6 +105,11 @@ export async function runInteraction(start, transport, signal = new AbortControl
   let sequence = 0;
   let preparedBody;
   let responseValidation = Promise.resolve(new Map());
+  const loadedSources = new Map();
+  const resultSources = [];
+  let toolSources = start.tool_sources ?? [];
+  let baseSources = [];
+  const currentSources = () => [...baseSources, ...(start.audit_sources ?? []), ...toolSources, ...loadedSources.values(), ...resultSources];
   const toolIDs = new Set();
   const limits = { ...LIMITS, ...start.limits };
   if (Object.keys(LIMITS).some(key => !Number.isInteger(limits[key]) || limits[key] < 1 || limits[key] > LIMITS[key])) throw new Error(SAFE_ERROR);
@@ -130,6 +137,27 @@ export async function runInteraction(start, transport, signal = new AbortControl
     active();
     if (!start.api_key || !Array.isArray(start.messages) || !start.messages.length) throw new Error(SAFE_ERROR);
     const { loader, assets } = await resources();
+    const codingEntry = fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent'));
+    const providerPackage = findPackageJSON('@earendil-works/pi-ai', new URL('./core/model-runtime.js', import.meta.resolve('@earendil-works/pi-coding-agent')));
+    const providerEntry = resolve(dirname(providerPackage), JSON.parse(await readFile(providerPackage, 'utf8')).exports['.'].import);
+    const sdkSources = await Promise.all([
+      [codingEntry, 'core/system-prompt.js', 'buildSystemPrompt', 'System prompt assembly'],
+      [codingEntry, 'core/skills.js', 'loadSkills / formatSkillsForPrompt', 'Skill metadata and catalog assembly'],
+      [providerEntry, 'api/openai-responses.js', 'buildParams', 'OpenAI request configuration'],
+      [providerEntry, 'api/openai-responses-shared.js', 'convertResponsesMessages / convertResponsesTools', 'Provider message and tool conversion'],
+    ].map(async ([sdkEntry, file, symbol, label]) => {
+      const runtimePath = resolve(dirname(sdkEntry), file);
+      const path = 'ai/' + relative(AI_ROOT, runtimePath).split(sep).join('/');
+      return { kind: 'file', label, delivery: 'provider request assembly', path, runtime_path: runtimePath, symbol, sha256: sha256(await readFile(runtimePath, 'utf8')), note: 'Packaged Pi 0.85.0 implementation; loaded package entry: ' + sdkEntry };
+    }));
+    baseSources = [
+      assetSource(assets.get(resolve(AI_ROOT, 'AGENTS.md')), 'Mango application instructions', 'system prompt'),
+      ...loader.getSkills().skills.map(skill => ({ ...assetSource(assets.get(resolve(AI_ROOT, skill.filePath)), skill.name, 'system prompt skill metadata'), symbol: 'YAML frontmatter: name, description; file path supplied by resources()', note: 'Only the advertised name, description, and location are initially sent. The full body enters context only after a successful native read.' })),
+      ...sdkSources,
+      { kind: 'runtime', label: 'Deployed runtime', delivery: 'prompt and tool assembly', path: 'ai/runtime/runtime.mjs', runtime_path: fileURLToPath(import.meta.url), symbol: 'runInteraction', sha256: sha256(await readFile(fileURLToPath(import.meta.url), 'utf8')), deploy_revision: start.deploy_revision || '', note: 'Sources are audit-only. The exact provider body is recorded separately for each invocation.' },
+      { kind: 'file', label: 'Native read tool schema', delivery: 'tool schema', path: 'ai/runtime/runtime.mjs', symbol: 'readDefinition', note: 'The path enum is the exact packaged ASSETS allowlist; no general filesystem or MCP access.' },
+      { kind: 'runtime', label: 'Conversation memory', delivery: 'prior history and model-generated history', path: 'ai/runtime/runtime.mjs', symbol: 'SessionManager.inMemory / session.agent.state.messages / session.prompt', note: 'This interaction uses in-memory Pi state initialized from the browser messages and current server context. Model replies, successful reads, and tool results are retained for subsequent invocations. No ai_runs, database chat archive, memory file, or previous Pi session is loaded.' },
+    ];
     const modelRuntime = await createModelRuntime(start.api_key);
     if (start.base_url) {
       const url = new URL(start.base_url);
@@ -152,7 +180,9 @@ export async function runInteraction(start, transport, signal = new AbortControl
       readFile: async path => {
         const asset = assets.get(path);
         if (!asset) throw new Error('Only approved Mango skill/reference content can be read.');
-        await capture('skill_load', 'completed', asset);
+        const source = assetSource(asset, 'Loaded instruction file', 'tool output retained in model history');
+        loadedSources.set(path, source);
+        await capture('skill_load', 'completed', { ...asset, sources: [source] });
         return Buffer.from(asset.content, 'utf8');
       },
       detectImageMimeType: async () => undefined,
@@ -181,9 +211,12 @@ export async function runInteraction(start, transport, signal = new AbortControl
         async execute(id, args) {
           active();
           const reply = await transport.tool({ id, name: definition.name, arguments: args });
+          const sources = reply.audit_sources ?? [];
+          resultSources.push(...sources);
           if (reply.tools) {
             session.agent.state.tools = [readTool, ...mangoTools(reply.tools)];
-            await capture('tool_catalog', 'completed', { tools: reply.tools });
+            toolSources = reply.tool_sources ?? [];
+            await capture('tool_catalog', 'completed', { tools: reply.tools, sources: toolSources });
           }
           return { content: [{ type: 'text', text: JSON.stringify(reply.result) }], details: reply.result };
         },
@@ -204,6 +237,7 @@ export async function runInteraction(start, transport, signal = new AbortControl
       effective_reasoning: session.agent.state.thinkingLevel, limits, pi_version: '0.85.0',
       instructions: assets.get(resolve(AI_ROOT, 'AGENTS.md')), effective_system_prompt: session.systemPrompt,
       context: start.context, history: start.messages, skills: loader.getSkills().skills,
+      sources: currentSources(), deploy_revision: start.deploy_revision || '',
       tools: session.agent.state.tools.map(({ name, description, parameters, constrainedSampling }) => ({ name, description, parameters, constrainedSampling })),
       configuration: { native_skills: true, tool_execution: 'sequential', retry: false, compaction: false, session_storage: 'memory', extensions: [], mcp_servers: [], prompt_expansion: false },
       unavailable: ['provider-hidden instructions', 'private reasoning', 'credential and authorization headers', 'private provider errors'],
@@ -226,7 +260,7 @@ export async function runInteraction(start, transport, signal = new AbortControl
         await capture('limit', 'stopped', { boundary: 'model_responses' });
         stop(); throw new Error(SAFE_ERROR);
       }
-      await capture('provider_request', 'prepared', { invocation: responseCount, provider: 'openai', model: start.model, body: JSON.parse(preparedBody), secret_url_omissions: secretURLOmissions });
+      await capture('provider_request', 'prepared', { invocation: responseCount, provider: 'openai', model: start.model, body: JSON.parse(preparedBody), sources: currentSources(), deploy_revision: start.deploy_revision || '', secret_url_omissions: secretURLOmissions });
       active();
       return transformed;
     };

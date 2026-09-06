@@ -11,8 +11,6 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
-
-	"miraeopus/backend/internal/domain"
 )
 
 const (
@@ -109,12 +107,12 @@ func (s *Server) handleAssistantStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	actor, ok := s.requireAssistantActor(w, r)
+	_, ok := s.requireAssistantActor(w, r)
 	if !ok {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]bool{"available": s.assistant != nil && s.assistant.available(), "can_inspect_context": actor.CompanyRole == domain.RoleDevAdmin})
+	writeJSON(w, http.StatusOK, map[string]bool{"available": s.assistant != nil && s.assistant.available(), "can_inspect_context": true})
 }
 
 func (s *Server) handleAssistantChat(w http.ResponseWriter, r *http.Request) {
@@ -142,10 +140,6 @@ func (s *Server) handleAssistantChat(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decoder.Decode(new(any)); err != io.EOF || !validAssistantRequest(request) {
 		writeError(w, http.StatusBadRequest, "invalid_assistant_request")
-		return
-	}
-	if request.InspectContext && actor.CompanyRole != domain.RoleDevAdmin {
-		writeError(w, http.StatusForbidden, "assistant_context_inspection_denied")
 		return
 	}
 	owner := actor.CompanyID + ":" + actor.User.UserID

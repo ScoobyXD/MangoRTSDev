@@ -8,8 +8,9 @@ import {
 } from "../modules/assistant/assistantApi.js";
 import { APIHTTPError, createRequestJSON } from "../modules/api/requestJSON.js";
 import { openEditorEntityLink } from "../modules/editor/editorEntityLinks.js";
-import { AssistantComposer, type AssistantComposerHandle, type AssistantProcess } from "../modules/assistant/AssistantComposer.js";
+import { AssistantComposer, type AssistantComposerHandle, type AssistantDraft, type AssistantProcess } from "../modules/assistant/AssistantComposer.js";
 import { useAssistantDictation } from "../modules/assistant/useAssistantDictation.js";
+import { AssistantInspection } from "../modules/assistant/AssistantInspection.js";
 import { AppModalPortal } from "./AppModalPortal.js";
 
 type Props = { apiBase: string; userID: string; bottomInset: number };
@@ -49,20 +50,13 @@ function subscribeCompany(listener: () => void): () => void {
   return () => window.removeEventListener(ACTIVE_COMPANY_CHANGED_EVENT, listener);
 }
 
-const AssistantTraceDetails = React.memo(function AssistantTraceDetails({ trace }: { trace: AssistantTrace }) {
-  return <details>
-    <summary>{trace.sequence}. {trace.kind.replace(/_/g, " ")} · {trace.status} · {trace.time}</summary>
-    <pre>{JSON.stringify(trace, null, 2)}</pre>
-  </details>;
-});
-
 export function AppAssistant(props: Props) {
   const companyID = useSyncExternalStore(subscribeCompany, getActiveCompanyID);
   const authGeneration = useSyncExternalStore(addAuthTerminalFailureListener, getAuthSessionCacheGeneration);
   return <AssistantSession key={`${props.userID}:${companyID}:${authGeneration}`} {...props} companyID={companyID} />;
 }
 
-function AssistantSession({ apiBase, companyID, bottomInset }: Props & { companyID: string }) {
+function AssistantSession({ apiBase, companyID, userID, bottomInset }: Props & { companyID: string }) {
   const [available, setAvailable] = useState<boolean | null>(null);
   const [availabilityMessage, setAvailabilityMessage] = useState("");
   const [draft, setDraft] = useState("");
@@ -77,7 +71,7 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
   const activeRequest = useRef<AbortController | null>(null);
   const inspectionRequests = useRef(new Set<AbortController>());
   const composerRef = useRef<AssistantComposerHandle>(null);
-  const dictation = useAssistantDictation(apiBase, companyID, composerRef);
+  const dictation = useAssistantDictation(apiBase, companyID, composerRef, (completedDraft) => { void send(completedDraft); });
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const followReply = useRef(true);
@@ -209,14 +203,16 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
     }
   };
 
-  const send = async () => {
-    const question = draft.trim();
-    if (activeRequest.current || dictation.isBusy() || pickerOpen || !available || !question || historyError) return;
+  const send = async (completedDraft?: AssistantDraft) => {
+    if (activeRequest.current || pickerOpen || !available || historyError) return;
+    if (!completedDraft && dictation.sendRecording()) return;
+    const question = (completedDraft?.text ?? draft).trim();
+    if (dictation.isBusy() || !question) return;
     const controller = new AbortController();
     activeRequest.current = controller;
     const index = turns.length;
     const requestID = crypto.randomUUID();
-    let process = selectedProcess ?? undefined;
+    let process = (completedDraft ? completedDraft.process : selectedProcess) ?? undefined;
     const inspecting = canInspectContext;
     setTurns((current) => [...current, { requestID, question, reply: "", status: "running", notice: "Thinking…", process, inspecting, traces: [] }]);
     composerRef.current?.clearMessage();
@@ -360,7 +356,7 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
           </button>
           {running
             ? <button type="button" className="mango-assistant-send" onClick={stop}>Stop</button>
-            : <button type="submit" className="mango-assistant-send" disabled={!available || !draft.trim() || Boolean(historyError) || pickerOpen || dictation.busy}>Send</button>}
+            : <button type="submit" className="mango-assistant-send" disabled={!available || Boolean(historyError) || pickerOpen || (dictation.phase !== "recording" && (!draft.trim() || dictation.busy))}>Send</button>}
         </form>
         {dictation.message && <p className="mango-assistant-availability" role="status">{dictation.message}</p>}
         {(availabilityMessage || historyError) && <p className="mango-assistant-availability" role="status">{availabilityMessage || historyError}</p>}
@@ -369,9 +365,9 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
     {canInspectContext && inspectedTurn !== null && <AppModalPortal onRequestClose={() => setInspectedTurn(null)}>
       <section role="dialog" aria-modal="true" aria-label="AI inspection" className="mango-assistant-context">
         <header><strong>AI inspection</strong><button type="button" onClick={() => setInspectedTurn(null)}>Close inspection</button></header>
-        <p>Events appear live while Mango works: captured context, skills, tool events, and provider requests. Prepared, dispatched, saved, failed, and uncertain are separate outcomes.</p>
+        <p>Inspect ordinary conversations and Process runs here: inputs and their exact sources, each model request, and live events. Prepared, dispatched, saved, failed, and uncertain are separate outcomes.</p>
         <p>Security omissions: credentials, authentication headers, private provider internals, and hidden reasoning are excluded. Recorded omission markers identify unavailable or removed fields.</p>
-        <p>Inspection stays in memory. Clear chat, reload, or an account/company change loses this browser history. Server recovery lasts up to 15 minutes, until your next Send in this company, or until backend restart. Earlier captured turns remain here until this chat is cleared.</p>
+        <p>This browser's inspection history stays in memory. Clear chat, reload, or an account/company change loses this browser history. Server recovery lasts up to 15 minutes, until your next Send in this company, or until backend restart. Earlier captured turns remain here until this chat is cleared.</p>
         <div className="mango-assistant-context-calls" ref={inspectionRef} onScroll={(event) => {
           const element = event.currentTarget;
           followInspection.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40;
@@ -380,7 +376,7 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
           {inspection?.inspectionNotice && <p role="status">{inspection.inspectionNotice}</p>}
           {!inspection && <p>No runs yet. Send a message, then open Inspect to watch its events live.</p>}
           {inspection?.traces.length === 0 && <p>No server events received yet.</p>}
-          {inspection?.traces.map((trace) => <AssistantTraceDetails key={trace.sequence} trace={trace} />)}
+          <AssistantInspection traces={inspection?.traces ?? []} requestID={inspection?.requestID} companyID={companyID} userID={userID} />
         </div>
       </section>
     </AppModalPortal>}
