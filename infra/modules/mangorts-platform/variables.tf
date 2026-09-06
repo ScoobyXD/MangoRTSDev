@@ -479,6 +479,12 @@ variable "bootstrap_company_name" {
   default     = "MangoRTS Bootstrap"
 }
 
+variable "deepgram_api_key_secret_arn" {
+  description = "Optional AWS Secrets Manager ARN containing the raw Deepgram API key for dev speech-to-text dictation. Leave empty to disable transcription."
+  type        = string
+  default     = ""
+}
+
 variable "nylas_client_id" {
   description = "Nylas application client/application ID for Hosted OAuth. Leave empty to disable Communications email integration."
   type        = string

@@ -1,4 +1,6 @@
-import React, { useLayoutEffect, useRef, useState } from "react";
+import React, { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { addAuthTerminalFailureListener, isTerminalAuthFailureActive } from "../auth/cognitoAuth.js";
+import { ACTIVE_COMPANY_CHANGED_EVENT, getActiveCompanyID } from "../auth/currentCompany.js";
 import { AssistantComposer } from "../modules/assistant/AssistantComposer.js";
 
 function AssistantToggleIcon({ direction }: { direction: "up" | "down" }) {
@@ -8,7 +10,20 @@ function AssistantToggleIcon({ direction }: { direction: "up" | "down" }) {
   </svg>;
 }
 
-export function AppAssistant({ bottomInset }: { bottomInset: number }) {
+type Props = { apiBase: string; userID: string; bottomInset: number };
+
+function subscribeCompany(listener: () => void) {
+  window.addEventListener(ACTIVE_COMPANY_CHANGED_EVENT, listener);
+  return () => window.removeEventListener(ACTIVE_COMPANY_CHANGED_EVENT, listener);
+}
+
+export function AppAssistant(props: Props) {
+  const companyID = useSyncExternalStore(subscribeCompany, getActiveCompanyID);
+  const authFailed = useSyncExternalStore(addAuthTerminalFailureListener, isTerminalAuthFailureActive);
+  return <AssistantSession key={`${props.apiBase}:${props.userID}:${companyID}:${authFailed}`} {...props} companyID={companyID} />;
+}
+
+function AssistantSession({ apiBase, companyID, bottomInset }: Props & { companyID: string }) {
   const [panelOpen, setPanelOpen] = useState(false);
   const focusToggleAfterChange = useRef(false);
   const expandButtonRef = useRef<HTMLButtonElement>(null);
@@ -49,8 +64,7 @@ export function AppAssistant({ bottomInset }: { bottomInset: number }) {
       ><AssistantToggleIcon direction="down" /></button>
       <div className="mango-assistant-panel" id={panelID}>
         <header className="mango-assistant-header"><strong>Mango chat</strong></header>
-        <AssistantComposer />
-        <p className="mango-assistant-availability" role="status">Mango chat is unavailable.</p>
+        <AssistantComposer apiBase={apiBase} companyID={companyID} visible={panelOpen} />
       </div>
     </div>
   </aside>;

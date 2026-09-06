@@ -105,6 +105,7 @@ func main() {
 		},
 		NylasClient:                 nylasClient,
 		NylasConfig:                 nylasConfig,
+		DeepgramAPIKey:              strings.TrimSpace(os.Getenv("DEEPGRAM_API_KEY")),
 		AttachmentStorage:           httpapi.NewS3AttachmentStorageFromEnv(),
 		RealtimeTicketSecret:        secretEnvValue("MANGORTS_REALTIME_TICKET_SECRET", "realtime_ticket_secret", "ticket_secret", "MANGORTS_REALTIME_TICKET_SECRET"),
 		RealtimeBackplane:           realtimeBackplane,
