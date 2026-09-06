@@ -33,39 +33,45 @@ func buildAssistantConfigFromEnvironment(
 	newReader assistantSecretReaderFactory,
 ) (httpapi.AssistantConfig, error) {
 	model := strings.TrimSpace(getenv("MANGORTS_ASSISTANT_MODEL"))
-	directKey := strings.TrimSpace(getenv("OPENAI_API_KEY"))
-	config := httpapi.AssistantConfig{APIKey: directKey, Model: model}
-	if directKey != "" || model == "" {
-		return config, nil
+	config := httpapi.AssistantConfig{APIKey: strings.TrimSpace(getenv("OPENAI_API_KEY")), Model: model}
+	var err error
+	if model != "" {
+		config.APIKey, err = resolveAssistantAPIKey(ctx, getenv, newReader, "OPENAI_API_KEY", "Mango chat")
+		if err != nil {
+			return httpapi.AssistantConfig{}, err
+		}
 	}
+	config.DeepgramAPIKey, err = resolveAssistantAPIKey(ctx, getenv, newReader, "DEEPGRAM_API_KEY", "Mango dictation")
+	return config, err
+}
 
-	secretARN := strings.TrimSpace(getenv("OPENAI_API_KEY_SECRET_ARN"))
+func resolveAssistantAPIKey(ctx context.Context, getenv func(string) string, newReader assistantSecretReaderFactory, keyName, label string) (string, error) {
+	if directKey := strings.TrimSpace(getenv(keyName)); directKey != "" {
+		return directKey, nil
+	}
+	secretARN := strings.TrimSpace(getenv(keyName + "_SECRET_ARN"))
 	if secretARN == "" {
-		return config, nil
+		return "", nil
 	}
 	parsedARN, err := awsarn.Parse(secretARN)
 	if err != nil || parsedARN.Service != "secretsmanager" || parsedARN.Region == "" {
-		return httpapi.AssistantConfig{}, fmt.Errorf("OPENAI_API_KEY_SECRET_ARN must be a regional Secrets Manager ARN")
+		return "", fmt.Errorf("%s_SECRET_ARN must be a regional Secrets Manager ARN", keyName)
 	}
 
 	resolveCtx, cancel := context.WithTimeout(ctx, assistantSecretResolutionTimeout)
 	defer cancel()
 	reader, err := newReader(resolveCtx, parsedARN.Region)
 	if err != nil {
-		return httpapi.AssistantConfig{}, fmt.Errorf("prepare Secrets Manager for Mango chat: %w", err)
+		return "", fmt.Errorf("prepare Secrets Manager for %s: %w", label, err)
 	}
 	output, err := reader.GetSecretValue(resolveCtx, &secretsmanager.GetSecretValueInput{SecretId: aws.String(secretARN)})
 	if err != nil {
-		return httpapi.AssistantConfig{}, fmt.Errorf("retrieve Mango chat API key from Secrets Manager: %w", err)
+		return "", fmt.Errorf("retrieve %s API key from Secrets Manager: %w", label, err)
 	}
 	if output == nil || output.SecretString == nil {
-		return httpapi.AssistantConfig{}, fmt.Errorf("Mango chat secret must contain a nonempty SecretString")
+		return "", fmt.Errorf("%s secret must contain a nonempty SecretString", label)
 	}
-	apiKey, err := assistantAPIKeyFromSecret(*output.SecretString)
-	if err != nil {
-		return httpapi.AssistantConfig{}, err
-	}
-	return httpapi.AssistantConfig{APIKey: apiKey, Model: model}, nil
+	return assistantAPIKeyFromSecret(*output.SecretString, keyName, label)
 }
 
 func newAssistantSecretReader(ctx context.Context, region string) (assistantSecretReader, error) {
@@ -76,24 +82,24 @@ func newAssistantSecretReader(ctx context.Context, region string) (assistantSecr
 	return secretsmanager.NewFromConfig(config), nil
 }
 
-func assistantAPIKeyFromSecret(raw string) (string, error) {
+func assistantAPIKeyFromSecret(raw, keyName, label string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return "", fmt.Errorf("Mango chat secret must contain a nonempty SecretString")
+		return "", fmt.Errorf("%s secret must contain a nonempty SecretString", label)
 	}
 	if !json.Valid([]byte(trimmed)) {
 		return trimmed, nil
 	}
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
-		return "", fmt.Errorf("Mango chat JSON secret must be an object containing an API key")
+		return "", fmt.Errorf("%s JSON secret must be an object containing an API key", label)
 	}
-	for _, name := range []string{"api_key", "OPENAI_API_KEY", "openai_api_key"} {
+	for _, name := range []string{"api_key", keyName, strings.ToLower(keyName)} {
 		if value, ok := payload[name].(string); ok {
 			if text := strings.TrimSpace(value); text != "" {
 				return text, nil
 			}
 		}
 	}
-	return "", fmt.Errorf("Mango chat JSON secret must contain api_key, OPENAI_API_KEY, or openai_api_key")
+	return "", fmt.Errorf("%s JSON secret must contain api_key, %s, or %s", label, keyName, strings.ToLower(keyName))
 }

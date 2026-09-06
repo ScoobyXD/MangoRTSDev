@@ -145,7 +145,7 @@ func TestAssistantAPIKeyFromSecret(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := assistantAPIKeyFromSecret(test.raw)
+			got, err := assistantAPIKeyFromSecret(test.raw, "OPENAI_API_KEY", "Mango chat")
 			if test.wantErr {
 				if err == nil {
 					t.Fatalf("expected error, got key %q", got)
@@ -170,5 +170,63 @@ func TestBuildAssistantConfigRejectsMissingSecretString(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "nonempty SecretString") {
 			t.Fatalf("expected SecretString error, got %v", err)
 		}
+	}
+}
+
+func TestBuildAssistantConfigDeepgramDirectKeyIsSeparateFromChat(t *testing.T) {
+	config, err := buildAssistantConfigFromEnvironment(context.Background(), assistantTestEnvironment(map[string]string{
+		"DEEPGRAM_API_KEY":            " direct-deepgram-key ",
+		"DEEPGRAM_API_KEY_SECRET_ARN": "must-not-be-read",
+	}), func(context.Context, string) (assistantSecretReader, error) {
+		t.Fatal("direct Deepgram key must not read AWS")
+		return nil, nil
+	})
+	if err != nil || config.DeepgramAPIKey != "direct-deepgram-key" || config.APIKey != "" || config.Model != "" {
+		t.Fatalf("incorrect dictation configuration: %#v, %v", config, err)
+	}
+}
+
+func TestBuildAssistantConfigResolvesDeepgramSecret(t *testing.T) {
+	const arn = "arn:aws:secretsmanager:us-west-1:000000000000:secret:mangorts-test-deepgram"
+	for _, secret := range []string{"deepgram-key", `{"api_key":"deepgram-key"}`, `{"DEEPGRAM_API_KEY":"deepgram-key"}`, `{"deepgram_api_key":"deepgram-key"}`} {
+		reader := &stubAssistantSecretReader{output: &secretsmanager.GetSecretValueOutput{SecretString: aws.String(secret)}}
+		config, err := buildAssistantConfigFromEnvironment(context.Background(), assistantTestEnvironment(map[string]string{
+			"OPENAI_API_KEY":              "chat-key",
+			"MANGORTS_ASSISTANT_MODEL":    "chat-model",
+			"DEEPGRAM_API_KEY_SECRET_ARN": arn,
+		}), func(ctx context.Context, region string) (assistantSecretReader, error) {
+			if _, ok := ctx.Deadline(); !ok || region != "us-west-1" {
+				t.Fatal("secret resolution must have a deadline and use the ARN region")
+			}
+			return reader, nil
+		})
+		if err != nil || config.DeepgramAPIKey != "deepgram-key" || config.APIKey != "chat-key" || config.Model != "chat-model" || reader.calls != 1 || aws.ToString(reader.input.SecretId) != arn {
+			t.Fatalf("incorrect separate credential resolution: %#v, %v", config, err)
+		}
+	}
+}
+
+func TestBuildAssistantConfigRejectsDeepgramConfigurationFailure(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		arn    string
+		output *secretsmanager.GetSecretValueOutput
+		err    error
+	}{
+		{name: "invalid ARN", arn: "not-an-arn"},
+		{name: "provider error", arn: testAssistantSecretARN, err: errors.New("fixture unavailable")},
+		{name: "missing string", arn: testAssistantSecretARN},
+		{name: "wrong provider JSON", arn: testAssistantSecretARN, output: &secretsmanager.GetSecretValueOutput{SecretString: aws.String(`{"OPENAI_API_KEY":"chat-key"}`)}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := buildAssistantConfigFromEnvironment(context.Background(), assistantTestEnvironment(map[string]string{
+				"DEEPGRAM_API_KEY_SECRET_ARN": test.arn,
+			}), func(context.Context, string) (assistantSecretReader, error) {
+				return &stubAssistantSecretReader{output: test.output, err: test.err}, nil
+			})
+			if err == nil || (!strings.Contains(err.Error(), "DEEPGRAM") && !strings.Contains(err.Error(), "Mango dictation")) {
+				t.Fatalf("configured Deepgram failure must fail clearly: %v", err)
+			}
+		})
 	}
 }

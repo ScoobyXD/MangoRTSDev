@@ -80,6 +80,11 @@ resource "aws_ecs_cluster" "main" {
     }
 
     precondition {
+      condition     = trimspace(var.deepgram_api_key_secret_arn) == "" || local.assistant_enabled
+      error_message = "Mango dictation requires enabled dev chat; leave deepgram_api_key_secret_arn empty to disable dictation."
+    }
+
+    precondition {
       condition = !(
         var.email_sqs_enabled &&
         var.backend_desired_count > 0
@@ -196,6 +201,9 @@ resource "aws_ecs_task_definition" "backend" {
         ],
         local.assistant_enabled ? [
           { name = "OPENAI_API_KEY", valueFrom = trimspace(var.openai_api_key_secret_arn) }
+        ] : [],
+        local.dictation_enabled ? [
+          { name = "DEEPGRAM_API_KEY", valueFrom = trimspace(var.deepgram_api_key_secret_arn) }
         ] : [],
         local.nylas_enabled ? [
           { name = "NYLAS_API_KEY", valueFrom = var.nylas_api_key_secret_arn },

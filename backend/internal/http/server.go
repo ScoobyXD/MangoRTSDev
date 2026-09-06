@@ -40,6 +40,8 @@ type BootstrapDevAdminConfig struct {
 type Server struct {
 	repo                                   store.Repository
 	assistant                              *mangoAssistant
+	deepgramAPIKey                         string
+	transcriptionClient                    *http.Client
 	realtimeRegistry                       *realtimeSubscriptionRegistry
 	realtimeTickets                        *realtimeTicketStore
 	realtimeBackplane                      realtime.Backplane
@@ -196,6 +198,8 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 	server := &Server{
 		repo:                               repo,
 		assistant:                          newMangoAssistant(options.Assistant),
+		deepgramAPIKey:                     strings.TrimSpace(options.Assistant.DeepgramAPIKey),
+		transcriptionClient:                newTranscriptionClient(),
 		realtimeRegistry:                   newRealtimeSubscriptionRegistry(),
 		realtimeTickets:                    newRealtimeTicketStore(realtimeTicketSecret),
 		realtimeBackplane:                  options.RealtimeBackplane,
@@ -293,6 +297,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/me", s.handleMe)
 	mux.HandleFunc("/v1/assistant/status", s.handleAssistantStatus)
 	mux.HandleFunc("/v1/assistant/chat", s.handleAssistantChat)
+	mux.HandleFunc("/v1/assistant/transcriptions", s.handleAssistantTranscription)
 	mux.HandleFunc("/v1/assistant/trace", s.handleAssistantTrace)
 	mux.HandleFunc("/v1/assistant/result", s.handleAssistantResult)
 	mux.HandleFunc("/v1/companies", s.handleCompanies)

@@ -87,6 +87,17 @@
 85. Normal and urgent mentions use separate exact user-ID lists; unselected, duplicate, conflicting, or unresolved recipients stop the send before any chat is saved.
 86. A bound Process chat targets only its server-tracked Node and an existing textbox on that Node.
 87. A requested chat or mention must be sent through its chat tool and reported only after a saved result; a textbox note or written simulation does not count as sending.
+88. The composer microphone starts recording on the first click and stops on the next click, with visible and accessible recording and transcribing states.
+89. Stop releases microphone tracks immediately and waits for the recorder's final audio chunk before uploading.
+90. Dictation uses only recorded-audio Deepgram Nova-3 with server-fixed `language=en` and `smart_format=true`, without paid add-ons or automatic retries.
+91. Transcription requires the authenticated user's current selected-company access.
+92. Successful dictation inserts plain text at the saved draft position through an undoable editor transaction, preserving surrounding text and the selected Process reference.
+93. Pending microphone permission, recording, and transcription freeze draft editing and all Send paths, including Enter; dictation never sends a message or executes tools.
+94. Closing, collapsing, clearing, unmounting, or changing authentication, account, or company cancels dictation and prevents late permission grants or results from changing another draft.
+95. Permission, device, recording, upload, provider, silence, and limit failures preserve the draft and display an understandable message.
+96. Browser recording stops after two minutes; audio above 8 MiB and insertions exceeding the existing 8,000-character message limit are rejected without truncation.
+97. Dictation audio stays temporary in browser and server memory and never becomes an attachment, database record, S3 object, or application log entry.
+98. Deepgram uses a separate server-held credential; a missing credential returns an unavailable error without disabling ordinary chat.
 
 ## Process story
 
@@ -181,7 +192,9 @@ The rules for explicit intent, ambiguous paths, document trust, rich-text replac
 
 | Boundary | Implemented limit / behavior |
 | --- | --- |
-| Browser endpoints | Authenticated `GET /v1/assistant/status`, `POST /v1/assistant/chat`, owner/dev-admin `GET /v1/assistant/trace?request_id=UUID`, and owner-only `GET /v1/assistant/result?request_id=UUID`, scoped by selected `company_id`; these are not model tools. |
+| Browser endpoints | Authenticated `GET /v1/assistant/status`, `POST /v1/assistant/chat`, `POST /v1/assistant/transcriptions`, owner/dev-admin `GET /v1/assistant/trace?request_id=UUID`, and owner-only `GET /v1/assistant/result?request_id=UUID`, scoped by selected `company_id`; these are not model tools. |
+| Dictation audio | One completed `audio` multipart file, at most 8 MiB plus 64 KiB multipart overhead; browser recording at most two minutes; WebM, Ogg, or MP4 with the browser's original audio content type. |
+| Dictation deadlines | Permission wait 30 seconds; final recorder chunk 5 seconds; upload read 10 seconds; provider request 20 seconds; handler context 32 seconds; endpoint write 35 seconds; browser request 40 seconds. Other routes retain their existing deadlines. |
 | Send body | Exactly the declared request fields: `request_id`, `reasoning_effort`, `messages`, and optional `process_id` and `inspect_context`; body at most 256,000 bytes. Last message must be from the user. |
 | Messages | 1–24 nonempty user/assistant messages; user message at most 8,000 characters, assistant history message at most 32,000, total at most 48,000. Server counts Unicode code points; browser validation counts JavaScript string units. |
 | Foreground execution | 90 seconds, at most 16 sequential tools including native reads and 17 model responses; no parallel function dispatch. |
@@ -209,7 +222,7 @@ The rules for explicit intent, ambiguous paths, document trust, rich-text replac
 - [Selected-Process tools, SOP/context reads, and tracked Node handling](../../backend/internal/http/assistant_process.go).
 - [Request validation](../../backend/internal/http/assistant.go), [Pi supervision and dispatch](../../backend/internal/http/assistant_pi.go), [runtime and native skills](../../ai/runtime/README.md) and [automatic identity/context inspection](../../backend/internal/http/assistant_context.go).
 - [Editor authorization and canonical saves](../../backend/internal/http/editor_json_handlers.go), [upload lifecycle handlers](../../backend/internal/http/attachment_direct_upload_handlers.go), and [Node transaction preconditions](../../backend/internal/store/node_work_precondition.go).
-- [Browser transport and event validation](../../frontend/src/modules/assistant/assistantApi.ts), [chat interface](../../frontend/src/app/AppAssistant.tsx), and [operator setup](../mango-assistant-setup.md).
+- [Browser transport and event validation](../../frontend/src/modules/assistant/assistantApi.ts), [chat interface](../../frontend/src/app/AppAssistant.tsx), [recorded-audio handler](../../backend/internal/http/assistant_transcription.go), and [operator setup](../mango-assistant-setup.md).
 - Related resource laws remain authoritative: [relationships](relationships.md), [Process Steps](process-steps.md), [editor](editor.md), [attachments](attachments.md), [permissions](permissions.md), [Company Explorer](company%20explorer.md), and [recycle bin](recycle-bin.md).
 
 Existing verification: `TestAssistant*` in the Go HTTP suite, `TestNodeWorkPrecondition*` in the memory store suite, `TestPostgresProcessMapNodeWorkPrecondition` in the disposable PostgreSQL harness, and the assistant/picker cases in the frontend relationship runner. Provider tests use a local HTTP stub; database tests use disposable local fixtures. They make no paid OpenAI calls or live-database writes. Inventory maintenance must compare every table entry against both tool declaration functions and its actual dispatch/handler behavior, including HTTP methods and side effects.

@@ -9,6 +9,7 @@ import {
 import { APIHTTPError, createRequestJSON } from "../modules/api/requestJSON.js";
 import { openEditorEntityLink } from "../modules/editor/editorEntityLinks.js";
 import { AssistantComposer, type AssistantComposerHandle, type AssistantProcess } from "../modules/assistant/AssistantComposer.js";
+import { useAssistantDictation } from "../modules/assistant/useAssistantDictation.js";
 import { AppModalPortal } from "./AppModalPortal.js";
 
 type Props = { apiBase: string; userID: string; bottomInset: number };
@@ -76,6 +77,7 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
   const activeRequest = useRef<AbortController | null>(null);
   const inspectionRequests = useRef(new Set<AbortController>());
   const composerRef = useRef<AssistantComposerHandle>(null);
+  const dictation = useAssistantDictation(apiBase, companyID, composerRef);
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const followReply = useRef(true);
@@ -209,7 +211,7 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
 
   const send = async () => {
     const question = draft.trim();
-    if (activeRequest.current || pickerOpen || !available || !question || question.length > ASSISTANT_MAX_MESSAGE_CHARS || historyError) return;
+    if (activeRequest.current || dictation.isBusy() || pickerOpen || !available || !question || question.length > ASSISTANT_MAX_MESSAGE_CHARS || historyError) return;
     const controller = new AbortController();
     activeRequest.current = controller;
     const index = turns.length;
@@ -264,6 +266,7 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
   };
 
   const setPanelVisibility = (open: boolean) => {
+    if (!open) dictation.cancel();
     focusToggleAfterChange.current = true;
     setPanelOpen(open);
   };
@@ -293,7 +296,8 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
         <header className="mango-assistant-header">
           <strong>Mango chat</strong>
           {canInspectContext && <button type="button" aria-haspopup="dialog" onClick={() => { void openInspection("latest"); }}>Inspect</button>}
-          <button type="button" className="mango-assistant-clear" disabled={running || turns.length === 0} onClick={() => {
+          <button type="button" className="mango-assistant-clear" disabled={running || (turns.length === 0 && !draft && !dictation.busy)} onClick={() => {
+            dictation.cancel("Dictation canceled.");
             for (const controller of inspectionRequests.current) controller.abort();
             setTurns([]); composerRef.current?.clear(); setInspectedTurn(null);
           }}>Clear chat</button>
@@ -319,7 +323,7 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
         </div>
         </section>}
         <form className="mango-assistant-composer" onSubmit={(event) => { event.preventDefault(); void send(); }}>
-          <AssistantComposer ref={composerRef} companyID={companyID} requestJSON={requestJSON} disabled={!available || running} visible={panelOpen}
+          <AssistantComposer ref={composerRef} companyID={companyID} requestJSON={requestJSON} disabled={!available || running || dictation.busy} visible={panelOpen}
             placeholder={available === null ? "Checking Mango chat…" : "Ask Mango… Type # to select a Process"}
             onChange={(next) => { setDraft(next.text); setSelectedProcess(next.process); }} onSubmit={() => { void send(); }} onPickerChange={setPickerOpen} />
           <label className="mango-assistant-reasoning">
@@ -333,10 +337,25 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
               {ASSISTANT_REASONING_EFFORTS.map((effort) => <option key={effort} value={effort}>{ASSISTANT_REASONING_LABELS[effort]}</option>)}
             </select>
           </label>
+          <button type="button" className="mango-assistant-microphone"
+            aria-label={dictation.phase === "recording" ? "Stop recording" : dictation.phase === "permission" ? "Cancel microphone request" : dictation.phase === "transcribing" ? "Transcribing speech" : "Start dictation"}
+            title={dictation.phase === "recording" ? "Stop recording" : "Dictate in English"}
+            aria-pressed={dictation.phase === "recording"}
+            disabled={!available || running || pickerOpen || dictation.phase === "transcribing"}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => { if (panelOpen && !running && available && !pickerOpen) void dictation.toggle(); }}>
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              {dictation.phase === "recording" ? <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" /> : <>
+                <rect x="9" y="2" width="6" height="12" rx="3" />
+                <path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" />
+              </>}
+            </svg>
+          </button>
           {running
             ? <button type="button" className="mango-assistant-send" onClick={stop}>Stop</button>
-            : <button type="submit" className="mango-assistant-send" disabled={!available || !draft.trim() || Boolean(historyError) || pickerOpen}>Send</button>}
+            : <button type="submit" className="mango-assistant-send" disabled={!available || !draft.trim() || Boolean(historyError) || pickerOpen || dictation.busy}>Send</button>}
         </form>
+        {dictation.message && <p className="mango-assistant-availability" role="status">{dictation.message}</p>}
         {(availabilityMessage || historyError) && <p className="mango-assistant-availability" role="status">{availabilityMessage || historyError}</p>}
       </div>
     </div>
