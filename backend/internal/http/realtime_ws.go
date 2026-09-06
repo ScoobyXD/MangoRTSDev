@@ -440,6 +440,9 @@ func (s *Server) authorizeRealtimeSubscription(ctx context.Context, actor ActorC
 		return true, "", nil
 	}
 	if userID, accountEmail := realtimePersonalMailboxIdentityFromScope(scope); userID != "" {
+		if !actor.User.MailboxEnabled {
+			return false, "mailbox_disabled", nil
+		}
 		if userID != strings.TrimSpace(actor.User.UserID) {
 			return false, "access_denied", nil
 		}
@@ -458,6 +461,9 @@ func (s *Server) authorizeRealtimeSubscription(ctx context.Context, actor ActorC
 		return false, "resource_not_found", nil
 	}
 	if sharedInboxID := realtimeSharedMailboxIDFromScope(scope); sharedInboxID != "" {
+		if !actor.User.MailboxEnabled {
+			return false, "mailbox_disabled", nil
+		}
 		return s.authorizeRealtimeEntityScope(actor, companyID, store.EntityTypeSharedInbox, sharedInboxID, store.EntityPermissionEdit)
 	}
 	if nodeID := realtimeChatNodeIDFromScope(scope); nodeID != "" {

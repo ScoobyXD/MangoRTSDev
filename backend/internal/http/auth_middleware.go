@@ -83,6 +83,9 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 				writeError(w, http.StatusUnauthorized, "unauthorized")
 				return
 			}
+			if !authorizeMailboxRequest(w, r, actor) {
+				return
+			}
 			companyID, err := requestCompanyID(r)
 			if err != nil {
 				writeError(w, http.StatusBadRequest, "invalid_company_id_payload")
@@ -119,6 +122,9 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			s.writeAuthResolutionError(w, r, claims, err)
 			return
 		}
+		if !authorizeMailboxRequest(w, r, actor) {
+			return
+		}
 
 		companyID, err := requestCompanyID(r)
 		if err != nil {
@@ -142,6 +148,14 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, actorContextKey{}, actor)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func authorizeMailboxRequest(w http.ResponseWriter, r *http.Request, actor ActorContext) bool {
+	if !actor.User.MailboxEnabled && (r.URL.Path == "/v1/communications" || strings.HasPrefix(r.URL.Path, "/v1/communications/")) {
+		writeError(w, http.StatusForbidden, "mailbox_disabled")
+		return false
+	}
+	return true
 }
 
 type authActorResolution struct {
@@ -232,11 +246,19 @@ func (s *Server) loadAuthenticatedActor(ctx context.Context, claims auth.Claims)
 		if err != nil {
 			return ActorContext{}, err
 		}
-		if bootstrapped {
-			memberships, err = s.freshUserMemberships(ctx, user.UserID)
+		if !bootstrapped {
+			_, bootstrapped, err = s.repo.EnsureInitialCompanyContext(ctx, claims.Subject)
 			if err != nil {
 				return ActorContext{}, err
 			}
+			if bootstrapped {
+				s.authCache.invalidateUser(user.UserID)
+				s.wakeRealtimeSpine()
+			}
+		}
+		memberships, err = s.freshUserMemberships(ctx, user.UserID)
+		if err != nil {
+			return ActorContext{}, err
 		}
 	}
 	actor := ActorContext{
@@ -335,7 +357,7 @@ func isAuthResolutionTimeout(err error) bool {
 func (s *Server) maybeBootstrapDevAdmin(ctx context.Context, claims auth.Claims) (bool, error) {
 	config := s.bootstrapDevAdmin
 	email := normalizeEmailForCompare(claims.Email)
-	if email == "" || len(config.Emails) == 0 {
+	if !claims.EmailVerified || email == "" || len(config.Emails) == 0 {
 		return false, nil
 	}
 	allowed := false
@@ -361,7 +383,7 @@ func (s *Server) maybeBootstrapDevAdmin(ctx context.Context, claims auth.Claims)
 
 func isPublicAuthEndpoint(path string) bool {
 	switch path {
-	case "/v1/password-resets/request", "/v1/invitations/validate", "/v1/invitations/accept":
+	case "/v1/invitations/validate", "/v1/invitations/accept":
 		return true
 	default:
 		return false

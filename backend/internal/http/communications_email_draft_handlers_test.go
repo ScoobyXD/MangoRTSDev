@@ -31,7 +31,7 @@ func communicationsEditorPersistenceTestHandler(t *testing.T) (http.Handler, str
 	}); err != nil {
 		t.Fatal(err)
 	}
-	handler := NewServerWithOptions(repo, ServerOptions{
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key),
 	}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)

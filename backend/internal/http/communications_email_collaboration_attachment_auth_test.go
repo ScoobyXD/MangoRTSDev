@@ -81,7 +81,7 @@ func runEmailCollaborationAttachmentAuthorizationBoundary(t *testing.T, scope st
 	storage := newFakeAttachmentObjectStorage()
 	seedFinalEmailMessageAttachment(t, repo, storage, companyID, collaboration.RootMessageID, attachmentID, owner.UserID, body)
 	client := &fakeNylasClient{}
-	server := NewServerWithOptions(repo, ServerOptions{
+	server := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasConfig: testNylasConfig(), NylasClient: client, AttachmentStorage: storage,
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
 	})
@@ -147,6 +147,7 @@ func serveEmailCollaborationAttachmentAuthRequest(
 	companyID string,
 	role string,
 ) *httptest.ResponseRecorder {
+	user.MailboxEnabled = true
 	request := httptest.NewRequest(http.MethodGet, path, nil)
 	actor := ActorContext{
 		User: user,

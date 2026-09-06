@@ -132,44 +132,57 @@ func TestMemoryAuthClaimsWatermarkBlocksOlderClaimVariants(t *testing.T) {
 	}
 }
 
-func TestMemoryInvitationProfileWriteFencesOlderTokenClaims(t *testing.T) {
-	repo := NewMemoryRepo()
-	company := repo.EnsureCompany("73737373-7373-4373-8373-737373737373", "Invitation Profile Company")
-	inviter, err := repo.UpsertAuthUser("invitation-profile-inviter", "inviter@example.com", "Inviter")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.AddCompanyMembership(inviter.CognitoSubject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
-		t.Fatal(err)
-	}
-	invitation, err := repo.CreateInvitation(CreateInvitationInput{
-		CompanyID: company.CompanyID, Email: "invitee@example.com",
-		Role: domain.RoleCompanyUser, InvitedByUserID: inviter.UserID,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	oldIssuedAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
-	invitee, err := repo.ResolveAuthUserContext(context.Background(), "invitation-profile-invitee", "invitee@example.com", "Old Token Name", oldIssuedAt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.AcceptInvitation(invitation.Token, invitee.CognitoSubject, invitee.Email, "Invitation Name"); err != nil {
-		t.Fatal(err)
-	}
-	accepted, err := repo.GetAuthUser(invitee.CognitoSubject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if accepted.DisplayName != "Invitation Name" || !accepted.AuthClaimsIssuedAt.After(oldIssuedAt) {
-		t.Fatalf("accepted user = %+v", accepted)
-	}
-	resolved, err := repo.ResolveAuthUserContext(context.Background(), invitee.CognitoSubject, invitee.Email, "Old Token Name", oldIssuedAt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resolved.DisplayName != accepted.DisplayName || !resolved.AuthClaimsIssuedAt.Equal(accepted.AuthClaimsIssuedAt) {
-		t.Fatalf("older token changed invitation profile: before=%+v after=%+v", accepted, resolved)
+func TestInvitationAcceptancePreservesExistingDisplayName(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		open func(*testing.T) Repository
+	}{
+		{"memory", func(*testing.T) Repository { return NewMemoryRepo() }},
+		{"postgres", func(t *testing.T) Repository { _, repo := openPostgresProcessMapIntegration(t); return repo }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo := test.open(t)
+			company, err := repo.CreateCompany("Invitation Profile Company")
+			if err != nil {
+				t.Fatal(err)
+			}
+			inviter, err := repo.UpsertAuthUser("invitation-profile-inviter", "inviter@example.com", "Inviter")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := repo.AddCompanyMembership(inviter.CognitoSubject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
+				t.Fatal(err)
+			}
+			invitation, err := repo.CreateInvitation(CreateInvitationInput{
+				CompanyID: company.CompanyID, Email: "invitee@example.com",
+				Role: domain.RoleCompanyUser, InvitedByUserID: inviter.UserID,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			oldIssuedAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+			invitee, err := repo.ResolveAuthUserContext(context.Background(), "invitation-profile-invitee", "invitee@example.com", "Stored Profile Name", oldIssuedAt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := repo.AcceptInvitation(invitation.Token, invitee.CognitoSubject, invitee.Email, "Invitation Name"); err != nil {
+				t.Fatal(err)
+			}
+			accepted, err := repo.GetAuthUser(invitee.CognitoSubject)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if accepted.DisplayName != invitee.DisplayName || !accepted.AuthClaimsIssuedAt.After(oldIssuedAt) {
+				t.Fatalf("accepted user = %+v", accepted)
+			}
+			resolved, err := repo.ResolveAuthUserContext(context.Background(), invitee.CognitoSubject, invitee.Email, "Old Token Name", oldIssuedAt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resolved.DisplayName != accepted.DisplayName || !resolved.AuthClaimsIssuedAt.Equal(accepted.AuthClaimsIssuedAt) {
+				t.Fatalf("older token changed stored profile: before=%+v after=%+v", accepted, resolved)
+			}
+		})
 	}
 }
 

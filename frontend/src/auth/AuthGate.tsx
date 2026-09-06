@@ -19,6 +19,9 @@ import {
   loginWithPassword,
   logout,
   resetPassword,
+  resendSignupConfirmation,
+  signUpWithPassword,
+  waitForSignupConfirmation,
   validateInvitationToken,
   type CurrentUserResponse,
   type LoginResult,
@@ -206,8 +209,6 @@ type InviteCreateResponse = {
     invite_email_status?: string;
     invite_email_error?: string;
   };
-  cognito_invite_status?: string;
-  cognito_user_status?: string;
   invite_email_status?: string;
   invite_email_error?: string;
   delivery_ok?: boolean;
@@ -378,6 +379,9 @@ export default function AuthGate() {
     setError("");
     try {
       const current = await fetchCurrentUser();
+      if (!current.is_dev_admin && current.memberships.length === 0) {
+        throw new Error("Your company could not be loaded. Please try signing in again.");
+      }
       setMe(current);
       const storedCompanyID = getStoredActiveCompanyID();
       const storedCompanyAllowed = storedCompanyID && (current.is_dev_admin || current.memberships.some((item) => item.company_id === storedCompanyID));
@@ -388,12 +392,14 @@ export default function AuthGate() {
       const returnPath = isAuthPath(window.location.pathname) ? consumeAuthReturnPath() : "";
       const nextPath = nextPathAfterAuthentication(window.location.pathname, returnPath);
       if (nextPath !== window.location.pathname) navigate(nextPath);
-    } catch {
+    } catch (loadError) {
       setMe(null);
+      setError(formatAuthError(loadError, "Could not open Mango"));
       if (!isAuthPath(window.location.pathname)) {
         rememberAuthReturnPath(window.location.pathname);
-        navigate("/login");
       }
+      navigate("/login");
+      throw loadError;
     } finally {
       setLoading(false);
     }
@@ -415,7 +421,7 @@ export default function AuthGate() {
       }
       return;
     }
-    void loadMe();
+    void loadMe().catch(() => {});
   }, [authEnabled, loadMe, navigate]);
 
   useEffect(() => {
@@ -460,7 +466,7 @@ export default function AuthGate() {
 
   if (!me || isAuthPath(normalizedPath)) {
     if (normalizedPath === "/accept-invite") {
-      return <AcceptInvitePage onAuthenticated={loadMe} onNavigate={navigate} />;
+      return <AcceptInvitePage me={me} onAuthenticated={loadMe} onNavigate={navigate} />;
     }
     if (normalizedPath === "/complete-account") {
       return <CompleteAccountPage pendingChallenge={pendingChallenge} onChallenge={setPendingChallenge} onAuthenticated={loadMe} onNavigate={navigate} />;
@@ -471,7 +477,7 @@ export default function AuthGate() {
     if (normalizedPath === "/reset-password") {
       return <ForgotPasswordPage onNavigate={navigate} initialCodeEntryOpen />;
     }
-    return <LoginPage onChallenge={setPendingChallenge} onAuthenticated={loadMe} onNavigate={navigate} />;
+    return <LoginPage onChallenge={setPendingChallenge} onAuthenticated={loadMe} onNavigate={navigate} loadError={error} />;
   }
 
   if (normalizedPath === "/settings" || normalizedPath === "/admin/users") {
@@ -482,7 +488,7 @@ export default function AuthGate() {
     return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} overrideContent={<RecycleBinPage embedded />} /></React.Suspense>;
   }
 
-  if (normalizedPath === "/connect-google") {
+  if (normalizedPath === "/connect-google" && me.user.mailbox_enabled) {
     return <ConnectGooglePage onNavigate={navigate} onLogout={() => logoutAndNavigate(navigate)} />;
   }
 
@@ -544,16 +550,15 @@ function normalizeEmailInput(email: string): string {
 }
 
 function inviteStatusMessage(payload: InviteCreateResponse): string {
-  const cognitoStatus = payload.cognito_user_status || payload.cognito_invite_status || payload.invitation.cognito_status || "not_configured";
+  const cognitoStatus = payload.invitation.cognito_status;
   const emailStatus = payload.invite_email_status || payload.invitation.invite_email_status || "not_configured";
   if (emailStatus === "sent") {
     if (cognitoStatus === "existing_mango_user") return "Invite email sent. The user can accept with their existing Mango password.";
     return "Invite email sent with the accept link.";
   }
   if (emailStatus === "failed") {
-    return "Mango created the invite and Cognito user, but the invite email failed. Check backend email configuration and resend.";
+    return "The invitation was created, but its email could not be sent. Please try sending the invitation again.";
   }
-  if (cognitoStatus === "failed") return "Mango created the invite, but Cognito user creation failed.";
   return "Mango invite created. Invite email delivery is not configured.";
 }
 
@@ -850,39 +855,104 @@ function AuthSecondaryButton({ children, ...buttonProps }: AuthButtonProps) {
   );
 }
 
-function LoginPage({ onChallenge, onAuthenticated, onNavigate }: { onChallenge: (challenge: PendingChallenge) => void; onAuthenticated: () => Promise<void>; onNavigate: (path: string) => void }) {
+function LoginPage({ onChallenge, onAuthenticated, onNavigate, loadError }: { onChallenge: (challenge: PendingChallenge) => void; onAuthenticated: () => Promise<void>; onNavigate: (path: string) => void; loadError?: string }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [signupEmail, setSignupEmail] = useState("");
+  const [signupPassword, setSignupPassword] = useState("");
+  const [message, setMessage] = useState("");
+  const [confirmationEmail, setConfirmationEmail] = useState("");
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"signup" | "signin" | null>(null);
+  const [resending, setResending] = useState(false);
+  const signupRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => signupRequest.current?.abort(), []);
+  const finishLogin = async (result: LoginResult) => {
+    if (result.status === "new_password_required") {
+      onChallenge(result);
+      onNavigate("/complete-account");
+      return;
+    }
+    await onAuthenticated();
+  };
   return (
-    <AuthPanel title="MangoRTS" error={error}>
-      <form style={authFormStyle} onSubmit={async (event) => {
+    <AuthPanel title="MangoRTS" error={error || loadError} wide>
+      <div className="mango-auth-columns">
+      <form aria-label="Sign Up" style={authFormStyle} onSubmit={async (event) => {
         event.preventDefault();
-        setBusy(true);
+        const controller = new AbortController();
+        signupRequest.current = controller;
+        setBusy("signup");
         setError("");
+        setMessage("");
+        const normalizedEmail = normalizeEmailInput(signupEmail);
+        const submittedPassword = signupPassword;
         try {
-          const result = await loginWithPassword(email, password);
-          if (result.status === "new_password_required") {
-            onChallenge(result);
-            onNavigate("/complete-account");
-            return;
+          await signUpWithPassword(normalizedEmail, submittedPassword, controller.signal);
+          setSignupPassword("");
+          setConfirmationEmail(normalizedEmail);
+          setMessage(`Check your email at ${normalizedEmail}. Keep this page open; it will sign you in after you click the confirmation link.`);
+          const result = await waitForSignupConfirmation(normalizedEmail, submittedPassword, controller.signal);
+          await finishLogin(result);
+        } catch (signupError) {
+          if (!controller.signal.aborted) {
+            setError(formatAuthError(signupError, "Signup could not finish"));
+            if (signupError instanceof Error && signupError.name === "UsernameExistsException") setConfirmationEmail(normalizedEmail);
           }
-          await onAuthenticated();
-        } catch (loginError) {
-          console.error("Login failed", loginError);
-          setError(formatLoginError(loginError));
         } finally {
-          setBusy(false);
+          setSignupPassword("");
+          if (signupRequest.current === controller) {
+            signupRequest.current = null;
+            setBusy(null);
+          }
         }
       }}>
-        <AuthTextField label="Email" value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="you@company.com" autoComplete="email" />
-        <AuthTextField label="Password" value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" autoComplete="current-password" />
-        <AuthPrimaryButton disabled={busy}>{busy ? "Signing in" : "Sign in"}</AuthPrimaryButton>
+        <h1 className="mango-auth-section-title">Sign Up</h1>
+        <AuthTextField label="Email" value={signupEmail} onChange={(event) => setSignupEmail(event.target.value)} type="email" placeholder="you@company.com" autoComplete="email" required disabled={busy !== null} />
+        <AuthTextField label="Create password" value={signupPassword} onChange={(event) => setSignupPassword(event.target.value)} type="password" placeholder="Create password" autoComplete="new-password" required minLength={6} disabled={busy !== null} />
+        <AuthPrimaryButton disabled={busy !== null}>{busy === "signup" ? "Waiting for confirmation" : "Sign up"}</AuthPrimaryButton>
       </form>
+      <form aria-label="Sign In" style={authFormStyle} onSubmit={async (event) => {
+        event.preventDefault();
+        setBusy("signin");
+        setError("");
+        setMessage("");
+        try {
+          const result = await loginWithPassword(email, password);
+          await finishLogin(result);
+        } catch (loginError) {
+          setError(formatLoginError(loginError));
+          if (loginError instanceof Error && loginError.name === "UserNotConfirmedException") setConfirmationEmail(normalizeEmailInput(email));
+        } finally {
+          setPassword("");
+          setBusy(null);
+        }
+      }}>
+        <h1 className="mango-auth-section-title">Sign In</h1>
+        <AuthTextField label="Email" value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="you@company.com" autoComplete="email" required disabled={busy !== null} />
+        <AuthTextField label="Password" value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" autoComplete="current-password" required disabled={busy !== null} />
+        <AuthPrimaryButton disabled={busy !== null}>{busy === "signin" ? "Signing in" : "Sign in"}</AuthPrimaryButton>
+      </form>
+      </div>
+      {message && <div role="status" style={authInfoMessageStyle}>{message}</div>}
+      {confirmationEmail && <div style={authActionRowStyle}>
+        <AuthSecondaryButton type="button" disabled={busy === "signin" || resending} onClick={async () => {
+          setError("");
+          setResending(true);
+          try {
+            await resendSignupConfirmation(confirmationEmail);
+            setMessage(`A new confirmation link was sent to ${confirmationEmail}.`);
+          } catch (resendError) { setError(formatAuthError(resendError, "Could not resend confirmation")); }
+          finally { setResending(false); }
+        }}>Resend confirmation email</AuthSecondaryButton>
+        {busy === "signup" && <AuthSecondaryButton type="button" onClick={() => {
+          signupRequest.current?.abort();
+          setMessage("You can confirm your email and use Sign In with the password you chose.");
+        }}>Stop waiting</AuthSecondaryButton>}
+      </div>}
       <div style={authActionRowStyle}>
-        <AuthSecondaryButton type="button" onClick={() => onNavigate("/accept-invite")}>Accept invite</AuthSecondaryButton>
-        <AuthSecondaryButton type="button" onClick={() => onNavigate("/forgot-password")}>Forgot password</AuthSecondaryButton>
+        <AuthSecondaryButton type="button" disabled={busy !== null} onClick={() => onNavigate("/accept-invite")}>Accept invite</AuthSecondaryButton>
+        <AuthSecondaryButton type="button" disabled={busy !== null} onClick={() => onNavigate("/forgot-password")}>Forgot password</AuthSecondaryButton>
       </div>
     </AuthPanel>
   );
@@ -931,89 +1001,92 @@ function CompleteAccountPage({ pendingChallenge, onChallenge, onAuthenticated, o
   );
 }
 
-function AcceptInvitePage({ onAuthenticated, onNavigate }: { onAuthenticated: () => Promise<void>; onNavigate: (path: string) => void }) {
-  const params = new URLSearchParams(window.location.search);
-  const initialToken = params.get("token") ?? "";
-  const tokenFromURL = Boolean(initialToken.trim());
-  const [token, setToken] = useState(initialToken);
-  const [displayName, setDisplayName] = useState("");
+function AcceptInvitePage({ me, onAuthenticated, onNavigate }: { me: CurrentUserResponse | null; onAuthenticated: () => Promise<void>; onNavigate: (path: string) => void }) {
+  const token = new URLSearchParams(window.location.search).get("token")?.trim() ?? "";
+  const [invitation, setInvitation] = useState<Awaited<ReturnType<typeof validateInvitationToken>> | null>(null);
   const [email, setEmail] = useState("");
-  const [invitedEmail, setInvitedEmail] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const requireNewPasswordMatch = () => {
-    if (!newPassword.trim()) {
-      throw new Error("Enter a new password.");
-    }
-    if (newPassword !== confirmNewPassword) {
-      throw new Error("Passwords are not the same.");
-    }
-  };
+  const [needsConfirmation, setNeedsConfirmation] = useState(false);
+  const [message, setMessage] = useState("");
   useEffect(() => {
-    if (!tokenFromURL || !token.trim()) return;
+    if (!token) return;
     let cancelled = false;
-    validateInvitationToken(token)
-      .then((invitation) => {
-        if (cancelled) return;
-        const normalized = normalizeEmailInput(invitation.email);
-        setInvitedEmail(normalized);
-        setEmail((previous) => previous.trim() || normalized);
-      })
-      .catch(() => {
-        if (!cancelled) setInvitedEmail("");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [token, tokenFromURL]);
+    validateInvitationToken(token).then((value) => {
+      if (!cancelled) {
+        setInvitation(value);
+        setEmail(value.email);
+      }
+    }).catch((validationError) => {
+      if (!cancelled) setError(formatAuthError(validationError, "Invitation unavailable"));
+    });
+    return () => { cancelled = true; };
+  }, [token]);
+  const wrongAccount = Boolean(me && invitation && normalizeEmailInput(me.user.email) !== normalizeEmailInput(invitation.email));
   return (
     <AuthPanel title="Accept Invite" error={error}>
-      <form style={authFormStyle} onSubmit={async (event) => {
+      <h1 className="mango-auth-section-title">Join {invitation?.company_name || "a company"}</h1>
+      {!token && <div style={authInfoMessageStyle}>Open the invitation link in your email to join a company.</div>}
+      {token && !invitation && !error && <div role="status">Loading invitation…</div>}
+      {invitation && <form aria-label="Accept invitation" style={authFormStyle} onSubmit={async (event) => {
         event.preventDefault();
         setBusy(true);
         setError("");
         try {
-          if (!token.trim()) {
-            throw new Error("Enter the Mango invite token.");
-          }
-          if (!displayName.trim()) {
-            throw new Error("Enter your full name.");
-          }
-          const invitation = await validateInvitationToken(token);
-          const invitedEmail = normalizeEmailInput(invitation.email);
           const normalizedEmail = normalizeEmailInput(email);
-          if (!normalizedEmail) {
-            throw new Error("Enter the invited email address.");
+          if (normalizedEmail !== normalizeEmailInput(invitation.email)) throw new Error("Use the email address this invitation was sent to.");
+          let accepted;
+          if (me) {
+            if (wrongAccount) throw new Error("Sign in with the invited email address before accepting.");
+            accepted = await acceptInvitation(token, me.user.display_name);
+          } else if (invitation.account_exists) {
+            const result = await loginWithPassword(normalizedEmail, password);
+            if (result.status === "new_password_required") {
+              await completeNewPassword(result.username, result.session, password);
+            }
+            accepted = await acceptInvitation(token, "");
+          } else {
+            accepted = await acceptInvitation(token, "", normalizedEmail, password);
+            const result = await loginWithPassword(normalizedEmail, password);
+            if (result.status !== "authenticated") throw new Error("Your invitation was accepted. Sign in to continue.");
           }
-          if (invitedEmail && normalizedEmail !== invitedEmail) {
-            throw new Error("This Mango invite token belongs to a different email address.");
-          }
-          requireNewPasswordMatch();
-          await acceptInvitation(token, displayName, normalizedEmail, newPassword);
-          const result = await loginWithPassword(normalizedEmail, newPassword);
-          if (result.status !== "authenticated") {
-            throw new Error("Sign in with the new password to continue.");
-          }
+          setActiveCompanyID(accepted.company_id);
           await onAuthenticated();
-          onNavigate("/connect-google");
+          onNavigate("/my-work");
         } catch (inviteError) {
-          console.error("Invite acceptance failed", inviteError);
-          setError(formatAuthError(inviteError, "Invite acceptance failed"));
+          if ((inviteError as { code?: string })?.code === "existing_account_sign_in_required") {
+            setInvitation({ ...invitation, account_exists: true });
+          }
+          if (inviteError instanceof Error && inviteError.name === "UserNotConfirmedException") setNeedsConfirmation(true);
+          setError(formatAuthError(inviteError, "Could not accept invitation"));
         } finally {
+          setPassword("");
           setBusy(false);
         }
       }}>
-        {tokenFromURL && invitedEmail && <div style={authInfoMessageStyle}>Invitation for {invitedEmail}.</div>}
-        {!tokenFromURL && <AuthTextField label="Invite token" value={token} onChange={(event) => setToken(event.target.value)} placeholder="Invite token" autoComplete="off" spellCheck={false} />}
-        <AuthTextField label="Your full name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Your full name" autoComplete="name" required />
-        <AuthTextField label="Email" value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="you@company.com" autoComplete="email" />
-        <AuthTextField label="New password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" placeholder="New password" autoComplete="new-password" />
-        <AuthTextField label="Confirm password" value={confirmNewPassword} onChange={(event) => setConfirmNewPassword(event.target.value)} type="password" placeholder="Confirm password" autoComplete="new-password" />
-        <AuthPrimaryButton disabled={busy}>{busy ? "Accepting" : "Accept invite"}</AuthPrimaryButton>
-      </form>
-      <AuthSecondaryButton type="button" onClick={() => onNavigate("/login")}>Back to login</AuthSecondaryButton>
+        <div style={authInfoMessageStyle}>You were invited as {invitation.role.replace(/_/g, " ")}. {invitation.account_exists ? "Your existing company memberships will stay available." : "Create your password to finish signing up."}</div>
+        <AuthTextField label="Email" value={email} onChange={(event) => setEmail(event.target.value)} type="email" autoComplete="email" required readOnly />
+        {!me && <AuthTextField label={invitation.account_exists ? "Password" : "Create password"} value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete={invitation.account_exists ? "current-password" : "new-password"} required />}
+        {wrongAccount && <div role="alert" style={authErrorStyle}>This invitation is for {invitation.email}. Sign out to use that account.</div>}
+        <AuthPrimaryButton disabled={busy || wrongAccount}>{busy ? "Joining" : "Join company"}</AuthPrimaryButton>
+      </form>}
+      {message && <div role="status" style={authInfoMessageStyle}>{message}</div>}
+      {needsConfirmation && invitation && <AuthSecondaryButton type="button" disabled={busy} onClick={async () => {
+        setBusy(true);
+        setError("");
+        try {
+          await resendSignupConfirmation(invitation.email);
+          setMessage("Confirmation email sent. Confirm it, then enter your password to join this company.");
+        } catch (resendError) { setError(formatAuthError(resendError, "Could not resend confirmation")); }
+        finally { setBusy(false); }
+      }}>Resend confirmation email</AuthSecondaryButton>}
+      {wrongAccount && <AuthSecondaryButton type="button" onClick={() => {
+        const invitationURL = window.location.href;
+        logout();
+        window.location.replace(invitationURL);
+      }}>Sign out</AuthSecondaryButton>}
+      <AuthSecondaryButton type="button" onClick={() => onNavigate(me ? "/my-work" : "/login")}>{me ? "Back to Mango" : "Back to Sign In"}</AuthSecondaryButton>
     </AuthPanel>
   );
 }
@@ -1285,7 +1358,11 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
           <CompanySearchSelect
             value={companyID}
             options={companyOptions}
-            onChange={setCompanyID}
+            onChange={(nextCompanyID) => {
+              if (!nextCompanyID || nextCompanyID === companyID) return;
+              setActiveCompanyID(nextCompanyID);
+              window.location.assign("/my-work");
+            }}
             onSearchQueryChange={me.is_dev_admin ? loadCompanyOptions : undefined}
             ariaLabel="Company Scope"
             placeholder="Search company or UUID"
@@ -1384,7 +1461,6 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
             <button className="mango-settings-action" style={settingsPrimaryButtonStyle}>Invite user</button>
           </form>
           {inviteMessage && <div style={settingsInfoTextStyle}>{inviteMessage}</div>}
-          <div style={settingsInfoTextStyle}>Dev note: while the Google app is in Testing mode, add invited Google accounts as Google Audience test users before they connect Google.</div>
         </section>}
         <section style={{ ...sectionStyle, flex: me.is_dev_admin ? "0 1 360px" : "1 1 280px", marginLeft: me.is_dev_admin ? "auto" : undefined }}>
           <div style={settingsProfileHeaderStyle}>
@@ -1465,7 +1541,7 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
         <div style={{ display: "grid", gap: 6 }}>
           {users.length === 0 && <div style={settingsInfoTextStyle}>No users in this company scope.</div>}
           {users.map((user) => {
-            const canDeleteUser = user.user_id !== me.user.user_id && (me.is_dev_admin || selectedCompany?.role === "company_admin" || (selectedCompany?.role === "company_manager" && user.role !== "company_admin" && user.role !== "dev_admin"));
+            const canDeleteUser = user.user_id !== me.user.user_id && (me.is_dev_admin || (user.role !== "dev_admin" && (selectedCompany?.role === "company_admin" || (selectedCompany?.role === "company_manager" && user.role !== "company_admin"))));
             return (
               <div key={user.user_id} style={userRowStyle}>
                 <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>{companyUserLabel(user)}</span>
@@ -1493,7 +1569,7 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
           title="Are you sure you want to delete this user?"
           detail={me.is_dev_admin
             ? <>This deletes {companyUserLabel(deleteConfirmation.user)} from Cognito and removes their Mango user, memberships, and invitation rows.</>
-            : <>This removes {companyUserLabel(deleteConfirmation.user)} from {activeCompanyLabel}. If this is their last company, Mango also deletes their Cognito identity.</>}
+            : <>This removes {companyUserLabel(deleteConfirmation.user)} from {activeCompanyLabel}. They must keep at least one other company membership.</>}
           position={deleteConfirmation.position}
           confirmLabel={deleteBusy ? "Deleting" : "Yes"}
           cancelLabel="No"
@@ -1532,10 +1608,10 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
   );
 }
 
-function AuthPanel({ error, children }: { title: string; error?: string; children: React.ReactNode }) {
+function AuthPanel({ error, children, wide = false }: { title: string; error?: string; children: React.ReactNode; wide?: boolean }) {
   return (
     <div style={panelStyle}>
-      <div style={formStyle}>
+      <div style={wide ? { ...formStyle, maxWidth: 800 } : formStyle}>
         <div style={authHeaderStyle}>
           <MangoWordmark size={28} weight={680} />
           <div style={authAccentRailStyle} />
@@ -2040,6 +2116,6 @@ function onboardingStatusLabels(item: CompanyUserOnboarding): string[] {
   if (item.google_connection_status === "connected") labels.push("Google connected");
   else if (item.google_connection_status === "reauth_required") labels.push("Google connection invalid / expired");
   else if (item.google_connection_status === "configuration_required") labels.push("Google/Gmail configuration required");
-  else labels.push("Google not connected");
+  else if (item.google_connection_status !== "disabled") labels.push("Google not connected");
   return labels;
 }

@@ -14,10 +14,11 @@ const (
 )
 
 type authMembershipCacheKey struct {
-	subject  string
-	email    string
-	name     string
-	issuedAt int64
+	subject       string
+	email         string
+	emailVerified bool
+	name          string
+	issuedAt      int64
 }
 
 type authMembershipCacheEntry struct {
@@ -219,10 +220,11 @@ func cacheKeyForClaims(claims auth.Claims) authMembershipCacheKey {
 		issuedAt = claims.IssuedAt.Unix()
 	}
 	return authMembershipCacheKey{
-		subject:  strings.TrimSpace(claims.Subject),
-		email:    strings.ToLower(strings.TrimSpace(claims.Email)),
-		name:     strings.TrimSpace(claims.Name),
-		issuedAt: issuedAt,
+		subject:       strings.TrimSpace(claims.Subject),
+		email:         strings.ToLower(strings.TrimSpace(claims.Email)),
+		emailVerified: claims.EmailVerified,
+		name:          strings.TrimSpace(claims.Name),
+		issuedAt:      issuedAt,
 	}
 }
 

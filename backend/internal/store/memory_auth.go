@@ -142,6 +142,27 @@ func (r *MemoryRepo) GetAuthUserByEmail(email string) (domain.User, error) {
 	return domain.User{}, ErrNotFound
 }
 
+func (r *MemoryRepo) GetAuthUserByIDContext(ctx context.Context, userID string) (domain.User, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.User{}, err
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return domain.User{}, ErrInvalid
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return domain.User{}, err
+	}
+	for _, user := range r.users {
+		if user.UserID == userID {
+			return user, nil
+		}
+	}
+	return domain.User{}, ErrNotFound
+}
+
 func (r *MemoryRepo) ListUserMemberships(userID string) ([]domain.CompanyMembership, error) {
 	return r.ListUserMembershipsContext(context.Background(), userID)
 }
@@ -383,6 +404,14 @@ func (r *MemoryRepo) AddCompanyMembership(cognitoSubject, companyID, role string
 }
 
 func (r *MemoryRepo) BootstrapDevAdminContext(ctx context.Context, cognitoSubject, companyName string) (domain.CompanyMembership, bool, error) {
+	return r.ensureInitialCompanyContext(ctx, cognitoSubject, companyName, domain.RoleDevAdmin)
+}
+
+func (r *MemoryRepo) EnsureInitialCompanyContext(ctx context.Context, cognitoSubject string) (domain.CompanyMembership, bool, error) {
+	return r.ensureInitialCompanyContext(ctx, cognitoSubject, "My Company", domain.RoleCompanyAdmin)
+}
+
+func (r *MemoryRepo) ensureInitialCompanyContext(ctx context.Context, cognitoSubject, companyName, role string) (domain.CompanyMembership, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.CompanyMembership{}, false, err
 	}
@@ -441,12 +470,12 @@ func (r *MemoryRepo) BootstrapDevAdminContext(ctx context.Context, cognitoSubjec
 		CompanyID:        company.CompanyID,
 		CompanyName:      company.Name,
 		UserID:           user.UserID,
-		Role:             domain.RoleDevAdmin,
+		Role:             role,
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
 	r.memberships[membershipKey(company.CompanyID, user.UserID)] = membership
-	affectedCompanyIDs := memoryMembershipAffectedCompanyIDsLocked(r.companies, company.CompanyID, true)
+	affectedCompanyIDs := memoryMembershipAffectedCompanyIDsLocked(r.companies, company.CompanyID, role == domain.RoleDevAdmin)
 	r.advancePolicyGroupMembershipVersionsLocked(affectedCompanyIDs)
 	if _, err := r.appendDomainEventsLocked(companyMembershipEventInputs(affectedCompanyIDs, CompanyMembershipSavedEventType, user.UserID)); err != nil {
 		rollback()
@@ -564,6 +593,9 @@ func (r *MemoryRepo) ListCompanyUserOnboarding(companyID string) ([]domain.Compa
 			CreatedTimestamp:             membership.CreatedTimestamp,
 			UpdatedTimestamp:             membership.UpdatedTimestamp,
 		}
+		if !user.MailboxEnabled {
+			item.GoogleConnectionStatus = "disabled"
+		}
 		if item.InvitationStatus == "" {
 			item.InvitationStatus = "none"
 		}
@@ -591,7 +623,7 @@ func (r *MemoryRepo) ListCompanyUserOnboarding(companyID string) ([]domain.Compa
 			InviteEmailStatus:        invitation.InviteEmailStatus,
 			InviteEmailError:         invitation.InviteEmailError,
 			InviteEmailSentTimestamp: invitation.EmailSentTimestamp,
-			GoogleConnectionStatus:   "not_connected",
+			GoogleConnectionStatus:   "disabled",
 			CreatedTimestamp:         invitation.CreatedTimestamp,
 			UpdatedTimestamp:         invitation.UpdatedTimestamp,
 		}
@@ -743,6 +775,9 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 			originalMembershipCompanyIDs = append(originalMembershipCompanyIDs, existingMembership.CompanyID)
 		}
 	}
+	if !deleteIdentity && len(originalMembershipCompanyIDs) == 1 {
+		return DeleteCompanyUserResult{}, ErrLastCompanyMembership
+	}
 	hadGlobalAccess := memoryUserHasDevAdminMembershipLocked(r.memberships, userID)
 	membershipsSnapshot := cloneMemoryMap(r.memberships)
 	userGroupMembersSnapshot := cloneMemoryMap(r.userGroupMembers)
@@ -857,14 +892,7 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 			delete(r.RACIMatrixProjectionRows, rowKey)
 		}
 	}
-	hasRemainingMembership := false
-	for _, membership := range r.memberships {
-		if membership.UserID == userID {
-			hasRemainingMembership = true
-			break
-		}
-	}
-	if hasRemainingMembership && !deleteIdentity {
+	if !deleteIdentity {
 		affectedCompanyIDs := memoryMembershipAffectedCompanyIDsLocked(
 			r.companies,
 			companyID,
@@ -1173,7 +1201,6 @@ func (r *MemoryRepo) AcceptInvitation(token, cognitoSubject, email, displayName 
 		r.users[cognitoSubject] = user
 	} else {
 		user.Email = email
-		user.DisplayName = displayName
 		if now.After(user.AuthClaimsIssuedAt) {
 			user.AuthClaimsIssuedAt = now
 		}

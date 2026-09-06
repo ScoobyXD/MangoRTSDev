@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { fetchCurrentUser, isAuthEnabled } from "../../auth/cognitoAuth.js";
 import { useAppOverlayPortalTarget } from "../../app/AppModalPortal.js";
 import { fetchSidebarPinTreeWithRequest } from "../../app/sidebarPinsApi.js";
 import { buildSidebarPinTreeRows, type SidebarPinTreeRow } from "../../app/sidebarPinTree.js";
@@ -150,6 +151,7 @@ function pickerEntityTypeLabel(type: UniversalEntityPickerEntityType): string {
 
 export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (props) => {
   const portalTarget = useAppOverlayPortalTarget();
+  const [mailboxEnabled, setMailboxEnabled] = useState(() => !isAuthEnabled());
   const rootRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const emailPaneRef = useRef<UniversalPickerEmailPaneHandle | null>(null);
@@ -176,12 +178,14 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
   const dragOnly = Boolean(props.onEntityDragStart && !props.onChoose);
 
   const allowedTypes = useMemo(
-    () => universalPickerAllowedTypes(mode, props.linkTargetTypes, category, props.referenceTargetTypes),
-    [category, mode, props.linkTargetTypes, props.referenceTargetTypes],
+    () => universalPickerAllowedTypes(mode, props.linkTargetTypes, category, props.referenceTargetTypes)
+      .filter((type) => mailboxEnabled || type !== "email_message"),
+    [category, mailboxEnabled, mode, props.linkTargetTypes, props.referenceTargetTypes],
   );
   const visibleCategoryOptions = useMemo(
-    () => props.linkTargetTypes.includes("huddle_logic_gate") ? categoryOptions : categoryOptions.filter((option) => option.type !== "huddle_logic_gate"),
-    [props.linkTargetTypes],
+    () => categoryOptions.filter((option) => (mailboxEnabled || option.type !== "email_message")
+      && (props.linkTargetTypes.includes("huddle_logic_gate") || option.type !== "huddle_logic_gate")),
+    [mailboxEnabled, props.linkTargetTypes],
   );
   const searchableAllowedTypes = useMemo(
     () => allowedTypes.filter((type): type is EditorSearchableEntityType => SEARCHABLE_ENTITY_TYPES.includes(type as EditorSearchableEntityType)),
@@ -215,6 +219,20 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
   useEffect(() => {
     inputRef.current?.focus({ preventScroll: true });
   }, []);
+
+  useEffect(() => {
+    if (!isAuthEnabled()) return undefined;
+    let cancelled = false;
+    setMailboxEnabled(false);
+    void fetchCurrentUser().then((current) => {
+      if (cancelled) return;
+      setMailboxEnabled(current.user.mailbox_enabled === true);
+      if (!current.user.mailbox_enabled) setCategory((currentCategory) => currentCategory === "email_message" ? "all" : currentCategory);
+    }).catch(() => {
+      if (!cancelled) setCategory((currentCategory) => currentCategory === "email_message" ? "all" : currentCategory);
+    });
+    return () => { cancelled = true; };
+  }, [props.companyID]);
 
   useEffect(() => {
     let cancelled = false;
@@ -349,7 +367,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
   }, [category, mode, props.linkTargetTypes]);
 
   const choose = async (entity: UniversalEntityPickerEntity) => {
-    if (!props.onChoose || busy) return;
+    if (!props.onChoose || busy || (!mailboxEnabled && entity.entityType === "email_message")) return;
     setBusy(true);
     setError("");
     try {
@@ -437,7 +455,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
     }
     if (event.key === "Tab" && !event.shiftKey) {
       const shortcutCategory = universalPickerShortcutCategory(query);
-      if (shortcutCategory && universalPickerAllowedTypes(mode, props.linkTargetTypes, shortcutCategory, props.referenceTargetTypes).length > 0) {
+      if (shortcutCategory && (mailboxEnabled || shortcutCategory !== "email_message") && universalPickerAllowedTypes(mode, props.linkTargetTypes, shortcutCategory, props.referenceTargetTypes).length > 0) {
         event.preventDefault(); setCategory(shortcutCategory); setQuery(""); return;
       }
       if (props.onChoose && category === "email_message" && emailPaneRef.current?.chooseSelection()) {
@@ -499,7 +517,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
           return <button key={option.type} type="button" disabled={!enabled || busy} aria-pressed={active} onClick={() => { setCategory(props.lockMode ? option.type : active ? "all" : option.type); setQuery(""); }} style={{ width: "100%", minWidth: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "7px 6px", border: active ? "1px solid rgba(8,145,178,.30)" : "1px solid rgba(255,255,255,.72)", borderRadius: 11, background: active ? "linear-gradient(145deg,#e8fbff,#f5efff)" : EDITOR_NEU_ACTIVE_SURFACE, boxShadow: active ? "inset 2px 2px 5px rgba(174,174,192,.18)" : EDITOR_NEU_SHADOW, color: enabled ? "#263247" : "#94a3b8", cursor: enabled ? "pointer" : "not-allowed", fontSize: 10, fontWeight: 800, whiteSpace: "nowrap" }}>{option.type === "email_message" ? <HeaderTriageIcon color={enabled ? "#0ea5e9" : "#94a3b8"} /> : option.type === "huddle_logic_gate" ? <HuddleResourceIcon type="huddle_logic_gate" /> : <ExplorerRowIcon kind={option.type} />}{option.label}</button>;
         })}
       </div>
-      {category === "email_message" ? (
+      {mailboxEnabled && category === "email_message" ? (
         <UniversalPickerEmailPane ref={emailPaneRef} active busy={busy} companyID={props.companyID} query={query} requestJSON={props.requestJSON} onChoose={chooseEmail} />
       ) : <div role="listbox" aria-label={query.trim() || category === "entity" ? "Resource search results" : "Pinned resources"} style={{ minHeight: 150, maxHeight: 310, overflowY: "auto", padding: "3px 9px 10px" }}>
         <div style={{ padding: "2px 7px 7px", fontSize: 10, fontWeight: 900, letterSpacing: .7, textTransform: "uppercase", color: "#64748b" }}>{query.trim() || category === "entity" ? "Results" : "Pinned"}</div>

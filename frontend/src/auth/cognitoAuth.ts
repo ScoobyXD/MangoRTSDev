@@ -31,6 +31,7 @@ export type MangoUser = {
   cognito_subject: string;
   email: string;
   display_name: string;
+  mailbox_enabled: boolean;
   created_timestamp: string;
   updated_timestamp: string;
 };
@@ -55,7 +56,7 @@ export type CurrentUserResponse = {
 
 const TOKEN_KEY = "mangorts:cognito-token-v2";
 const COGNITO_PASSWORD_RESET_SECONDS = 60 * 60;
-const PUBLIC_AUTH_PATHS = new Set(["/v1/invitations/validate", "/v1/invitations/accept", "/v1/password-resets/request"]);
+const PUBLIC_AUTH_PATHS = new Set(["/v1/invitations/validate", "/v1/invitations/accept"]);
 const CURRENT_USER_CACHE_TTL_MS = 30_000;
 export const AUTH_TERMINAL_FAILURE_EVENT = "mangorts:auth-terminal-failure";
 
@@ -101,7 +102,49 @@ export function formatAuthError(error: unknown, fallback: string): string {
   return fallback;
 }
 
-export async function loginWithPassword(email: string, password: string): Promise<LoginResult> {
+export async function signUpWithPassword(email: string, password: string, signal?: AbortSignal): Promise<void> {
+  const config = readAuthConfig();
+  assertConfigured(config);
+  const username = normalizeEmail(email);
+  await cognitoRequest(config, "SignUp", {
+    ClientId: config.clientID,
+    Username: username,
+    Password: password,
+    UserAttributes: [{ Name: "email", Value: username }],
+  }, signal);
+}
+
+export async function resendSignupConfirmation(email: string): Promise<void> {
+  const config = readAuthConfig();
+  assertConfigured(config);
+  await cognitoRequest(config, "ResendConfirmationCode", {
+    ClientId: config.clientID,
+    Username: normalizeEmail(email),
+  });
+}
+
+// The original signup browser authenticates with its own submitted password.
+// Nothing is saved to browser storage until Cognito confirms and signs it in.
+export async function waitForSignupConfirmation(email: string, password: string, signal: AbortSignal): Promise<LoginResult> {
+  const deadline = Date.now() + 10 * 60_000;
+  while (Date.now() < deadline) {
+    signal.throwIfAborted();
+    try {
+      return await loginWithPassword(email, password, signal);
+    } catch (error) {
+      if (!(error instanceof Error) || error.name !== "UserNotConfirmedException") throw error;
+    }
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = () => { clearTimeout(timer); reject(signal.reason); };
+      const timer = setTimeout(() => { signal.removeEventListener("abort", onAbort); resolve(); }, 10_000);
+      signal.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted) onAbort();
+    });
+  }
+  throw new Error("Automatic sign-in timed out. Confirm your email, then use Sign In with the password you chose.");
+}
+
+export async function loginWithPassword(email: string, password: string, signal?: AbortSignal): Promise<LoginResult> {
   const config = readAuthConfig();
   assertConfigured(config);
   const username = normalizeEmail(email);
@@ -112,7 +155,8 @@ export async function loginWithPassword(email: string, password: string): Promis
       USERNAME: username,
       PASSWORD: password,
     },
-  });
+  }, signal);
+  signal?.throwIfAborted();
   if (response.AuthenticationResult) {
     writeAuthResult(response.AuthenticationResult);
     return { status: "authenticated" };
@@ -143,17 +187,13 @@ export async function completeNewPassword(username: string, session: string, new
 
 export async function forgotPassword(email: string): Promise<{ expires_in_seconds?: number }> {
   const username = normalizeEmail(email);
-  const eligibility = await apiFetchJSON<{ expires_in_seconds?: number }>("/v1/password-resets/request", {
-    method: "POST",
-    body: JSON.stringify({ email: username }),
-  });
   const config = readAuthConfig();
   assertConfigured(config);
   await cognitoRequest<unknown>(config, "ForgotPassword", {
     ClientId: config.clientID,
     Username: username,
   });
-  return { expires_in_seconds: eligibility.expires_in_seconds ?? COGNITO_PASSWORD_RESET_SECONDS };
+  return { expires_in_seconds: COGNITO_PASSWORD_RESET_SECONDS };
 }
 
 export async function resetPassword(email: string, confirmationCode: string, newPassword: string): Promise<void> {
@@ -181,19 +221,21 @@ export async function changePassword(currentPassword: string, newPassword: strin
   });
 }
 
-export async function validateInvitationToken(token: string): Promise<MangoInvitation> {
-  const payload = await apiFetchJSON<{ invitation: MangoInvitation }>("/v1/invitations/validate", {
+export async function validateInvitationToken(token: string): Promise<MangoInvitation & { account_exists: boolean }> {
+  const payload = await apiFetchJSON<{ invitation: MangoInvitation; account_exists: boolean }>("/v1/invitations/validate", {
     method: "POST",
     body: JSON.stringify({ token: token.trim() }),
   });
-  return payload.invitation;
+  return { ...payload.invitation, account_exists: payload.account_exists };
 }
 
-export async function acceptInvitation(token: string, displayName: string, email: string, password: string): Promise<void> {
-  await apiFetchJSON("/v1/invitations/accept", {
+export async function acceptInvitation(token: string, displayName: string, email?: string, password?: string): Promise<MangoInvitation> {
+  const result = await apiFetchJSON<{ invitation: MangoInvitation }>("/v1/invitations/accept", {
     method: "POST",
-    body: JSON.stringify({ token: token.trim(), display_name: displayName.trim(), email: normalizeEmail(email), password }),
+    body: JSON.stringify({ token: token.trim(), display_name: displayName.trim(), email: email === undefined ? undefined : normalizeEmail(email), password }),
   });
+  clearCurrentUserCache();
+  return result.invitation;
 }
 
 export async function fetchCurrentUser(): Promise<CurrentUserResponse> {
@@ -372,7 +414,7 @@ async function refreshTokenSet(config: CognitoConfig, token: TokenSet): Promise<
   }
 }
 
-async function cognitoRequest<T>(config: CognitoConfig, action: string, payload: unknown): Promise<T> {
+async function cognitoRequest<T>(config: CognitoConfig, action: string, payload: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(`https://cognito-idp.${config.region}.amazonaws.com/`, {
     method: "POST",
     headers: {
@@ -380,10 +422,14 @@ async function cognitoRequest<T>(config: CognitoConfig, action: string, payload:
       "X-Amz-Target": `AWSCognitoIdentityProviderService.${action}`,
     },
     body: JSON.stringify(payload),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
   });
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(cognitoErrorMessage(response, text, action));
+    const error = new Error(cognitoErrorMessage(response, text, action));
+    const payload = parseErrorPayload(text);
+    error.name = normalizeAwsErrorType(stringValue(payload?.__type) || response.headers.get("x-amzn-errortype") || "Error");
+    throw error;
   }
   return response.json() as Promise<T>;
 }
@@ -415,7 +461,7 @@ function apiErrorMessage(response: Response, text: string): string {
 function friendlyCognitoError(type: string, message: string, action: string): string {
   const lowerMessage = message.toLowerCase();
   if (lowerMessage.includes("invalid session for the user") && lowerMessage.includes("used once")) {
-    return "That Cognito invite session has already been used. Sign in with the new password, then paste the Mango invite token again.";
+    return "That setup session has already been used. Sign in with your password, then reopen the invitation link.";
   }
   if (action === "ChangePassword" && type === "NotAuthorizedException" && lowerMessage.includes("incorrect")) {
     return "Current password is incorrect.";
@@ -427,7 +473,13 @@ function friendlyCognitoError(type: string, message: string, action: string): st
     return message;
   }
   if (type === "UserNotFoundException") {
-    return "No Cognito user exists for that email. Ask an admin to resend the invite.";
+    return "No account exists for that email. Use Sign Up to create one.";
+  }
+  if (type === "UsernameExistsException") {
+    return "An account already exists for that email. Use Sign In, or resend the confirmation email if you have not confirmed it yet.";
+  }
+  if (type === "UserNotConfirmedException") {
+    return "Confirm your email before signing in. You can resend the confirmation email below.";
   }
   if (type === "CodeMismatchException") {
     return "The reset code is not valid.";
@@ -449,10 +501,18 @@ function friendlyCognitoError(type: string, message: string, action: string): st
 
 function friendlyApiError(code: string): string {
   switch (code) {
-    case "failed_to_create_cognito_user":
-      return "Mango created the invite, but Cognito did not create the user. Check backend logs, AWS credentials, and onboarding status, then resend.";
+    case "authentication_unavailable":
+      return "Mango is temporarily unavailable. Please try signing in again.";
+    case "authentication_timeout":
+      return "Mango took too long to respond. Please try signing in again.";
+    case "last_company_membership":
+      return "This is the user's last company. Add another company membership before removing this one.";
+    case "mailbox_disabled":
+      return "Mailbox features are not available for this account.";
+    case "existing_account_sign_in_required":
+      return "This email already has an account. Sign in with its existing password to accept the invitation.";
     case "failed_to_set_cognito_password":
-      return "Mango could not set the invited user's password. Check backend logs, AWS credentials, and Cognito password policy.";
+      return "Account setup could not finish. Please try again, or sign in if you already created the account.";
     case "cognito_admin_not_configured":
       return "Invite acceptance is not configured for Cognito in this environment.";
     case "failed_to_list_company_users":
@@ -498,8 +558,6 @@ function friendlyApiError(code: string): string {
       return "Enter your full name.";
     case "display_name_confirmation_required":
       return "Type your full name exactly as it appears on your account.";
-    case "password_reset_user_not_found":
-      return "You are not a user.";
     case "nylas_rate_limited":
       return "Nylas is rate limiting this mailbox. Wait a moment, then refresh.";
     case "nylas_request_failed":
@@ -509,7 +567,7 @@ function friendlyApiError(code: string): string {
     case "nylas_reauth_required":
       return "Email access expired. Disconnect and reconnect your mailbox.";
     case "nylas_not_connected":
-      return "Connect your mailbox before opening Home.";
+      return "Connect your mailbox before opening Mail.";
     case "nylas_not_configured":
       return "Google connection is not configured for this environment.";
     case "project_node_already_in_another_project":

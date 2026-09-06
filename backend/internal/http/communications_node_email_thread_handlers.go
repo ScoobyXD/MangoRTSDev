@@ -9,6 +9,9 @@ import (
 )
 
 func (s *Server) handleNodeEmailThread(w http.ResponseWriter, r *http.Request, nodeID, emailThreadID string) {
+	if !requireMailboxAccess(w, r) {
+		return
+	}
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return

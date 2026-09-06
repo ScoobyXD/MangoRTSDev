@@ -60,6 +60,13 @@ func (s *Server) handleNodeViewV2(w http.ResponseWriter, r *http.Request, nodeID
 		return
 	}
 	view.EffectiveAccessFlags = flags
+	if mailboxDisabledForRequest(r) {
+		unfilteredInformationCount := len(view.Information)
+		view.Information = withoutNodeMailboxInformation(view.Information)
+		view.Projections = withoutNodeMailboxProjections(view.Projections)
+		view.InformationCount -= unfilteredInformationCount - len(view.Information)
+		view.ProjectionCount = len(view.Projections)
+	}
 	writeJSONWithPrecomputedETag(w, r, http.StatusOK, view, etag)
 }
 

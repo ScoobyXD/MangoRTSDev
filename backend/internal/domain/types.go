@@ -62,6 +62,7 @@ type User struct {
 	CognitoSubject     string    `json:"cognito_subject"`
 	Email              string    `json:"email"`
 	DisplayName        string    `json:"display_name"`
+	MailboxEnabled     bool      `json:"mailbox_enabled"`
 	AuthClaimsIssuedAt time.Time `json:"-"`
 	CreatedTimestamp   time.Time `json:"created_timestamp"`
 	UpdatedTimestamp   time.Time `json:"updated_timestamp"`

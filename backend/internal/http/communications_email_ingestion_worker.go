@@ -26,6 +26,9 @@ func (s *Server) processCommunicationsEmailIngestionProviderWork(ctx context.Con
 	if err != nil {
 		return err
 	}
+	if err := s.checkPersonalMailboxConnection(ctx, connection); err != nil {
+		return err
+	}
 	if connection.Status != "connected" || strings.TrimSpace(connection.GrantID) == "" {
 		return errCommunicationsEmailConnectionReauthRequired
 	}

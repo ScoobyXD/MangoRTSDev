@@ -436,6 +436,9 @@ func (s *Server) getEmailAttachmentResourceAccess(companyID, userID, resourceTyp
 }
 
 func (s *Server) requireFinalEmailAttachmentResourceAccess(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID string, mutation bool) bool {
+	if !requireMailboxAccess(w, r) {
+		return false
+	}
 	companyID = strings.TrimSpace(companyID)
 	if companyID == "" {
 		writeError(w, http.StatusBadRequest, "company_id_required")
@@ -468,6 +471,9 @@ func (s *Server) requireFinalEmailAttachmentResourceAccess(w http.ResponseWriter
 
 func (s *Server) requireAttachmentResourceView(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID string) bool {
 	resourceType = store.NormalizeAttachmentResourceType(resourceType)
+	if (resourceType == "shared_inbox" || resourceType == "shared_inbox_folder") && !requireMailboxAccess(w, r) {
+		return false
+	}
 	if isFinalEmailAttachmentResource(resourceType) {
 		return s.requireFinalEmailAttachmentResourceAccess(w, r, companyID, resourceType, resourceID, false)
 	}
@@ -480,6 +486,9 @@ func (s *Server) requireAttachmentResourceView(w http.ResponseWriter, r *http.Re
 }
 func (s *Server) requireAttachmentResourceEdit(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID string) bool {
 	resourceType = store.NormalizeAttachmentResourceType(resourceType)
+	if (resourceType == "shared_inbox" || resourceType == "shared_inbox_folder") && !requireMailboxAccess(w, r) {
+		return false
+	}
 	if isFinalEmailAttachmentResource(resourceType) {
 		return s.requireFinalEmailAttachmentResourceAccess(w, r, companyID, resourceType, resourceID, true)
 	}
@@ -509,7 +518,13 @@ func (s *Server) canReadAttachmentThroughResourceLink(w http.ResponseWriter, r *
 
 func (s *Server) canViewAttachmentResource(r *http.Request, companyID, resourceType, resourceID string) (bool, error) {
 	resourceType = store.NormalizeAttachmentResourceType(resourceType)
+	if (resourceType == "shared_inbox" || resourceType == "shared_inbox_folder") && mailboxDisabledForRequest(r) {
+		return false, nil
+	}
 	if isFinalEmailAttachmentResource(resourceType) {
+		if mailboxDisabledForRequest(r) {
+			return false, nil
+		}
 		actor, ok := authenticatedActor(r)
 		if !ok || actorRoleForCompany(actor, companyID) == "" || strings.TrimSpace(actor.User.UserID) == "" {
 			return false, nil

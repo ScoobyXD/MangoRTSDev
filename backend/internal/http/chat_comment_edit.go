@@ -187,6 +187,9 @@ func (s *Server) handleNodeChatCommentEdit(w http.ResponseWriter, r *http.Reques
 		writeChatCommentEditError(w, errChatCommentNotFound, "failed_to_load_chat_comment")
 		return
 	}
+	if !requireMailboxInformationAccess(w, r, existing.Type, existing.Information) {
+		return
+	}
 	updatedInformation, _, err := editChatCommentInformation(existing.Type, existing.Information, actorUserID, req.Message, req.EntityLinks, req.MentionedUserIDs, req.MentionedGroupIDs)
 	if err != nil {
 		writeChatCommentEditError(w, err, "failed_to_edit_chat_comment")
@@ -235,6 +238,9 @@ func (s *Server) handleProjectChatCommentEdit(w http.ResponseWriter, r *http.Req
 	existing, found := findProjectChatComment(projections, informationID)
 	if !found {
 		writeChatCommentEditError(w, errChatCommentNotFound, "failed_to_load_chat_comment")
+		return
+	}
+	if !requireMailboxInformationAccess(w, r, existing.Type, existing.Information) {
 		return
 	}
 	updatedInformation, _, err := editChatCommentInformation(existing.Type, existing.Information, actor.User.UserID, req.Message, req.EntityLinks, req.MentionedUserIDs, req.MentionedGroupIDs)

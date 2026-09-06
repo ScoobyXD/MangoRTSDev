@@ -257,6 +257,12 @@ func (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request, proje
 			writeError(w, http.StatusInternalServerError, "failed_to_load_project")
 			return
 		}
+		if mailboxDisabledForRequest(r) {
+			view.Information = withoutProjectMailboxInformation(view.Information)
+			view.Projections = withoutProjectMailboxProjections(view.Projections)
+			view.InformationCount = len(view.Information)
+			view.ProjectionCount = len(view.Projections)
+		}
 		writeJSONMaybeNotModified(w, r, http.StatusOK, view)
 	case http.MethodPut:
 		var req projectRequest
@@ -340,6 +346,9 @@ func (s *Server) handleProjectInformation(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusConflict, "editor_collaboration_required")
 		return
 	}
+	if !requireMailboxInformationAccess(w, r, req.Type, req.Information) {
+		return
+	}
 	if strings.TrimSpace(req.InformationID) != "" {
 		if projections, listErr := s.repo.ListProjectProjections(companyID, projectID); listErr != nil {
 			s.writeProjectMutationError(w, listErr, "failed_to_load_chat_comment")
@@ -383,6 +392,9 @@ func (s *Server) handleProjectProjectionList(w http.ResponseWriter, r *http.Requ
 		s.writeProjectMutationError(w, err, "failed_to_list_project_projection")
 		return
 	}
+	if mailboxDisabledForRequest(r) {
+		items = withoutProjectMailboxProjections(items)
+	}
 	writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"project_id": projectID, "projections": items})
 }
 
@@ -409,6 +421,9 @@ func (s *Server) handleProjectProjectionByID(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	for _, projection := range projections {
+		if projection.InformationID == informationID && !requireMailboxInformationAccess(w, r, projection.Type, projection.Information) {
+			return
+		}
 		if projection.InformationID == informationID && strings.EqualFold(strings.TrimSpace(projection.Type), "Text box") {
 			writeError(w, http.StatusConflict, "editor_collaboration_required")
 			return
@@ -676,6 +691,9 @@ func (s *Server) handleProjectScopedNodeCreate(w http.ResponseWriter, r *http.Re
 		ActorUserID: actor.User.UserID,
 	}
 	if req.InitialInformation != nil {
+		if !requireMailboxInformationAccess(w, r, req.InitialInformation.Type, req.InitialInformation.Information) {
+			return
+		}
 		if rejectDurableInlineFileBytes(w, "project_scoped_node_initial_information", req.InitialInformation.Information) {
 			return
 		}

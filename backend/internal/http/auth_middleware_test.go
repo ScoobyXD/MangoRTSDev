@@ -135,6 +135,52 @@ func TestAuthMiddlewareBootstrapsAllowedDevAdmin(t *testing.T) {
 	}
 }
 
+func TestAuthMiddlewareRequiresVerifiedEmailForDevAdminBootstrap(t *testing.T) {
+	t.Parallel()
+	key := mustRSAKey(t)
+	for _, test := range []struct {
+		name      string
+		claim     any
+		wantAdmin bool
+	}{
+		{"verified", true, true},
+		{"unverified", false, false},
+		{"missing", nil, false},
+		{"string", "true", false},
+		{"number", 1, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			const email = "bootstrap@example.com"
+			validator := testValidator(t, "kid", key)
+			token := testJWTWithVerificationClaim(t, key, "kid", "bootstrap-verified-email", email, time.Now().Add(-time.Minute), test.claim)
+			claims, err := validator.Validate(context.Background(), token)
+			if err != nil || claims.EmailVerified != test.wantAdmin {
+				t.Fatalf("verified claim = %t, err=%v, want %t", claims.EmailVerified, err, test.wantAdmin)
+			}
+			server := NewServerWithOptions(store.NewMemoryRepo(), ServerOptions{
+				AuthValidator:     validator,
+				BootstrapDevAdmin: BootstrapDevAdminConfig{Emails: []string{email}, CompanyName: "Bootstrap"},
+			})
+			t.Cleanup(server.Close)
+			req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+			res := httptest.NewRecorder()
+			server.Routes().ServeHTTP(res, req)
+			var payload signupMeResponse
+			if res.Code != http.StatusOK || json.Unmarshal(res.Body.Bytes(), &payload) != nil {
+				t.Fatalf("first login status=%d body=%s", res.Code, res.Body.String())
+			}
+			wantRole := domain.RoleCompanyAdmin
+			if test.wantAdmin {
+				wantRole = domain.RoleDevAdmin
+			}
+			if payload.IsDevAdmin != test.wantAdmin || len(payload.Memberships) != 1 || payload.Memberships[0].Role != wantRole {
+				t.Fatalf("first login context = %+v, want one %s membership", payload, wantRole)
+			}
+		})
+	}
+}
+
 func TestAuthMiddlewareAllowsDevAdminAcrossCompanies(t *testing.T) {
 	t.Parallel()
 
@@ -429,6 +475,11 @@ func testJWT(t *testing.T, key *rsa.PrivateKey, kid, subject, email string) stri
 
 func testJWTWithIssuedAt(t *testing.T, key *rsa.PrivateKey, kid, subject, email string, issuedAt time.Time) string {
 	t.Helper()
+	return testJWTWithVerificationClaim(t, key, kid, subject, email, issuedAt, true)
+}
+
+func testJWTWithVerificationClaim(t *testing.T, key *rsa.PrivateKey, kid, subject, email string, issuedAt time.Time, emailVerified any) string {
+	t.Helper()
 	header := map[string]string{"alg": "RS256", "kid": kid, "typ": "JWT"}
 	claims := map[string]any{
 		"iss":       "https://cognito-idp.us-west-1.amazonaws.com/us-west-1_test",
@@ -438,6 +489,9 @@ func testJWTWithIssuedAt(t *testing.T, key *rsa.PrivateKey, kid, subject, email 
 		"token_use": "access",
 		"exp":       time.Now().Add(time.Hour).Unix(),
 		"iat":       issuedAt.Unix(),
+	}
+	if emailVerified != nil {
+		claims["email_verified"] = emailVerified
 	}
 	unsigned := encodeJSONSegment(t, header) + "." + encodeJSONSegment(t, claims)
 	sum := sha256.Sum256([]byte(unsigned))
@@ -895,6 +949,11 @@ func TestDeleteCompanyUserInvalidatesCachedCompanyAccess(t *testing.T) {
 	if _, err := baseRepo.AddCompanyMembership(targetSubject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
+	const remainingCompanyID = "22222222-2222-2222-2222-222222222222"
+	baseRepo.EnsureCompany(remainingCompanyID, "Remaining Company")
+	if _, err := baseRepo.AddCompanyMembership(targetSubject, remainingCompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
 	repo := &countingAuthRepo{Repository: baseRepo}
 	validator := &tokenClaimsValidator{claims: map[string]auth.Claims{
 		"admin-token":  {Subject: adminSubject, Email: admin.Email, Name: "Admin"},
@@ -1180,6 +1239,9 @@ func TestAuthJoinedWaiterReturnsOnOwnCancellation(t *testing.T) {
 	if _, err := base.UpsertAuthUser(subject, "cancel@example.com", "Cancel User"); err != nil {
 		t.Fatal(err)
 	}
+	if _, _, err := base.EnsureInitialCompanyContext(context.Background(), subject); err != nil {
+		t.Fatal(err)
+	}
 	repo := newBlockingAuthPoolRepo(base, 20)
 	server := NewServerWithOptions(repo, ServerOptions{DisableRealtimeSpine: true, DisableNotificationCleanup: true})
 	t.Cleanup(server.Close)
@@ -1228,6 +1290,9 @@ func TestAuthLiveWaiterRetriesAfterShortDeadlineLeader(t *testing.T) {
 	base := store.NewMemoryRepo()
 	const subject = "auth-short-deadline-leader"
 	if _, err := base.UpsertAuthUser(subject, "leader@example.com", "Leader User"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := base.EnsureInitialCompanyContext(context.Background(), subject); err != nil {
 		t.Fatal(err)
 	}
 	repo := newBlockingAuthPoolRepo(base, 20)
@@ -1420,6 +1485,10 @@ func TestConcurrentChangedClaimsSerializeBySubject(t *testing.T) {
 	if _, err := base.UpsertAuthUser(subject, "old@example.com", "Old Name"); err != nil {
 		t.Fatal(err)
 	}
+	company := base.EnsureCompany("96969696-9696-4696-8696-969696969696", "Claims Serialization")
+	if _, err := base.AddCompanyMembership(subject, company.CompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
 	repo := &blockingChangedClaimsRepo{Repository: base, started: make(chan struct{}), release: make(chan struct{})}
 	server := NewServerWithOptions(repo, ServerOptions{DisableRealtimeSpine: true, DisableNotificationCleanup: true})
 	t.Cleanup(server.Close)
@@ -1476,7 +1545,7 @@ func TestAuthFirstBootstrapBurstCreatesOneCompanyAndMembership(t *testing.T) {
 		DisableNotificationCleanup:     true,
 	})
 	t.Cleanup(server.Close)
-	claims := auth.Claims{Subject: subject, Email: "bootstrap@example.com", Name: "Bootstrap User"}
+	claims := auth.Claims{Subject: subject, Email: "bootstrap@example.com", EmailVerified: true, Name: "Bootstrap User"}
 
 	const requestCount = 40
 	start := make(chan struct{})
@@ -1563,7 +1632,7 @@ func TestAuthBootstrapIsAtomicAcrossServerInstances(t *testing.T) {
 	for _, server := range servers {
 		t.Cleanup(server.Close)
 	}
-	claims := auth.Claims{Subject: "cross-server-bootstrap", Email: "cross-server@example.com", Name: "Cross Server User"}
+	claims := auth.Claims{Subject: "cross-server-bootstrap", Email: "cross-server@example.com", EmailVerified: true, Name: "Cross Server User"}
 	actors := make(chan ActorContext, len(servers))
 	errorsFound := make(chan error, len(servers))
 	for _, server := range servers {

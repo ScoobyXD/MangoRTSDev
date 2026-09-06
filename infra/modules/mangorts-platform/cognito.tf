@@ -2,12 +2,20 @@ resource "aws_cognito_user_pool" "main" {
   name = "${local.name_prefix}-users"
 
   admin_create_user_config {
-    allow_admin_create_user_only = true
+    allow_admin_create_user_only = false
   }
 
   auto_verified_attributes = ["email"]
 
+  user_attribute_update_settings {
+    attributes_require_verification_before_update = ["email"]
+  }
+
   username_attributes = ["email"]
+
+  verification_message_template {
+    default_email_option = "CONFIRM_WITH_LINK"
+  }
 
   password_policy {
     minimum_length                   = 6
@@ -24,6 +32,13 @@ resource "aws_cognito_user_pool" "main" {
       priority = 1
     }
   }
+}
+
+# Cognito's email verification links use /confirmUser on this domain.
+# The pool ID supplies a stable, unique prefix without exposing an app secret.
+resource "aws_cognito_user_pool_domain" "signup" {
+  domain       = lower(replace(aws_cognito_user_pool.main.id, "_", "-"))
+  user_pool_id = aws_cognito_user_pool.main.id
 }
 
 resource "aws_cognito_resource_server" "mangorts_api" {

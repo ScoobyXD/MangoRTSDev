@@ -123,7 +123,7 @@ func newEmailOutboxBoundaryFixture(t *testing.T) (*store.MemoryRepo, store.Commu
 func TestEmailIngestionOutboxFailureRedeliveryRevalidatesProviderTruth(t *testing.T) {
 	base, job, client := newEmailOutboxBoundaryFixture(t)
 	repo := &emailOutboxBoundaryRepo{Repository: base, fail: true}
-	server := NewServerWithOptions(repo, ServerOptions{
+	server := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasClient: client, NylasConfig: testNylasConfig(),
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true, DisableRealtimeSpine: true,
 	})
@@ -162,7 +162,7 @@ func TestEmailIngestionOutboxFailureRedeliveryRevalidatesProviderTruth(t *testin
 func TestEmailIngestionSuccessfulOutboxThenSQSDeleteFailureRedeliversWithoutDuplicateEvent(t *testing.T) {
 	base, job, client := newEmailOutboxBoundaryFixture(t)
 	repo := &emailOutboxBoundaryRepo{Repository: base}
-	server := NewServerWithOptions(repo, ServerOptions{
+	server := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasClient: client, NylasConfig: testNylasConfig(),
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true, DisableRealtimeSpine: true,
 	})
@@ -204,7 +204,7 @@ func TestEmailIngestionPersonalCompletionTargetsOnlyJobCompany(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := &emailOutboxBoundaryRepo{Repository: base}
-	server := NewServerWithOptions(repo, ServerOptions{
+	server := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasClient: client, NylasConfig: testNylasConfig(),
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
 	})
@@ -343,7 +343,7 @@ func TestEmailIngestionValkeyOutageAcknowledgesAfterDurableOutboxAndSpineRecover
 	options := realtimeBackplaneTestOptions(backplane)
 	options.NylasClient = client
 	options.NylasConfig = testNylasConfig()
-	server := NewServerWithOptions(repo, options)
+	server := newLegacyMailboxTestServer(repo, options)
 	defer server.Close()
 	server.nylasGate = newNylasRequestGate(0)
 
@@ -421,7 +421,7 @@ func TestEmailIngestionParksPermanentProviderFailuresFromAttachmentRecovery(t *t
 			client := newEmailCollaborationThreadTestClient()
 			client.messagesByID[test.message.ID] = test.message
 			test.configure(client)
-			server := NewServerWithOptions(repo, ServerOptions{
+			server := newLegacyMailboxTestServer(repo, ServerOptions{
 				NylasClient: client, NylasConfig: testNylasConfig(), AttachmentStorage: newFakeAttachmentObjectStorage(),
 				DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
 			})
@@ -449,7 +449,7 @@ func TestEmailIngestionParksPermanentProviderFailuresFromAttachmentRecovery(t *t
 func TestEmailIngestionStatusWriteFailureRemainsUnacknowledged(t *testing.T) {
 	base, job, client := newEmailOutboxBoundaryFixture(t)
 	client.messageErrorsByID["outbox-boundary-message"] = NylasAPIError{StatusCode: 401, Code: "unauthorized"}
-	server := NewServerWithOptions(&emailParkingFailureRepo{Repository: base}, ServerOptions{
+	server := newLegacyMailboxTestServer(&emailParkingFailureRepo{Repository: base}, ServerOptions{
 		NylasClient: client, NylasConfig: testNylasConfig(),
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
 	})
@@ -494,7 +494,7 @@ func TestCommunicationsEmailIngestionWorkerStoresThreadAttachmentsAndLaterManual
 		Attachments: []NylasAttachment{{ID: "provider-file", Filename: "report.pdf", ContentType: "application/pdf", Size: 12}},
 	}
 	storage := newFakeAttachmentObjectStorage()
-	server := NewServerWithOptions(repo, ServerOptions{
+	server := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasClient: client, NylasConfig: testNylasConfig(), AttachmentStorage: storage,
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
 	})
@@ -670,7 +670,7 @@ func TestCommunicationsEmailIngestionWorkerReconcilesSentTriggerIntoExistingThre
 		ID: "sent-trigger-sent", ThreadID: providerThreadID, Date: baseDate + 1,
 		Subject: "Re: Sent trigger", Body: "<p>sent</p>", Folders: []string{"SENT"},
 	}
-	server := NewServerWithOptions(repo, ServerOptions{
+	server := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasClient: client, NylasConfig: testNylasConfig(),
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true, DisableRealtimeSpine: true,
 	})
@@ -757,7 +757,7 @@ func TestCommunicationsEmailIngestionWorkerReconcilesMissingSentMemberFromPrevio
 	client.messagesByID["stored-trigger-missing-sent"] = NylasMessage{
 		ID: "stored-trigger-missing-sent", ThreadID: providerThreadID, Date: baseDate + 1, Folders: []string{"SENT"},
 	}
-	server := NewServerWithOptions(repo, ServerOptions{
+	server := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasClient: client, NylasConfig: testNylasConfig(),
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true, DisableRealtimeSpine: true,
 	})
@@ -829,7 +829,7 @@ func TestCommunicationsEmailIngestionWorkerStoresUnknownSentThreadWithoutCrossin
 		ID: "cross-connection-sent", ThreadID: providerThreadID, Date: baseDate + 1, FolderIDs: []string{"cross-connection-sent-folder"},
 	}
 	client.messagesByID["cross-connection-unrelated"] = NylasMessage{ID: "cross-connection-unrelated", Date: baseDate + 2, Folders: []string{"SENT"}}
-	server := NewServerWithOptions(repo, ServerOptions{
+	server := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasClient: client, NylasConfig: testNylasConfig(),
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true, DisableRealtimeSpine: true,
 	})
@@ -918,7 +918,7 @@ func TestCommunicationsEmailIngestionWorkerRetriesMissingSiblingAfterPartialFail
 		ID: "sent-retry-missing", ThreadID: providerThreadID, Date: baseDate + 1, Folders: []string{"INBOX"},
 	}
 	client.messageErrorsByID["sent-retry-missing"] = errors.New("temporary sibling fetch failure")
-	server := NewServerWithOptions(repo, ServerOptions{
+	server := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasClient: client, NylasConfig: testNylasConfig(),
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true, DisableRealtimeSpine: true,
 	})
@@ -1003,7 +1003,7 @@ func TestCommunicationsEmailIngestionWorkerUpgradesBlankProviderThreadWithoutFor
 				ID: test.triggerID, ThreadID: providerThreadID, Date: baseDate + 1, FolderIDs: []string{"blank-thread-sent"},
 			}
 			client.messagesByID[otherID] = NylasMessage{ID: otherID, ThreadID: providerThreadID, Date: baseDate + 2, Folders: []string{"INBOX"}}
-			server := NewServerWithOptions(repo, ServerOptions{
+			server := newLegacyMailboxTestServer(repo, ServerOptions{
 				NylasClient: client, NylasConfig: testNylasConfig(),
 				DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true, DisableRealtimeSpine: true,
 			})
@@ -1061,7 +1061,7 @@ func TestCommunicationsEmailIngestionWorkerRejectsUnknownNonInboxOrSentTriggers(
 			client.messagesByID[messageID] = NylasMessage{
 				ID: messageID, ThreadID: "noneligible-thread", Date: time.Now().UTC().Add(time.Second).Unix(), Folders: []string{folder},
 			}
-			server := NewServerWithOptions(repo, ServerOptions{
+			server := newLegacyMailboxTestServer(repo, ServerOptions{
 				NylasClient: client, NylasConfig: testNylasConfig(),
 				DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true, DisableRealtimeSpine: true,
 			})
@@ -1200,7 +1200,7 @@ func TestCommunicationsEmailIngestionWorkerPreservesCompleteMangoSentAttachment(
 	client.messagesByID["sent-attachment-sibling"] = NylasMessage{
 		ID: "sent-attachment-sibling", ThreadID: providerThreadID, Date: baseDate + 2, FolderIDs: []string{"sent-attachment-inbox"},
 	}
-	server := NewServerWithOptions(repo, ServerOptions{
+	server := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasClient: client, NylasConfig: testNylasConfig(), AttachmentStorage: storage,
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true, DisableRealtimeSpine: true,
 	})
@@ -1324,7 +1324,7 @@ func TestCommunicationsEmailConnectionScanStartsAtActivationAndQueuesRoutineWork
 		t.Fatal(err)
 	}
 	sender := &recordingEmailQueueSender{}
-	server := NewServerWithOptions(repo, ServerOptions{
+	server := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasClient: client, NylasConfig: testNylasConfig(),
 		EmailQueue: sender, DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
 	})
@@ -1383,7 +1383,7 @@ func TestEmailReconciliationRetriesOnlyTheExactOriginalDiscoverySource(t *testin
 		}}}},
 	}
 	sender := &recordingEmailQueueSender{err: errors.New("temporary SQS send failure")}
-	server := NewServerWithOptions(repo, ServerOptions{
+	server := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasClient: client, NylasConfig: testNylasConfig(), EmailQueue: sender,
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
 	})
@@ -1519,7 +1519,7 @@ func TestEmailReconciliationDoesNotResendActiveDurableOrTerminalJobs(t *testing.
 		messagePagesByToken: map[string]NylasMessagePage{"": {Messages: providerMessages}},
 	}
 	sender := &recordingEmailQueueSender{}
-	server := NewServerWithOptions(repo, ServerOptions{
+	server := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasClient: client, NylasConfig: testNylasConfig(), EmailQueue: sender,
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
 	})

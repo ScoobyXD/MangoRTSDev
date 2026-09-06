@@ -64,6 +64,12 @@ func (s *Server) processEmailArchiveDelivery(ctx context.Context, message emailq
 	if err != nil {
 		return false, err
 	}
+	if err := s.checkPersonalMailboxConnection(ctx, connection); err != nil {
+		if errors.Is(err, errMailboxDisabled) {
+			return true, nil
+		}
+		return false, err
+	}
 	if normalizeEmailForCompare(connection.AccountEmail) != normalizeEmailForCompare(item.AccountEmail) ||
 		strings.TrimSpace(connection.Provider) != strings.TrimSpace(item.Provider) {
 		return false, store.ErrInvalid
