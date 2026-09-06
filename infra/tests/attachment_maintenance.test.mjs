@@ -79,6 +79,16 @@ test("task invocation and failure log delivery use scoped permissions", () => {
   assert.doesNotMatch(maintenance, /"(?:ecs|iam|events|logs|cloudwatch):\*"/);
 });
 
+test("recovery rules wait for their exact deploy permissions before creation", () => {
+  for (const name of ["attachment_maintenance", "attachment_maintenance_failed", "attachment_maintenance_succeeded"]) {
+    assert.match(block('resource "aws_cloudwatch_event_rule"', name), /depends_on\s*=\s*\[aws_iam_role_policy_attachment\.github_deploy_attachment_maintenance\]/);
+  }
+  const deployPolicy = block('data "aws_iam_policy_document"', "github_deploy_attachment_maintenance");
+  assert.match(deployPolicy, /"events:TagResource"/);
+  assert.match(deployPolicy, /resources\s*=\s*\[local\.attachment_maintenance_arn, "\$\{local\.attachment_maintenance_arn\}-failed", "\$\{local\.attachment_maintenance_arn\}-succeeded"\]/);
+  assert.doesNotMatch(deployPolicy, /aws_cloudwatch_event_rule\./, "the policy must not depend on the rules it authorizes");
+});
+
 test("API release depends on recovery and runbook requires successful bootstrap before timer removal", () => {
   const service = ecs.match(/resource "aws_ecs_service" "backend"[\s\S]*?\n\}/)?.[0] ?? "";
   for (const target of ["aws_cloudwatch_event_target.attachment_maintenance", "aws_cloudwatch_metric_alarm.attachment_maintenance_failed", "aws_cloudwatch_metric_alarm.attachment_maintenance_overdue"]) {
@@ -86,7 +96,7 @@ test("API release depends on recovery and runbook requires successful bootstrap 
   }
   const runbook = read("docs/infra/attachment-deletion-recovery.md");
   assert.match(runbook, /not deployed recovery/);
-  assert.match(runbook, /Keep the existing API and email-worker images running/);
+  assert.match(runbook, /Keep both services stopped through recovery bootstrap and validation/);
   assert.match(runbook, /require container exit code `0`/);
   assert.match(runbook, /QA email worker may remain disabled/);
 });
