@@ -8,6 +8,7 @@ import { requestAppDockTab } from "../../app/appDockTabs";
 import { buildLogicGateRoute } from "../../app/deepLinkRoutes";
 import { openAppPathInNewTab } from "../../app/resourceLinks";
 import { requestJSON, isAbortError, APIHTTPError } from "../api/requestJSON";
+import { AccountFilterControl } from "../accounts/AccountFilterControl";
 import { convertTriageMessagesToExplorerTarget, listCompanyUsers, transferEmailNodeToNode } from "../communications/communicationsApi";
 import { dispatchTriageConversionApplied } from "../triage/triageEvents";
 import { hasTriageMessageDrag, readTriageMessageDrag, type TriageMessageDragPayload } from "../triage/triageDragDrop";
@@ -58,6 +59,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
   const [view, setView] = useState<ProcessWorkView>("Steps");
   const [surface, setSurface] = useState<"board" | "map">("board");
   const [boardMode, setBoardMode] = useState<"kanban" | "steps">("kanban");
+  const [kanbanQuery, setKanbanQuery] = useState("");
+  const [kanbanAccountIDs, setKanbanAccountIDs] = useState<string[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const selectionAnchor = useRef("");
   const [users, setUsers] = useState<CompanyUser[]>([]);
@@ -98,6 +101,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
   companyRef.current = companyID;
 
   useEffect(() => { if (forcedLogicGateID) setProcessID(forcedLogicGateID); }, [forcedLogicGateID]);
+  useEffect(() => { setKanbanQuery(""); setKanbanAccountIDs([]); }, [companyID, processID, boardMode, surface]);
   useEffect(() => {
     if (forcedLogicGateID) return;
     const apply = (selection: ReturnType<typeof readLiveSelectionForFrame>) => {
@@ -243,6 +247,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
   });
   const steps = useMemo(() => orderedProcessSteps(snapshot?.steps ?? []), [snapshot?.steps]);
   const counts = useMemo(() => processWorkCounts(snapshot?.nodes ?? []), [snapshot?.nodes]);
+  const kanbanAccounts = useMemo(() => [...new Map((snapshot?.nodes ?? []).flatMap((node) => node.accounts ?? []).map((account) => [account.account_id, account])).values()], [snapshot?.nodes]);
   const userName = (id?: string) => users.find((person) => person.user_id === id)?.display_name || users.find((person) => person.user_id === id)?.email || "";
   const canEdit = snapshot?.permissions.can_edit === true;
   const selectedIDs = [...selected];
@@ -428,7 +433,11 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
         const color = tab === "Steps" ? NODE_ICON_GRADIENT_END : processStatusColor(tab === "Backlog" ? "Backlogs" : tab);
         return <button key={tab} id={`${frameID}-${tab}`} type="button" role="tab" aria-selected={view === tab} aria-controls={`${frameID}-work-panel`} className={view === tab ? "is-active" : ""} style={{ "--view-color": color, "--view-start-color": tab === "Steps" ? NODE_ICON_GRADIENT_START : color, "--view-end-color": color } as React.CSSProperties} onClick={() => { setView(tab); setSelected(new Set()); }}><span>{tab}</span><span className="process-work__count">{counts[tab]}</span></button>;
       })}</div>}
-      {boardMode === "steps" && groupingControl}
+      {boardMode === "kanban" ? <div className="process-work__kanban-filters">
+        {groupingControl}
+        <input aria-label="Search Kanban board" placeholder="Search board" value={kanbanQuery} onChange={(event) => { setKanbanQuery(event.target.value); setSelected(new Set()); }} />
+        <AccountFilterControl accounts={kanbanAccounts} selectedAccountIDs={kanbanAccountIDs} onChange={(ids) => { setKanbanAccountIDs(ids); setSelected(new Set()); }} compact showLabel={false} style={{ flex: "0 1 220px", minWidth: 120, marginLeft: "auto" }} />
+      </div> : groupingControl}
       {displayToggle()}
     </div>}
     {surface === "board" && selected.size > 0 && canEdit && <div className="process-work__selection"><span>{selected.size} selected</span>
@@ -445,7 +454,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
           <button type="button" disabled={disabled || busy} onClick={createStep}>+ Create Step</button>
         </aside>} /> : <aside className="process-work__map-actions" aria-label="Process map controls">{displayToggle()}</aside> : boardMode === "kanban" ?
         <StatusKanbanBoard key={`${companyID}:${processID}`} companyID={companyID} processID={processID} accent={accent} isDark={isDark} nodes={snapshot?.nodes ?? []} selected={selected} highlightedNodeID={forcedHighlightedNodeID}
-          canEdit={canEdit} busy={busy} userID={userID} canResolveRequests={snapshot?.permissions.can_resolve_requests === true} dateSort={dateSort} dateDirection={dateDirection} hasGroups={groupings.length > 0} groupNodes={groupedNodes} groupingControl={groupingControl} personName={userName}
+          canEdit={canEdit} busy={busy} userID={userID} canResolveRequests={snapshot?.permissions.can_resolve_requests === true} dateSort={dateSort} dateDirection={dateDirection} hasGroups={groupings.length > 0} groupNodes={groupedNodes} personName={userName}
+          query={kanbanQuery} accountIDs={kanbanAccountIDs} onClearFilters={() => { setKanbanQuery(""); setKanbanAccountIDs([]); }}
           onSelection={updateSelection} onClearSelection={() => setSelected(new Set())} onOpen={(node) => { updateSelection(node, new Set([node.node_id])); openNode(node.node_id, node.node_title); }} onMove={(ids, status, before, priority) => void moveStatusNodes(ids, status, before, priority)}
           onTransferEmail={(source, target) => void transferWorkEmail(source, target)} onCreate={createStatusNode} onAssign={(items, status, priority) => void assignItemsToWork(items, status, undefined, priority)} onTriage={(triage, status, priority) => void convertMessagesToWork(triage, status, undefined, priority)} onRename={renameStatusNode}
           onRemove={(nodeIDs) => setDeletion({ nodeIDs: [...new Set(nodeIDs)], detach: true })} onDelete={(nodeIDs) => setDeletion({ nodeIDs: [...new Set(nodeIDs)] })} /> : view === "Steps" ? <div className="process-work__steps">{steps.map(renderStep)}{renderStep(null, steps.length)}{canEdit && <button type="button" className="process-work__add-step" disabled={busy} onClick={() => addStep(steps[steps.length - 1]?.process_step_id)}>+ Add {steps.length ? "next " : ""}step</button>}</div> :
