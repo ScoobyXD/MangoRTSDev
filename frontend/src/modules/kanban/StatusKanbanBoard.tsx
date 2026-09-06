@@ -3,7 +3,6 @@ import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { buildLogicGateRoute } from "../../app/deepLinkRoutes";
 import { openAppPathInNewTab } from "../../app/resourceLinks";
-import { AccountFilterControl } from "../accounts/AccountFilterControl";
 import { EXPLORER_DRAG_MIME } from "../company-explorer/companyExplorerDragDrop";
 import type { UniversalNestedGroup } from "../grouping/universalGrouping";
 import { hasTriageMessageDrag, readTriageMessageDrag, type TriageMessageDragPayload } from "../triage/triageDragDrop";
@@ -23,7 +22,7 @@ type Props = {
   canEdit: boolean; busy: boolean; userID: string; canResolveRequests: boolean;
   dateSort: boolean; dateDirection: "asc" | "desc";
   groupNodes: (nodes: ProcessWorkNode[], rootID: string) => Group[];
-  hasGroups: boolean; groupingControl: React.ReactNode;
+  hasGroups: boolean; query: string; accountIDs: string[]; onClearFilters: () => void;
   personName: (id?: string) => string;
   onSelection: (node: ProcessWorkNode, selected: Set<string>) => void;
   onClearSelection: () => void;
@@ -41,9 +40,7 @@ type Menu = { x: number; y: number; status: ProcessStatus; node?: ProcessWorkNod
 const menuButton: React.CSSProperties = { width: "100%", padding: "7px 10px", border: 0, borderRadius: 6, background: "transparent", textAlign: "left", font: "inherit", cursor: "pointer" };
 
 export function StatusKanbanBoard(props: Props) {
-  const { companyID, processID, nodes, selected, canEdit, busy, accent, isDark } = props;
-  const [query, setQuery] = useState("");
-  const [accountIDs, setAccountIDs] = useState<string[]>([]);
+  const { companyID, processID, nodes, selected, canEdit, busy, accent, isDark, query, accountIDs } = props;
   const [menu, setMenu] = useState<Menu | null>(null);
   const [rename, setRename] = useState<{ node: ProcessWorkNode; title: string; groupID: string } | null>(null);
   const renameInput = useRef<HTMLInputElement>(null);
@@ -70,7 +67,6 @@ export function StatusKanbanBoard(props: Props) {
   useEffect(() => { if (rename) { renameInput.current?.focus(); renameInput.current?.select(); } }, [rename?.node.node_id]);
   const text = isDark ? "#f6f8fb" : "#111827", subtext = isDark ? "#b8c4cc" : "#475569";
   const line = isDark ? "rgba(255,255,255,0.16)" : "rgba(148,163,184,0.18)";
-  const accounts = useMemo(() => [...new Map(nodes.flatMap((node) => node.accounts ?? []).map((account) => [account.account_id, account])).values()], [nodes]);
   const filtered = useMemo(() => nodes.filter((node) => statusKanbanNodeMatchesFilter(node, query, accountIDs)), [nodes, query, accountIDs]);
   const sort = (rows: ProcessWorkNode[]) => [...rows].sort((a, b) => compareStatusKanbanNodes(a, b, { dateAddedSort: props.dateSort, dateAddedDirection: props.dateDirection }));
   const columns = STATUS_KANBAN_COLUMNS.map((column) => {
@@ -190,7 +186,6 @@ export function StatusKanbanBoard(props: Props) {
     if ((event.key === "Delete" || event.key === "Backspace") && canEdit && !busy && selected.size) { event.preventDefault(); props.onRemove([...selected]); }
     if (event.key === "F2" && canEdit && !busy && selected.size === 1) { const node = nodes.find((row) => selected.has(row.node_id)); if (node) { event.preventDefault(); beginRename(node); } }
   }}>
-    <div className="status-kanban__filters" style={{ width: boardWidth }}>{props.groupingControl}<input aria-label="Search Kanban board" placeholder="Search board" value={query} onChange={(event) => { setQuery(event.target.value); props.onClearSelection(); }} /><AccountFilterControl accounts={accounts} selectedAccountIDs={accountIDs} onChange={(ids) => { setAccountIDs(ids); props.onClearSelection(); }} showLabel={false} style={{ width: 220, marginLeft: "auto" }} /></div>
     <div className="status-kanban__lanes" style={{ minWidth: boardWidth }}>
       <div className="status-kanban__main">{main.map(renderColumn)}</div>
       <div className="status-kanban__bottom" style={{ gridTemplateColumns: `minmax(180px, ${bottom[0].width}px) minmax(0, 1fr)` }}>{bottom.map(renderColumn)}</div>
@@ -199,7 +194,7 @@ export function StatusKanbanBoard(props: Props) {
       {menu.priority ? KANBAN_NODE_PRIORITY_STYLE_OPTIONS.filter((option) => option.value !== "0").map((option) => <button type="button" key={option.value} style={menuButton} disabled={busy || !canEdit} onClick={() => {
         const pending = menu; setMenu(null);
         if (pending.items) props.onAssign(pending.items, pending.status, Number(option.value));
-        else void props.onCreate(pending.status, Number(option.value)).then((node) => { if (node) { setQuery(""); setAccountIDs([]); props.onSelection(node, new Set([node.node_id])); beginRename(node); } });
+        else void props.onCreate(pending.status, Number(option.value)).then((node) => { if (node) { props.onClearFilters(); props.onSelection(node, new Set([node.node_id])); beginRename(node); } });
       }}>{option.label}</button>) : <>
         {menu.node && <><button type="button" style={menuButton} onClick={() => { openAppPathInNewTab(buildLogicGateRoute(processID, menu.node!.node_id)); setMenu(null); }}>Open in new browser tab</button><button type="button" style={menuButton} onClick={() => { requestAppSidebarPin({ kind: "node", id: menu.node!.node_id, name: menu.node!.node_title }); setMenu(null); }}>Pin</button></>}
         {canEdit && <><button type="button" style={menuButton} disabled={busy} onClick={() => setMenu({ ...menu, priority: true })}>Create new node</button>
