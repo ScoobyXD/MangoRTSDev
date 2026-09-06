@@ -18,7 +18,6 @@ export type AssistantEvent =
   | { type: "done" }
   | { type: "error"; message: string };
 
-export const ASSISTANT_MAX_MESSAGE_CHARS = 8_000;
 export const ASSISTANT_STOP_MESSAGE = "Stopped. Changes already completed in Mango may remain.";
 export const ASSISTANT_MAX_TRACE_BYTES = 8 * 1024 * 1024;
 const ASSISTANT_TRACE_STREAM_BYTES = ASSISTANT_MAX_TRACE_BYTES + 256 * 1024;
@@ -29,7 +28,7 @@ export function isAssistantReasoningEffort(value: string): value is AssistantRea
 }
 
 export function assistantHistoryError(messages: AssistantMessage[]): string {
-  if (messages.length > 24 || messages.reduce((total, message) => total + message.content.length, 0) > 48_000) {
+  if (messages.length > 24) {
     return "This conversation is full. Clear chat to start a new one.";
   }
   return "";
@@ -40,32 +39,60 @@ export function getAssistantStatus(apiBase: string, companyID: string, signal: A
 }
 
 export async function transcribeAssistantAudio(apiBase: string, companyID: string, audio: Blob, signal: AbortSignal): Promise<string> {
-  const body = new FormData();
-  body.append("audio", audio, "dictation");
-  let result: { text: string };
   try {
-    result = await requestJSON(apiBase, `/v1/assistant/transcriptions?company_id=${encodeURIComponent(companyID)}`, {
-      method: "POST", body, signal, timeoutMs: 40_000,
+    return await requestJSON<string>(apiBase, `/v1/assistant/transcriptions?company_id=${encodeURIComponent(companyID)}`, {
+      method: "POST", body: audio, signal, timeoutMs: 0,
+      headers: { "Content-Type": audio.type, Accept: "application/x-ndjson" },
+      consumeResponse: consumeTranscriptionStream,
     });
   } catch (error) {
     if (isTerminalAuthFailureError(error) || error instanceof RealtimeMutationBlockedError) throw error;
-    if (error instanceof Error && error.name === "TimeoutError") throw new Error("Transcription timed out. Please try a shorter recording.");
+    if (signal.aborted) throw error;
     if (error instanceof APIHTTPError) {
       if (error.status === 403) throw new Error("Dictation is unavailable for this company or account.");
       if (error.status === 503) throw new Error("Dictation is unavailable. Ask your administrator to configure Deepgram.");
-      if (error.status === 413) throw new Error("The recording is too large. Record a shorter message (maximum 8 MiB).");
+      if (error.status === 413 || error.bodyText.includes("transcription_audio_too_large")) throw new Error("The recording exceeds the 2 GB maximum. Please record again.");
       if (error.status === 415) throw new Error("This recording format is unsupported. Try another browser.");
-      if (error.status === 422) throw new Error(error.bodyText.includes("transcription_text_too_long")
-        ? "The transcript exceeds 8,000 characters. Please record a shorter message."
-        : "No speech was heard. Please try recording again.");
-      if (error.status === 408 || error.status === 504) throw new Error("Transcription timed out. Please try a shorter recording.");
+      if (error.status === 422 || error.bodyText.includes("transcription_no_speech")) throw new Error("No speech was heard. Please try recording again.");
+      if (error.status === 408 || error.status === 504 || error.bodyText.includes("transcription_timed_out")) throw new Error("Deepgram could not finish processing the recording in time. Please try again.");
     }
     throw new Error("The recording could not be transcribed. Check your connection and try again.");
   }
-  if (!result || typeof result.text !== "string") throw new Error("Transcription returned an invalid response. Please try again.");
-  const text = result.text.trim();
-  if (!text) throw new Error("No speech was heard. Please try recording again.");
-  return text;
+}
+
+export async function consumeTranscriptionStream(response: Response): Promise<string> {
+  if (!response.body || response.headers.get("Content-Type")?.split(";")[0].trim() !== "application/x-ndjson") {
+    throw new Error("Invalid transcription response.");
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let fragments: string[] = [];
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error("The transcription was interrupted.");
+      const lines = decoder.decode(value, { stream: true }).split("\n");
+      for (let index = 0; index < lines.length; index++) {
+        fragments.push(lines[index]);
+        if (index === lines.length - 1) continue;
+        const line = fragments.join("");
+        fragments = [];
+        const event: unknown = JSON.parse(line);
+        if (!event || typeof event !== "object" || !("type" in event)) throw new Error("Invalid transcription event.");
+        if (event.type === "progress") continue;
+        if (event.type === "error" && "code" in event && typeof event.code === "string") {
+          throw new APIHTTPError(502, "Transcription failed", event.code);
+        }
+        if (event.type !== "result" || !("text" in event) || typeof event.text !== "string") throw new Error("Invalid transcription result.");
+        const text = event.text.trim();
+        if (!text) throw new APIHTTPError(422, "No speech", "transcription_no_speech");
+        return text;
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
 }
 
 export async function getAssistantTrace(apiBase: string, companyID: string, requestID: string, signal: AbortSignal): Promise<AssistantTraceSnapshot> {

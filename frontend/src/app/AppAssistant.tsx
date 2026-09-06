@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncEx
 import { addAuthTerminalFailureListener, getAuthSessionCacheGeneration, isTerminalAuthFailureActive } from "../auth/cognitoAuth.js";
 import { ACTIVE_COMPANY_CHANGED_EVENT, getActiveCompanyID } from "../auth/currentCompany.js";
 import {
-  ASSISTANT_DEFAULT_REASONING_EFFORT, ASSISTANT_MAX_MESSAGE_CHARS, ASSISTANT_REASONING_EFFORTS,
+  ASSISTANT_DEFAULT_REASONING_EFFORT, ASSISTANT_REASONING_EFFORTS,
   ASSISTANT_STOP_MESSAGE, assistantErrorMessage, assistantHistoryError, getAssistantStatus, getAssistantTrace, getAssistantResult,
   isAssistantReasoningEffort, streamAssistantChat, type AssistantMessage, type AssistantReasoningEffort, type AssistantTrace,
 } from "../modules/assistant/assistantApi.js";
@@ -136,7 +136,7 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
   const history: AssistantMessage[] = turns.filter((turn) => turn.status === "complete" && turn.reply.trim()).flatMap((turn) => [
     { role: "user" as const, content: turn.question }, { role: "assistant" as const, content: turn.reply },
   ]);
-  const historyError = draft.length > ASSISTANT_MAX_MESSAGE_CHARS ? "Keep your message under 8,000 characters." : assistantHistoryError([...history, { role: "user", content: draft.trim() }]);
+  const historyError = assistantHistoryError([...history, { role: "user", content: draft.trim() }]);
 
   const revokeInspection = () => {
     setCanInspectContext(false);
@@ -211,7 +211,7 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
 
   const send = async () => {
     const question = draft.trim();
-    if (activeRequest.current || dictation.isBusy() || pickerOpen || !available || !question || question.length > ASSISTANT_MAX_MESSAGE_CHARS || historyError) return;
+    if (activeRequest.current || dictation.isBusy() || pickerOpen || !available || !question || historyError) return;
     const controller = new AbortController();
     activeRequest.current = controller;
     const index = turns.length;
@@ -344,6 +344,13 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
             disabled={!available || running || pickerOpen || dictation.phase === "transcribing"}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => { if (panelOpen && !running && available && !pickerOpen) void dictation.toggle(); }}>
+            {dictation.phase === "recording" && <span className="mango-assistant-sound-waves" data-active={dictation.audioLevel > 0}
+              style={{ "--voice-level": dictation.audioLevel } as React.CSSProperties} aria-hidden="true">
+              <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" focusable="false">
+                <path d="M13 13Q8 20 13 27M27 13Q32 20 27 27" />
+                <path d="M8 8Q0 20 8 32M32 8Q40 20 32 32" />
+              </svg>
+            </span>}
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
               {dictation.phase === "recording" ? <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" /> : <>
                 <rect x="9" y="2" width="6" height="12" rx="3" />

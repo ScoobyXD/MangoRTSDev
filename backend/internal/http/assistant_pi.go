@@ -176,7 +176,7 @@ func (s *Server) runAssistant(r *http.Request, request assistantRequest, emit fu
 		"type": "start", "api_key": a.apiKey, "model": a.model, "base_url": a.baseURL,
 		"reasoning_effort": request.ReasoningEffort, "messages": clean["messages"],
 		"context": clean["context"], "tools": assistantCatalog(process),
-		"limits": map[string]int{"tools": assistantMaxSteps, "responses": assistantMaxSteps + 1, "output_bytes": assistantMaxOutputBytes, "context_bytes": 512000, "trace_bytes": assistantTraceLimit},
+		"limits": map[string]int{"tools": assistantMaxSteps, "responses": assistantMaxSteps + 1, "output_bytes": assistantMaxOutputBytes, "trace_bytes": assistantTraceLimit},
 	}
 	if err = encoder.Encode(start); err != nil {
 		return err

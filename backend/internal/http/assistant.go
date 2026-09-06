@@ -134,7 +134,7 @@ func (s *Server) handleAssistantChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request assistantRequest
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256000))
+	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_assistant_request")
@@ -212,19 +212,12 @@ func validAssistantRequest(request assistantRequest) bool {
 	if !isUUIDText(request.RequestID) || !validAssistantReasoningEffort(request.ReasoningEffort) || len(request.Messages) == 0 || len(request.Messages) > 24 {
 		return false
 	}
-	total := 0
 	for _, message := range request.Messages {
-		size := utf8.RuneCountInString(message.Content)
-		limit := 8000
-		if message.Role == "assistant" {
-			limit = assistantMaxOutputBytes
-		}
-		if (message.Role != "user" && message.Role != "assistant") || strings.TrimSpace(message.Content) == "" || size > limit {
+		if (message.Role != "user" && message.Role != "assistant") || strings.TrimSpace(message.Content) == "" || (message.Role == "assistant" && utf8.RuneCountInString(message.Content) > assistantMaxOutputBytes) {
 			return false
 		}
-		total += size
 	}
-	return total <= 48000 && request.Messages[len(request.Messages)-1].Role == "user"
+	return request.Messages[len(request.Messages)-1].Role == "user"
 }
 
 func validAssistantReasoningEffort(effort string) bool {

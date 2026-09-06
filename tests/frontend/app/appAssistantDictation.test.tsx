@@ -33,7 +33,7 @@ async function harness() {
   Object.assign(dom.window.Range.prototype, { getClientRects: () => [], getBoundingClientRect: () => ({ left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 }) });
   const permissions: Array<ReturnType<typeof deferred<MediaStream>>> = [];
   replace(dom.window.navigator, "mediaDevices", { getUserMedia: (constraints: MediaStreamConstraints) => {
-    assert.equal(constraints.audio, true);
+    assert.deepEqual(constraints.audio, { echoCancellation: true, noiseSuppression: true });
     const permission = deferred<MediaStream>(); permissions.push(permission); return permission.promise;
   } });
   class Recorder {
@@ -53,6 +53,35 @@ async function harness() {
   const recorders: Recorder[] = [];
   replace(globalThis, "MediaRecorder", Recorder);
   replace(dom.window, "MediaRecorder", Recorder);
+  let clock = 0;
+  let amplitude = 0;
+  let activityTimerID = 1_000_000;
+  const activityTimers = new Map<number, () => void>();
+  const originalInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  replace(globalThis.performance, "now", () => clock);
+  replace(globalThis, "setInterval", (callback: () => void, delay?: number) => {
+    if (delay !== 100) return originalInterval(callback, delay);
+    activityTimers.set(++activityTimerID, callback); return activityTimerID;
+  });
+  replace(globalThis, "clearInterval", (id: number) => {
+    if (!activityTimers.delete(id)) originalClearInterval(id);
+  });
+  class AudioContextMock {
+    state = "suspended";
+    source = { connected: false, connect: () => { this.source.connected = true; }, disconnect: () => { this.source.connected = false; } };
+    analyser = { fftSize: 2048, disconnected: false, getFloatTimeDomainData: (data: Float32Array) => { data.fill(amplitude); }, disconnect: () => { this.analyser.disconnected = true; } };
+    constructor() { audioContexts.push(this); }
+    createMediaStreamSource(stream: MediaStream) { assert.ok(stream.getAudioTracks().length); return this.source; }
+    createAnalyser() { return this.analyser; }
+    async resume() { this.state = "running"; }
+    async close() { this.state = "closed"; }
+  }
+  const audioContexts: AudioContextMock[] = [];
+  replace(globalThis, "AudioContext", AudioContextMock);
+  const sample = async (level: number, elapsed = 100) => {
+    await act(async () => { amplitude = level; clock += elapsed; for (const callback of activityTimers.values()) callback(); });
+  };
   const requests: Array<{ url: string; init: RequestInit; response: ReturnType<typeof deferred<Response>> }> = [];
   const chats: Array<{ process_id?: string; messages: Array<{ content: string }> }> = [];
   replace(globalThis, "fetch", async (input: RequestInfo | URL, init: RequestInit = {}) => {
@@ -92,16 +121,25 @@ async function harness() {
     await click("Stop recording");
     await act(async () => { recorders.at(-1)!.chunk(data); recorders.at(-1)!.finish(); });
   };
-  const respond = async (text: string, status = 200) => { await act(async () => { requests.at(-1)!.response.resolve(Response.json(status === 200 ? { text } : { error: text }, { status })); }); };
+  const respond = async (text: string, status = 200) => { await act(async () => {
+    requests.at(-1)!.response.resolve(status === 200
+      ? new Response(`${JSON.stringify({ type: "result", text })}\n`, { headers: { "Content-Type": "application/x-ndjson" } })
+      : Response.json({ error: text }, { status }));
+  }); };
   const unmount = async () => { if (mounted) { await act(async () => { root.unmount(); }); mounted = false; } };
   await act(async () => { render(); });
   await click("Expand Mango chat");
   return {
-    dom, container, replace, input, button, click, setText, grant, record, complete, respond, unmount, permissions, recorders, requests, chats,
+    dom, container, replace, input, button, click, setText, grant, record, complete, respond, unmount, permissions, recorders, requests, chats, sample, audioContexts, activityTimers,
     company: async () => { await act(async () => { setActiveCompanyID("company-b"); }); },
     account: async () => { await act(async () => { render("user-b"); }); },
     logout: async () => { await act(async () => { markTerminalAuthFailure("logout"); }); },
-    dispose: async () => { await unmount(); resetTerminalAuthFailure(); restores.reverse().forEach((restore) => restore()); dom.window.close(); },
+    dispose: async () => {
+      await unmount(); resetTerminalAuthFailure();
+      assert.equal(activityTimers.size, 0, "all activity polling is released");
+      assert.ok(audioContexts.every((context) => context.state === "closed" && !context.source.connected && context.analyser.disconnected), "every audio context and analyser is released");
+      restores.reverse().forEach((restore) => restore()); dom.window.close();
+    },
   };
 }
 
@@ -144,10 +182,10 @@ test("dictation waits for final audio, locks every Send path, preserves selected
     assert.equal(h.requests.length, 1);
     assert.match(h.requests[0].url, /\/v1\/assistant\/transcriptions\?company_id=company-a$/);
     assert.equal(h.requests[0].init.method, "POST");
-    const audio = (h.requests[0].init.body as FormData).get("audio") as Blob;
+    const audio = h.requests[0].init.body as Blob;
     assert.equal(await audio.text(), "first-final");
     assert.equal(audio.type, "audio/webm;codecs=opus");
-    assert.equal(new Headers(h.requests[0].init.headers).has("Content-Type"), false, "fetch must set the multipart boundary");
+    assert.equal(new Headers(h.requests[0].init.headers).get("Content-Type"), audio.type);
     await assertBlocked();
     assert.equal(h.button("Transcribing speech").disabled, true);
     await h.respond("<b>spoken</b>");
@@ -165,7 +203,7 @@ test("dictation waits for final audio, locks every Send path, preserves selected
   } finally { await h.dispose(); }
 });
 
-test("permission, capture, provider and length failures preserve the draft and release resources", async () => {
+test("permission, capture and provider failures preserve the draft and release resources", async () => {
   const h = await harness();
   try {
     await h.setText("Keep this draft");
@@ -199,8 +237,9 @@ test("permission, capture, provider and length failures preserve the draft and r
     assert.equal(h.input().editor.isEditable, true);
     await h.setText("a".repeat(7_998));
     await h.record(); await h.complete(); await h.respond("five!");
-    assert.equal(h.input().editor.getText(), "a".repeat(7_998), "overlong transcription must not truncate or modify the draft");
-    assert.match(h.container.textContent!, /8,000/);
+    assert.equal(h.input().editor.getText().length, 8_003, "long transcription is inserted without truncation");
+    assert.doesNotMatch(h.container.textContent!, /8,000/);
+    assert.equal(h.button("Send").disabled, false);
     assert.equal(h.chats.length, 0);
   } finally { await h.dispose(); }
 });
@@ -220,16 +259,16 @@ test("canceling a pending microphone permission safely discards a later grant", 
   } finally { await h.dispose(); }
 });
 
-test("dictation counts the paragraph break inserted after Select All toward the 8,000-character limit", async () => {
+test("dictation preserves a complete transcript beyond 8,000 characters after Select All", async () => {
   const h = await harness();
   try {
     await h.setText("a".repeat(7_999));
     await act(async () => { h.input().editor.view.dispatch(h.input().editor.state.tr.setSelection(new AllSelection(h.input().editor.state.doc))); });
     assert.equal(h.input().editor.state.selection.to, h.input().editor.state.doc.content.size);
-    const original = h.input().editor.getJSON();
     await h.record(); await h.complete(); await h.respond("b");
-    assert.deepEqual(h.input().editor.getJSON(), original, "an extra paragraph must not push the resulting draft over the limit");
-    assert.match(h.container.textContent!, /8,000/);
+    assert.equal(h.input().editor.getText({ blockSeparator: "\n" }), `${"a".repeat(7_999)}\nb`);
+    assert.equal(h.button("Send").disabled, false);
+    assert.doesNotMatch(h.container.textContent!, /8,000/);
     assert.equal(h.input().editor.isEditable, true);
     await h.setText("a".repeat(7_998));
     await act(async () => { h.input().editor.view.dispatch(h.input().editor.state.tr.setSelection(new AllSelection(h.input().editor.state.doc))); });
@@ -237,6 +276,19 @@ test("dictation counts the paragraph break inserted after Select All toward the 
     assert.equal(h.input().editor.getText({ blockSeparator: "\n" }), `${"a".repeat(7_998)}\nb`, "a complete 8,000-character draft still accepts the transcript");
     assert.equal(h.button("Send").disabled, false);
     assert.equal(h.chats.length, 0);
+  } finally { await h.dispose(); }
+});
+
+test("a complete transcript over 8,000 characters can be sent without truncation", async () => {
+  const h = await harness();
+  try {
+    const transcript = "Complete spoken sentence. ".repeat(2_100).trim();
+    await h.record(); await h.complete(); await h.respond(transcript);
+    assert.equal(h.input().editor.getText(), transcript);
+    assert.equal(h.button("Send").disabled, false);
+    await h.click("Send");
+    assert.equal(h.chats.length, 1);
+    assert.equal(h.chats[0].messages.at(-1)!.content, transcript, "all transcript text reaches the chat request");
   } finally { await h.dispose(); }
 });
 
@@ -349,42 +401,106 @@ test("dictation retains the existing realtime disconnection request guard", asyn
   } finally { setRealtimeHealthClientActive(key, false); await h.dispose(); }
 });
 
-test("capture automatically stops after two minutes and rejects audio over eight MiB", async () => {
+test("voice waves follow microphone amplitude and continuous speech can exceed two minutes", async () => {
   const h = await harness();
   try {
-    const originalTimeout = globalThis.setTimeout;
-    let durationElapsed!: () => void;
-    h.replace(globalThis, "setTimeout", (callback: () => void, delay?: number, ...args: unknown[]) => {
-      if (delay === 120_000) { durationElapsed = callback; return originalTimeout(() => undefined, 0); }
-      return originalTimeout(callback, delay, ...args);
-    });
-    await h.setText("Keep this draft");
-    let track = await h.record();
-    assert.equal(typeof durationElapsed, "function", "every recording has a two-minute bound");
-    await act(async () => { durationElapsed(); });
-    assert.equal(track.stopped, true);
-    assert.equal(h.recorders[0].stopCalls, 1);
-    await act(async () => { h.recorders[0].chunk("completed bounded audio"); h.recorders[0].finish(); });
-    await h.respond("Text");
-    await h.setText("Keep this draft");
-    track = await h.record();
-    await act(async () => { h.recorders.at(-1)!.chunk(new Uint8Array(8 * 1024 * 1024 + 1)); });
-    assert.equal(track.stopped, true);
-    await act(async () => { h.recorders.at(-1)!.finish(); });
-    assert.equal(h.requests.length, 1, "oversize audio must not upload");
-    assert.equal(h.input().editor.getText(), "Keep this draft");
-    assert.equal(h.input().editor.isEditable, true);
-    assert.match(h.container.textContent!, /8\s*(MiB|MB)|large|shorter/i);
+    const track = await h.record();
+    const waves = () => h.container.querySelector<HTMLElement>(".mango-assistant-sound-waves")!;
+    assert.equal(waves().getAttribute("data-active"), "false");
+    await h.sample(0.003);
+    assert.equal(waves().getAttribute("data-active"), "false", "quiet background noise does not activate waves");
+    await h.sample(0.02);
+    assert.equal(waves().getAttribute("data-active"), "true");
+    const quietLevel = Number(waves().style.getPropertyValue("--voice-level"));
+    await h.sample(0.08);
+    assert.ok(Number(waves().style.getPropertyValue("--voice-level")) > quietLevel);
+    await h.sample(0.08, 60_000);
+    await h.sample(0.08, 60_000);
+    await h.sample(0.08, 60_000);
+    assert.equal(track.stopped, false, "elapsed recording duration does not stop active speech");
+    assert.equal(h.recorders[0].stopCalls, 0);
+    assert.doesNotMatch(h.container.textContent!, /2 minutes|two.minute/i);
+    await h.sample(0);
+    assert.equal(waves().getAttribute("data-active"), "false");
+    await h.complete();
+    assert.equal(h.container.querySelector(".mango-assistant-sound-waves"), null);
+    assert.equal(h.activityTimers.size, 0);
+    assert.equal(h.audioContexts[0].state, "closed");
+    await h.respond("Speech continues for as long as needed.");
   } finally { await h.dispose(); }
 });
 
-test("permission, recorder completion, and upload deadlines release the draft and ignore late work", async () => {
+test("one minute of initial silence stops recording and transcribes the complete audio", async () => {
+  const h = await harness();
+  try {
+    await h.setText("Keep this draft");
+    const track = await h.record();
+    await h.sample(0, 59_999);
+    assert.equal(track.stopped, false);
+    await h.sample(0, 1);
+    assert.equal(track.stopped, true);
+    assert.equal(h.recorders[0].stopCalls, 1);
+    assert.match(h.container.textContent!, /one minute of silence/i);
+    assert.equal(h.requests.length, 0, "automatic stop still waits for final recorder data");
+    await act(async () => { h.recorders[0].chunk("completed audio"); h.recorders[0].finish(); });
+    await h.respond("Text");
+    assert.match(h.input().editor.getText(), /Text/);
+  } finally { await h.dispose(); }
+});
+
+test("detected speech resets the silence timer, including when a delayed background timer resumes", async () => {
+  const h = await harness();
+  try {
+    const track = await h.record();
+    await h.sample(0, 59_000);
+    await h.sample(0.05, 2_000);
+    assert.equal(track.stopped, false, "current speech is checked before the elapsed silence deadline");
+    await h.sample(0, 59_999);
+    assert.equal(track.stopped, false);
+    await h.sample(0, 1);
+    assert.equal(track.stopped, true);
+    await act(async () => { h.recorders[0].chunk("complete"); h.recorders[0].finish(); });
+    await h.respond("Text");
+  } finally { await h.dispose(); }
+});
+
+test("recording accepts more than eight MiB and enforces the exact 2 GB maximum", async () => {
+  const h = await harness();
+  try {
+    await h.record();
+    await act(async () => { h.recorders[0].chunk(new Uint8Array(8 * 1024 * 1024 + 1)); });
+    assert.equal(h.recorders[0].stopCalls, 0);
+    await h.complete(); await h.respond("Text");
+    await h.setText("Keep this draft");
+    let track = await h.record();
+    // Override size only to exercise the boundary without allocating gigabytes in the test.
+    const atLimit = new Blob(["audio"]);
+    h.replace(atLimit, "size", 2_000_000_000);
+    await act(async () => { h.recorders.at(-1)!.ondataavailable?.({ data: atLimit }); });
+    assert.equal(track.stopped, true, "exactly 2 GB stops normally");
+    await act(async () => { h.recorders.at(-1)!.finish(); });
+    await h.respond("Text");
+    await h.setText("Keep this draft");
+    track = await h.record();
+    const tooLarge = new Blob(["audio"]);
+    h.replace(tooLarge, "size", 2_000_000_001);
+    await act(async () => { h.recorders.at(-1)!.ondataavailable?.({ data: tooLarge }); });
+    assert.equal(track.stopped, true);
+    await act(async () => { h.recorders.at(-1)!.finish(); });
+    assert.equal(h.requests.length, 2, "oversize audio must not upload");
+    assert.equal(h.input().editor.getText(), "Keep this draft");
+    assert.equal(h.input().editor.isEditable, true);
+    assert.match(h.container.textContent!, /2 GB maximum/i);
+  } finally { await h.dispose(); }
+});
+
+test("permission and recorder completion deadlines release the draft and ignore late work", async () => {
   const h = await harness();
   try {
     const originalTimeout = globalThis.setTimeout;
     const deadlines = new Map<number, () => void>();
     h.replace(globalThis, "setTimeout", (callback: () => void, delay?: number, ...args: unknown[]) => {
-      if (delay === 30_000 || delay === 5_000 || delay === 40_000) {
+      if (delay === 30_000 || delay === 5_000) {
         deadlines.set(delay, callback); return originalTimeout(() => undefined, 0);
       }
       return originalTimeout(callback, delay, ...args);
@@ -395,29 +511,20 @@ test("permission, recorder completion, and upload deadlines release the draft an
     await act(async () => { deadlines.get(30_000)!(); });
     assert.equal((await h.grant()).stopped, true);
     assert.match(h.container.textContent!, /permission timed out/i);
-    let track = await h.record();
+    const track = await h.record();
     await h.click("Stop recording");
     assert.equal(track.stopped, true);
     assert.ok(deadlines.has(5_000));
     await act(async () => { deadlines.get(5_000)!(); h.recorders.at(-1)!.chunk("too late"); h.recorders.at(-1)!.finish(); });
     assert.equal(h.requests.length, 0);
     assert.match(h.container.textContent!, /recording could not finish/i);
-    track = await h.record(); await h.complete();
-    assert.ok(deadlines.has(40_000));
-    await act(async () => {
-      deadlines.get(40_000)!();
-      assert.equal(h.requests[0].init.signal!.aborted, true);
-      h.requests[0].response.reject(h.requests[0].init.signal!.reason);
-    });
-    assert.equal(track.stopped, true);
-    assert.match(h.container.textContent!, /timed out|too long/i);
     assert.equal(h.input().editor.getText(), "Keep this draft");
     assert.equal(h.input().editor.isEditable, true);
     assert.equal(h.chats.length, 0);
   } finally { await h.dispose(); }
 });
 
-test("the dictation watchdog unlocks a stalled request without waiting for its promise to settle", async () => {
+test("a long upload has no short transcription watchdog and can still be canceled immediately", async () => {
   const h = await harness();
   try {
     const originalTimeout = globalThis.setTimeout;
@@ -428,14 +535,14 @@ test("the dictation watchdog unlocks a stalled request without waiting for its p
     });
     await h.setText("Keep this draft");
     const track = await h.record(); await h.complete();
-    assert.equal(deadlines.length, 2, "dictation starts its own watchdog before the request client's fetch timeout");
+    assert.equal(deadlines.length, 0, "long uploads must not inherit the former 40-second deadline");
     assert.equal(h.input().editor.isEditable, false);
-    await act(async () => { deadlines[0](); });
+    await h.click("Collapse Mango chat");
+    await h.click("Expand Mango chat");
     assert.equal(track.stopped, true);
     assert.equal(h.requests[0].init.signal!.aborted, true);
     assert.equal(h.input().editor.isEditable, true, "the editor unlocks while the awaited request is still unresolved");
     assert.equal(h.button("Send").disabled, false);
-    assert.match(h.container.textContent!, /transcription timed out/i);
     await h.respond("This late response must be discarded");
     assert.equal(h.input().editor.getText(), "Keep this draft");
     assert.doesNotMatch(h.container.textContent!, /This late response/);

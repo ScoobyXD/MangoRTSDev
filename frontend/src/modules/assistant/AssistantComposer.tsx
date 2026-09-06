@@ -6,7 +6,6 @@ import type { BoundRequestJSON } from "../api/requestJSON.js";
 import { openEditorEntityLink, readEditorEntityLinkElement } from "../editor/editorEntityLinks.js";
 import { UniversalEntityPicker, type UniversalEntityPickerAnchor } from "../editor/UniversalEntityPicker.js";
 import { createMangoTiptapExtensions } from "../editor/tiptap/mangoTiptapExtensions.js";
-import { ASSISTANT_MAX_MESSAGE_CHARS } from "./assistantApi.js";
 
 export type AssistantProcess = { id: string; label: string };
 export type AssistantDraft = { text: string; process: AssistantProcess | null };
@@ -28,7 +27,8 @@ type PickerDraft = { from: number; to: number; anchor: UniversalEntityPickerAnch
 const PROCESS_TYPES = ["logic_gate"] as const;
 const NO_LINK_TYPES = [] as const;
 
-function readDraft(editor: Editor, doc = editor.state.doc): AssistantDraft {
+function readDraft(editor: Editor): AssistantDraft {
+  const { doc } = editor.state;
   let process: AssistantProcess | null = null;
   doc.descendants((node) => {
     if (node.type.name === "mangoEntityLink" && node.attrs.entityType === "logic_gate") {
@@ -138,9 +138,6 @@ export const AssistantComposer = React.forwardRef<AssistantComposerHandle, Props
       if (!saved || text === undefined) return;
       if (!editor.state.doc.eq(saved.doc)) throw new Error("The draft changed. Please record again.");
       const transaction = closeHistory(editor.state.tr.insertText(text, saved.position, saved.position));
-      if (readDraft(editor, transaction.doc).text.length > ASSISTANT_MAX_MESSAGE_CHARS) {
-        throw new Error("The transcript would exceed 8,000 characters. Shorten your draft or record a shorter message.");
-      }
       editor.view.dispatch(transaction);
     },
   }), [editor]);
@@ -161,7 +158,6 @@ export const AssistantComposer = React.forwardRef<AssistantComposerHandle, Props
       onChoose={async (entity) => {
         if (entity.entityType !== "logic_gate") throw new Error("Select a Process.");
         if (editor.state.doc.textBetween(picker.from, picker.to, "", "") !== "#") throw new Error("Open the picker again after editing your message.");
-        if (readDraft(editor).text.length + entity.label.length > ASSISTANT_MAX_MESSAGE_CHARS) throw new Error("Shorten your message before selecting a Process.");
         const transaction = editor.state.tr;
         const previous: Array<{ from: number; to: number }> = [];
         transaction.doc.descendants((node, position) => {

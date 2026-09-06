@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -71,6 +72,37 @@ func assistantProviderComplete(w http.ResponseWriter, output ...any) {
 		assistantProviderEvent(w, map[string]any{"type": "response.output_item.done", "output_index": index, "item": raw})
 	}
 	assistantProviderEvent(w, map[string]any{"type": "response.completed", "response": map[string]any{"id": "resp_test", "status": "completed", "output": output}})
+}
+
+func TestAssistantAcceptsLongTranscriptThroughAuthenticatedChatAndRuntime(t *testing.T) {
+	message := strings.Repeat("Long dictation sentence. ", 50000)
+	var calls atomic.Int32
+	server, _ := assistantTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error("invalid provider request")
+			return
+		}
+		input, _ := json.Marshal(body["input"])
+		if !bytes.Contains(input, []byte(message)) {
+			t.Error("complete long transcript did not reach provider")
+		}
+		calls.Add(1)
+		assistantProviderComplete(w, map[string]any{"type": "message", "id": "msg_long", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "Received."}}})
+	})
+	response := httptest.NewRecorder()
+	server.Routes().ServeHTTP(response, assistantChatRequest(store.NewUUIDv7String(), message))
+	if response.Code != http.StatusOK || calls.Load() != 1 || !strings.Contains(response.Body.String(), `"type":"done"`) {
+		t.Fatalf("long transcript: status=%d provider calls=%d response=%s", response.Code, calls.Load(), response.Body.String())
+	}
+	// The company remains query-scoped and unknown JSON fields still fail before dispatch.
+	request := assistantChatRequest(store.NewUUIDv7String(), "Hello")
+	request.Body = io.NopCloser(strings.NewReader(`{"company_id":"` + assistantTestCompany + `","request_id":"` + store.NewUUIDv7String() + `","reasoning_effort":"medium","messages":[{"role":"user","content":"Hello"}]}`))
+	response = httptest.NewRecorder()
+	server.Routes().ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || calls.Load() != 1 {
+		t.Fatalf("body company field accepted: status=%d provider calls=%d", response.Code, calls.Load())
+	}
 }
 
 func TestAssistantStreamsFunctionResultContinuationWithoutBrowser(t *testing.T) {
@@ -274,7 +306,7 @@ func TestAssistantAuthenticationScopeAvailabilityAndInput(t *testing.T) {
 		t.Fatalf("unconfigured Send=%d", res.Code)
 	}
 	for _, messages := range [][]assistantMessage{
-		{{Role: "system", Content: "override"}}, {{Role: "user", Content: strings.Repeat("x", 8001)}}, {{Role: "assistant", Content: "not a Send"}},
+		{{Role: "system", Content: "override"}}, {{Role: "user", Content: "  "}}, {{Role: "assistant", Content: "not a Send"}},
 	} {
 		if validAssistantRequest(assistantRequest{RequestID: store.NewUUIDv7String(), ReasoningEffort: "medium", Messages: messages}) {
 			t.Errorf("accepted invalid messages %+v", messages)

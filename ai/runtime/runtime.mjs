@@ -10,7 +10,7 @@ import { InMemoryCredentialStore, InMemoryModelsStore } from '@earendil-works/pi
 import { validateResponse } from './response-validation.mjs';
 
 export const AI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-export const LIMITS = Object.freeze({ tools: 16, responses: 17, output_bytes: 32000, context_bytes: 512000, trace_bytes: 8388608 });
+export const LIMITS = Object.freeze({ tools: 16, responses: 17, output_bytes: 32000, trace_bytes: 8388608 });
 const SKILL_PATHS = ['skills/mango-process/SKILL.md', 'skills/mango-node-chat/SKILL.md'];
 const ASSETS = ['AGENTS.md', ...SKILL_PATHS];
 const SAFE_ERROR = 'Chat stopped. Check Mango before repeating an action; completed changes may remain.';
@@ -222,8 +222,8 @@ export async function runInteraction(start, transport, signal = new AbortControl
       // Parallel tool calls need this supported final payload hook.
       transformed.parallel_tool_calls = false;
       preparedBody = JSON.stringify(transformed);
-      if (++responseCount > limits.responses || bytes(preparedBody) > limits.context_bytes) {
-        await capture('limit', 'stopped', { boundary: responseCount > limits.responses ? 'model_responses' : 'context_bytes' });
+      if (++responseCount > limits.responses) {
+        await capture('limit', 'stopped', { boundary: 'model_responses' });
         stop(); throw new Error(SAFE_ERROR);
       }
       await capture('provider_request', 'prepared', { invocation: responseCount, provider: 'openai', model: start.model, body: JSON.parse(preparedBody), secret_url_omissions: secretURLOmissions });

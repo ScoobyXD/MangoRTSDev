@@ -87,17 +87,8 @@
 85. Normal and urgent mentions use separate exact user-ID lists; unselected, duplicate, conflicting, or unresolved recipients stop the send before any chat is saved.
 86. A bound Process chat targets only its server-tracked Node and an existing textbox on that Node.
 87. A requested chat or mention must be sent through its chat tool and reported only after a saved result; a textbox note or written simulation does not count as sending.
-88. The composer microphone starts recording on the first click and stops on the next click, with visible and accessible recording and transcribing states.
-89. Stop releases microphone tracks immediately and waits for the recorder's final audio chunk before uploading.
-90. Dictation uses only recorded-audio Deepgram Nova-3 with server-fixed `language=en` and `smart_format=true`, without paid add-ons or automatic retries.
-91. Transcription requires the authenticated user's current selected-company access.
-92. Successful dictation inserts plain text at the saved draft position through an undoable editor transaction, preserving surrounding text and the selected Process reference.
-93. Pending microphone permission, recording, and transcription freeze draft editing and all Send paths, including Enter; dictation never sends a message or executes tools.
-94. Closing, collapsing, clearing, unmounting, or changing authentication, account, or company cancels dictation and prevents late permission grants or results from changing another draft.
-95. Permission, device, recording, upload, provider, silence, and limit failures preserve the draft and display an understandable message.
-96. Browser recording stops after two minutes; audio above 8 MiB and insertions exceeding the existing 8,000-character message limit are rejected without truncation.
-97. Dictation audio stays temporary in browser and server memory and never becomes an attachment, database record, S3 object, or application log entry.
-98. Deepgram uses a separate server-held credential; a missing credential returns an unavailable error without disabling ordinary chat.
+88. Composer dictation must follow the recording, silence, activity, storage, and cancellation laws in [Speech to Text](speech%20to%20text.md).
+89. User messages must reach chat without character or input-byte caps; message-count, execution, output, inspection, and provider constraints remain authoritative.
 
 ## Process story
 
@@ -193,16 +184,16 @@ The rules for explicit intent, ambiguous paths, document trust, rich-text replac
 | Boundary | Implemented limit / behavior |
 | --- | --- |
 | Browser endpoints | Authenticated `GET /v1/assistant/status`, `POST /v1/assistant/chat`, `POST /v1/assistant/transcriptions`, owner/dev-admin `GET /v1/assistant/trace?request_id=UUID`, and owner-only `GET /v1/assistant/result?request_id=UUID`, scoped by selected `company_id`; these are not model tools. |
-| Dictation audio | One completed `audio` multipart file, at most 8 MiB plus 64 KiB multipart overhead; browser recording at most two minutes; WebM, Ogg, or MP4 with the browser's original audio content type. |
-| Dictation deadlines | Permission wait 30 seconds; final recorder chunk 5 seconds; upload read 10 seconds; provider request 20 seconds; handler context 32 seconds; endpoint write 35 seconds; browser request 40 seconds. Other routes retain their existing deadlines. |
-| Send body | Exactly the declared request fields: `request_id`, `reasoning_effort`, `messages`, and optional `process_id` and `inspect_context`; body at most 256,000 bytes. Last message must be from the user. |
-| Messages | 1–24 nonempty user/assistant messages; user message at most 8,000 characters, assistant history message at most 32,000, total at most 48,000. Server counts Unicode code points; browser validation counts JavaScript string units. |
+| Dictation audio | Raw WebM, Ogg, or MP4, at most 2,000,000,000 bytes; no total recording-duration cap; automatic stop after 60 seconds without microphone activity. Full rules are in [Speech to Text](speech%20to%20text.md). |
+| Dictation deadlines | Permission/startup 30 seconds; final recorder chunk 5 seconds; Deepgram response-header wait ten minutes after upload; no fixed total upload/browser transcription timeout. Progress every 15 seconds keeps the response connected. Other routes retain their existing deadlines. |
+| Send body | Exactly the declared request fields: `request_id`, `reasoning_effort`, `messages`, and optional `process_id` and `inspect_context`; no input-byte cap. Last message must be from the user. |
+| Messages | 1–24 nonempty user/assistant messages; no user-message or combined-history character cap; generated assistant history remains at most 32,000 Unicode code points per message. |
 | Foreground execution | 90 seconds, at most 16 sequential tools including native reads and 17 model responses; no parallel function dispatch. |
 | Provider output | At most 4,096 output tokens and 2 MiB of raw SSE bytes per response, and 32,000 streamed text bytes across the Send. |
 | Tool input | At most 32 KiB of arguments after outer function parsing; exact schema, no extra/missing keys, and per-field bounds. |
 | Captured handler output | At most 64 KiB of valid JSON; an overflow or non-success response stops the Send. |
 | Process context | Initial serialized Process definition at most 64 KiB; unavailable/oversized context stops before a provider call or Node creation. |
-| Continuation input | Serialized provider continuation at most 512,000 bytes after each function result. |
+| Continuation input | No application input-byte cap; provider capacity and the existing execution/inspection budgets remain authoritative. |
 | Browser stream | At most 512,000 bytes, plus 8 MiB and bounded event framing when inspection is enabled, and a 95-second request timeout; malformed or interrupted streams report uncertainty. |
 | Duplicate sends | One active Send per user/company per backend process; request IDs retained 15 minutes, capped at 2,048 receipts. This is not a durable guarantee across replicas/restarts. |
 | Result receipts | Saved Process/Node links only, same fifteen-minute/2,048-request bound; current actor/company/resource checks apply even with Inspect off. |

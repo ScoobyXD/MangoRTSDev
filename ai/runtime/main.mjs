@@ -43,7 +43,8 @@ process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => {
   try {
     buffer += chunk;
-    if (Buffer.byteLength(buffer) > 1048576) throw new Error(ERROR);
+    // The initial request contains the complete user transcript; only later control frames are bounded.
+    if (started && Buffer.byteLength(buffer) > 1048576) throw new Error(ERROR);
     let end;
     while ((end = buffer.indexOf('\n')) !== -1) {
       const line = buffer.slice(0, end);
