@@ -221,8 +221,8 @@ test("parses editor snapshots, tombstones, and application heartbeats", () => {
   assert.equal(heartbeat.type, "heartbeat.confirmed");
 });
 
-test("parses canonical editor events for Huddle and KPI documents", () => {
-  for (const resourceType of ["huddle_node", "huddle_logic_gate", "kpi"] as const) {
+test("parses canonical editor events for Huddle, KPI, and Process Step documents", () => {
+  for (const resourceType of ["huddle_node", "huddle_logic_gate", "kpi", "process_step"] as const) {
     const message = parseRealtimeMessage(JSON.stringify({
       type: "editor.snapshot.required",
       company_id: "company-1",
@@ -238,6 +238,7 @@ test("parses canonical editor events for Huddle and KPI documents", () => {
     assert.equal(message.type, "editor.snapshot.required");
     assert.equal(message.resource_type, resourceType);
     assert.equal(isSupportedRealtimeScope(`editor-json:${resourceType}:resource-1:document-1`), true);
+    assert.equal(parseRealtimeMessage(JSON.stringify({ ...message, type: "editor.document.deleted" })).type, "editor.document.deleted");
   }
 });
 
@@ -422,6 +423,25 @@ test("one client shares a socket and dispatches compact messages to exact scopes
       "a fresh handler after the last unsubscribe sends a new wire subscription",
     );
     unsubFreshTransient();
+
+    const stepID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const stepScope = realtimeEditorJSONScope("process_step", stepID, stepID);
+    let stepSnapshots = 0;
+    const unsubStep = client.subscribe(stepScope, {
+      onEditorSnapshotRequired: () => { stepSnapshots += 1; },
+    });
+    assert.deepEqual(JSON.parse(sockets[0].sent.at(-1)!), { type: "subscribe", scope: stepScope });
+    sockets[0].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: stepScope }) });
+    const stepEvent = {
+      type: "editor.snapshot.required", company_id: "company-1", scope: stepScope,
+      event_id: "step-save-1", resource_type: "process_step", resource_id: stepID, document_id: stepID,
+      resource_revision: 1, operation_id: "step-operation-1", client_id: "other-browser",
+    };
+    sockets[0].onmessage?.({ data: JSON.stringify(stepEvent) });
+    assert.equal(stepSnapshots, 1, "a visible Step editor must receive canonical updates through its exact subscription");
+    sockets[0].onmessage?.({ data: JSON.stringify({ ...stepEvent, scope: realtimeEditorJSONScope("process_step", "other-step", "other-step") }) });
+    assert.equal(stepSnapshots, 1, "another Step's update must not reach this editor");
+    unsubStep();
 
     sockets[0].onmessage?.({ data: JSON.stringify({
       type: "notification.created",
@@ -785,6 +805,7 @@ test("frontend source inventory contains only retained narrow scope families", (
     "app/AppSidebarChrome.tsx",
     "app/NotificationRealtimeBridge.tsx",
 		"modules/editor/EditorContent.tsx",
+		"modules/editor/LogicGateTiptapEditorSurface.tsx",
 		"modules/editor/NodeWorkspaceSurfaceParts.tsx",
     "modules/editor/tiptap/MangoTiptapEditor.tsx",
     "modules/huddles/HuddleResourceSurface.tsx",

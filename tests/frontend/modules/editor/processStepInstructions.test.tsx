@@ -168,6 +168,9 @@ test("saved Process instruction cards follow canonical step events and stop edit
     const observer = observers.find((entry) => entry.target === target && entry.rootMargin === "600px 0px")!;
     assert.ok(observer, "the shared editor must install its normal viewport observer");
     observer.callback([{ target, isIntersecting: true, intersectionRatio: 1 } as IntersectionObserverEntry], observer as unknown as IntersectionObserver);
+    const visibleObserver = observers.find((entry) => entry.target === target && entry.rootMargin === "0px")!;
+    assert.ok(visibleObserver, "a visible Step editor must use the normal realtime subscription path");
+    visibleObserver.callback([{ target, isIntersecting: true, intersectionRatio: 1 } as IntersectionObserverEntry], visibleObserver as unknown as IntersectionObserver);
   };
   install("WebSocket", class {
     static CONNECTING = 0;
@@ -257,7 +260,8 @@ test("saved Process instruction cards follow canonical step events and stop edit
     assert.match(card(stepA)!.textContent ?? "", /Initial step snapshot/);
     const stepEditor = card(stepA)!.querySelector<HTMLElement>('[data-mango-editor-format="tiptap_json"]')!;
     await act(async () => { markNearViewport(stepEditor); Simulate.doubleClick(stepEditor); });
-    await waitFor(() => Boolean(stepEditor.querySelector(".mango-tiptap-prosemirror")), "saved step editor did not activate");
+    await waitFor(() => reportedErrors.length > 0 || Boolean(stepEditor.querySelector(".mango-tiptap-prosemirror")), "saved step editor did not activate");
+    assert.deepEqual(reportedErrors, [], "a visible Step editor must prepare and subscribe without an error");
     await act(async () => { stepEditor.querySelector<HTMLElement>(".mango-tiptap-prosemirror")!.focus(); });
     assert.match(stepEditor.textContent ?? "", /Canonical Prepare instructions/);
     assert.ok(documentRequests.some((request) => request.path.includes(`/editor-json/process_step/${stepA}/documents/${stepA}?`)));

@@ -185,7 +185,7 @@ export type RealtimeEditorSnapshotRequiredMessage = RealtimeBaseMessage & {
   company_id: string;
   scope: string;
   event_id: string;
-  resource_type: "node" | "logic_gate" | "project" | "huddle_logic_gate" | "huddle_node" | "kpi" | "email_draft" | "email_signature";
+  resource_type: "node" | "logic_gate" | "process_step" | "project" | "huddle_logic_gate" | "huddle_node" | "kpi" | "email_draft" | "email_signature";
   resource_id: string;
   document_id: string;
   resource_revision: number;
@@ -200,7 +200,7 @@ export type RealtimeEditorDocumentDeletedMessage = RealtimeBaseMessage & {
   company_id: string;
   scope: string;
   event_id: string;
-  resource_type: "node" | "logic_gate" | "project" | "huddle_logic_gate" | "huddle_node" | "kpi" | "email_draft" | "email_signature";
+  resource_type: "node" | "logic_gate" | "process_step" | "project" | "huddle_logic_gate" | "huddle_node" | "kpi" | "email_draft" | "email_signature";
   resource_id: string;
   document_id: string;
   resource_revision: number;
@@ -453,13 +453,13 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
     case "editor.document.deleted": {
       const scoped = scopedMessageBase(payload, type);
       const eventID = stringValue(payload.event_id);
-      const resourceType = stringValue(payload.resource_type) as "node" | "logic_gate" | "project" | "huddle_logic_gate" | "huddle_node" | "kpi" | "email_draft" | "email_signature";
+      const resourceType = stringValue(payload.resource_type) as RealtimeEditorSnapshotRequiredMessage["resource_type"];
       const resourceID = stringValue(payload.resource_id);
       const documentID = stringValue(payload.document_id);
       const operationID = stringValue(payload.operation_id);
       const clientID = stringValue(payload.client_id);
       const resourceRevision = optionalNumber(payload.resource_revision);
-      if (!eventID || !["node", "logic_gate", "project", "huddle_logic_gate", "huddle_node", "kpi", "email_draft", "email_signature"].includes(resourceType) || !resourceID || !documentID || !operationID || !clientID || resourceRevision === undefined) {
+      if (!eventID || !["node", "logic_gate", "process_step", "project", "huddle_logic_gate", "huddle_node", "kpi", "email_draft", "email_signature"].includes(resourceType) || !resourceID || !documentID || !operationID || !clientID || resourceRevision === undefined) {
         throw new Error("realtime_editor_event_required");
       }
       const common = {
@@ -487,7 +487,7 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
 }
 
 export function isSupportedRealtimeScope(scope: string): boolean {
-  return /^(?:notifications:user:[^:]+|process-map:company|chat:node:[^:]+|process:[^:]+|huddle-action-items:[^:]+|huddle-board-action-items:[^:]+|mailbox:personal:account:[^:]+:[^:@\s]+@[^:@\s]+|mailbox:shared:[^:]+|editor:(?:node|logic_gate|project):[^:]+:[^:]+|editor-json:(?:node|logic_gate|project|huddle_logic_gate|huddle_node|kpi|email_draft|email_signature):[^:]+:[^:]+)$/.test(scope.trim());
+  return /^(?:notifications:user:[^:]+|process-map:company|chat:node:[^:]+|process:[^:]+|huddle-action-items:[^:]+|huddle-board-action-items:[^:]+|mailbox:personal:account:[^:]+:[^:@\s]+@[^:@\s]+|mailbox:shared:[^:]+|editor:(?:node|logic_gate|project):[^:]+:[^:]+|editor-json:(?:node|logic_gate|process_step|project|huddle_logic_gate|huddle_node|kpi|email_draft|email_signature):[^:]+:[^:]+)$/.test(scope.trim());
 }
 
 export function realtimeHuddleActionItemsScope(huddleNodeID: string): string {

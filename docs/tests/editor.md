@@ -50,6 +50,7 @@
 48. Process save status and save flushing include its overview and owned Step editors.
 49. Process Save version and restore use one server transaction for the overview and surviving Step instructions without changing Step topology.
 50. Callbacks from a removed Step or closed Process editor must not change the current Process errors or save status.
+51. A visible Step editor must accept its exact `editor-json:process_step:<step ID>:<step ID>` realtime subscription and decode its canonical editor events through the shared client.
 
 Last updated: 2026-09-05
 
