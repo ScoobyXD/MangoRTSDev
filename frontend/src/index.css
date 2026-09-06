@@ -162,6 +162,29 @@ button, input, textarea, select {
   font-style: normal;
 }
 
+.mango-auth-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 28px;
+}
+.mango-auth-columns > form + form {
+  border-left: 1px solid rgba(100, 116, 139, 0.18);
+  padding-left: 28px;
+}
+.mango-auth-section-title {
+  margin: 0 0 6px;
+  font-size: 20px;
+  font-weight: 680;
+}
+@media (max-width: 580px) {
+  .mango-auth-columns { grid-template-columns: minmax(0, 1fr); }
+  .mango-auth-columns > form + form {
+    border-left: 0;
+    border-top: 1px solid rgba(100, 116, 139, 0.18);
+    padding: 24px 0 0;
+  }
+}
+
 .mango-auth-input,
 .mango-auth-primary,
 .mango-auth-secondary {

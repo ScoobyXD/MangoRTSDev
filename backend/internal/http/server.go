@@ -22,7 +22,6 @@ type AuthTokenValidator interface {
 }
 
 type CognitoAdminClient interface {
-	AdminCreateUser(ctx context.Context, email string) (auth.CognitoAdminCreateUserResult, error)
 	AdminAcceptInvitation(ctx context.Context, email, password string) (auth.CognitoAdminAcceptInvitationResult, error)
 	AdminDeleteUser(ctx context.Context, username string) error
 }
@@ -300,7 +299,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/invitations", s.handleInvitations)
 	mux.HandleFunc("/v1/invitations/validate", s.handleInvitationValidate)
 	mux.HandleFunc("/v1/invitations/accept", s.handleInvitationAccept)
-	mux.HandleFunc("/v1/password-resets/request", s.handlePasswordResetRequest)
 	mux.HandleFunc("/v1/communications/status", s.handleCommunicationsStatus)
 	mux.HandleFunc("/v1/communications/auth-url", s.handleCommunicationsAuthURL)
 	mux.HandleFunc("/v1/communications/disconnect", s.handleCommunicationsDisconnect)

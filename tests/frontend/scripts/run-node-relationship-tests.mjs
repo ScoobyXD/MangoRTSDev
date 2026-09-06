@@ -123,6 +123,20 @@ const testFiles = [
 ];
 const componentTests = [
   {
+    source: resolve(repoRoot, "tests/frontend/auth/signup.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/auth/signup.test.cjs"),
+    bundleDependencies: true,
+    environment: { VITE_AUTH_MODE: "cognito", VITE_API_BASE_URL: "http://localhost", VITE_COGNITO_REGION: "us-west-1", VITE_COGNITO_USER_POOL_ID: "test-pool", VITE_COGNITO_CLIENT_ID: "test-client" },
+    loader: { ".css": "empty" },
+  },
+  {
+    source: resolve(repoRoot, "tests/frontend/pages/home/mailboxAvailability.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/mailboxAvailability.test.cjs"),
+    bundleDependencies: true,
+    environment: { VITE_AUTH_MODE: "cognito", VITE_API_BASE_URL: "http://localhost", VITE_COMPANY_ID: "mailbox-policy-company" },
+    loader: { ".css": "empty" },
+  },
+  {
     source: resolve(repoRoot, "tests/frontend/modules/company-explorer/companyExplorerCreationReveal.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/companyExplorerCreationReveal.test.cjs"),
     bundleDependencies: true,
@@ -343,7 +357,8 @@ for (const componentTest of componentTests) {
     ...(componentTest.bundleDependencies
       ? { external: ["react", "react-dom", "react-dom/*", "jsdom"] }
       : { packages: "external" }),
-    define: { "import.meta.env": "{}" },
+    define: { "import.meta.env": JSON.stringify(componentTest.environment ?? {}) },
+    ...(componentTest.loader ? { loader: componentTest.loader } : {}),
     outfile: componentTest.file,
   };
   if (plugins) await build({ ...options, plugins });

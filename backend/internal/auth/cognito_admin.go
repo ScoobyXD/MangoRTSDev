@@ -19,7 +19,21 @@ import (
 	"time"
 )
 
-var ErrCognitoAdminUnavailable = errors.New("cognito admin unavailable")
+var (
+	ErrCognitoAdminUnavailable = errors.New("cognito admin unavailable")
+	ErrCognitoAccountExists    = errors.New("cognito account already exists")
+)
+
+type CognitoInvalidPasswordError struct {
+	Message string
+}
+
+func (e *CognitoInvalidPasswordError) Error() string {
+	if message := strings.TrimSpace(e.Message); message != "" {
+		return message
+	}
+	return "Choose a password that meets the account password requirements."
+}
 
 type CognitoAdminClient struct {
 	Region     string
@@ -37,10 +51,6 @@ type awsCredentials struct {
 	Expiration      time.Time
 }
 
-type CognitoAdminCreateUserResult struct {
-	Status string
-}
-
 type CognitoAdminAcceptInvitationResult struct {
 	Subject string
 	Email   string
@@ -54,28 +64,12 @@ func NewCognitoAdminClient(region, userPoolID string) *CognitoAdminClient {
 	}
 }
 
-func (c *CognitoAdminClient) AdminCreateUser(ctx context.Context, email string) (CognitoAdminCreateUserResult, error) {
-	email = strings.ToLower(strings.TrimSpace(email))
-	if c == nil || c.Region == "" || c.UserPoolID == "" || email == "" {
-		return CognitoAdminCreateUserResult{}, ErrCognitoAdminUnavailable
-	}
-	userExists, err := c.adminCreateUser(ctx, email, "SUPPRESS")
-	if err != nil {
-		return CognitoAdminCreateUserResult{}, err
-	}
-	if !userExists {
-		return CognitoAdminCreateUserResult{Status: "created"}, nil
-	}
-	return CognitoAdminCreateUserResult{Status: "resent"}, nil
-}
-
 func (c *CognitoAdminClient) AdminAcceptInvitation(ctx context.Context, email, password string) (CognitoAdminAcceptInvitationResult, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
-	password = strings.TrimSpace(password)
-	if c == nil || c.Region == "" || c.UserPoolID == "" || email == "" || password == "" {
+	if c == nil || c.Region == "" || c.UserPoolID == "" || email == "" || strings.TrimSpace(password) == "" {
 		return CognitoAdminAcceptInvitationResult{}, ErrCognitoAdminUnavailable
 	}
-	if _, err := c.adminCreateUser(ctx, email, "SUPPRESS"); err != nil {
+	if err := c.adminCreateUser(ctx, email, password); err != nil {
 		return CognitoAdminAcceptInvitationResult{}, err
 	}
 	if err := c.adminSetUserPassword(ctx, email, password, true); err != nil {
@@ -91,35 +85,43 @@ func (c *CognitoAdminClient) AdminAcceptInvitation(ctx context.Context, email, p
 	return user, nil
 }
 
-func (c *CognitoAdminClient) adminCreateUser(ctx context.Context, email, messageAction string) (bool, error) {
+func (c *CognitoAdminClient) adminCreateUser(ctx context.Context, email, password string) error {
 	payload := map[string]any{
-		"UserPoolId": c.UserPoolID,
-		"Username":   email,
+		"UserPoolId":        c.UserPoolID,
+		"Username":          email,
+		"TemporaryPassword": password,
+		"MessageAction":     "SUPPRESS",
 		"UserAttributes": []map[string]string{
 			{"Name": "email", "Value": email},
 			{"Name": "email_verified", "Value": "true"},
 		},
 	}
-	if messageAction != "SUPPRESS" {
-		payload["DesiredDeliveryMediums"] = []string{"EMAIL"}
-	}
-	if messageAction != "" {
-		payload["MessageAction"] = messageAction
-	}
 	statusCode, header, raw, err := c.cognitoPost(ctx, "AdminCreateUser", payload)
 	if err != nil {
-		return false, err
+		return err
 	}
 	if statusCode >= 200 && statusCode <= 299 {
-		return false, nil
+		return nil
+	}
+	var providerError struct {
+		Type    string `json:"__type"`
+		Message string `json:"message"`
+	}
+	parsed := json.Unmarshal(raw, &providerError) == nil
+	if strings.Contains(header.Get("X-Amzn-Errortype"), "InvalidPasswordException") || (parsed && strings.Contains(providerError.Type, "InvalidPasswordException")) {
+		passwordError := &CognitoInvalidPasswordError{}
+		if parsed {
+			passwordError.Message = providerError.Message
+		}
+		return passwordError
 	}
 	if strings.Contains(string(raw), "UsernameExistsException") || strings.Contains(header.Get("X-Amzn-Errortype"), "UsernameExistsException") {
-		return true, nil
+		return ErrCognitoAccountExists
 	}
 	if detail := strings.TrimSpace(string(raw)); detail != "" {
-		return false, fmt.Errorf("cognito admin create user failed: status=%d body=%s", statusCode, detail)
+		return fmt.Errorf("cognito admin create user failed: status=%d body=%s", statusCode, detail)
 	}
-	return false, fmt.Errorf("cognito admin create user failed: status=%d", statusCode)
+	return fmt.Errorf("cognito admin create user failed: status=%d", statusCode)
 }
 
 func (c *CognitoAdminClient) adminSetUserPassword(ctx context.Context, email, password string, permanent bool) error {

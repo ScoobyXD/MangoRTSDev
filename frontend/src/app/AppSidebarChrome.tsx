@@ -151,6 +151,7 @@ type AppSidebarProps = {
   activePage: AppSidebarPrimaryPage | null;
   activeHomeView: HomeKeyViewID;
   currentUserID: string;
+  mailboxEnabled: boolean;
   pinTree: SidebarPinTree;
   pinDropActive: boolean;
   explorerSelectionTargetFrameIDs: string[];
@@ -276,6 +277,7 @@ export function AppSidebar({
   activePage,
   activeHomeView,
   currentUserID,
+  mailboxEnabled,
   pinTree,
   pinDropActive,
   explorerSelectionTargetFrameIDs,
@@ -305,6 +307,7 @@ export function AppSidebar({
   const [logicGateStatusCountsByID, setLogicGateStatusCountsByID] = useState<Record<string, SidebarLogicGateStatusCounts>>({});
   const notificationSummary = useNotificationSummary(companyID);
   const [sharedTriageOpen, setSharedTriageOpen] = usePersistedSidebarSectionOpen("shared-triage", false);
+  const sharedInboxesNeeded = mailboxEnabled && (sharedTriageOpen || (homeActive && activeHomeView.startsWith("shared:")));
   const [sharedInboxes, setSharedInboxes] = useState<CommunicationsSharedInbox[]>([]);
   const [connectedAccountEmail, setConnectedAccountEmail] = useState("");
   const [loadingSharedInboxes, setLoadingSharedInboxes] = useState(false);
@@ -662,8 +665,10 @@ export function AppSidebar({
   }, [activeHomeView]);
 
   useEffect(() => {
-    if (!companyID) {
+    if (!companyID || !sharedInboxesNeeded) {
       setSharedInboxes([]);
+      setSharedError("");
+      setLoadingSharedInboxes(false);
       return;
     }
     let cancelled = false;
@@ -687,24 +692,10 @@ export function AppSidebar({
     return () => {
       cancelled = true;
     };
-  }, [companyID]);
+  }, [companyID, sharedInboxesNeeded]);
 
   useEffect(() => {
-    let cancelled = false;
-    fetchCommunicationsStatus()
-      .then((status) => {
-        if (!cancelled) setConnectedAccountEmail(status.connected ? status.connection?.account_email ?? "" : "");
-      })
-      .catch(() => {
-        if (!cancelled) setConnectedAccountEmail("");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!companyID) return undefined;
+    if (!companyID || !sharedInboxesNeeded) return undefined;
     const onSharedInboxesUpdated = (event: Event) => {
       const detail = (event as CustomEvent<{ companyID?: string }>).detail;
       if (detail?.companyID && detail.companyID !== companyID) return;
@@ -722,7 +713,7 @@ export function AppSidebar({
     };
     window.addEventListener(EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED, onSharedInboxesUpdated);
     return () => window.removeEventListener(EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED, onSharedInboxesUpdated);
-  }, [companyID]);
+  }, [companyID, sharedInboxesNeeded]);
 
   useEffect(() => {
     setExpandedSharedFolderIDs((previous) => {
@@ -733,7 +724,7 @@ export function AppSidebar({
 
   useEffect(() => {
     const activeFolderID = activeHomeView.startsWith("shared:") ? activeHomeView.slice("shared:".length) : "";
-    if (!activeFolderID) return;
+    if (!mailboxEnabled || !activeFolderID) return;
     setSharedTriageOpen(true);
     setExpandedSharedFolderIDs((previous) => {
       const next = new Set(previous);
@@ -750,7 +741,7 @@ export function AppSidebar({
       }
       return changed ? next : previous;
     });
-  }, [activeHomeView, sharedInboxes]);
+  }, [activeHomeView, mailboxEnabled, sharedInboxes]);
 
   useEffect(() => {
     if (!renamingSharedFolderID) return;
@@ -779,11 +770,12 @@ export function AppSidebar({
   const openSharedContextMenu = useCallback((event: React.MouseEvent, folder: CommunicationsSharedInbox | null) => {
     event.preventDefault();
     event.stopPropagation();
+    if (!mailboxEnabled) return;
     void fetchCommunicationsStatus()
       .then((status) => setConnectedAccountEmail(status.connected ? status.connection?.account_email ?? "" : ""))
       .catch(() => setConnectedAccountEmail(""));
     setSharedContextMenu({ x: event.clientX, y: event.clientY, folder });
-  }, []);
+  }, [mailboxEnabled]);
 
   const toggleSharedFolder = useCallback((folderID: string) => {
     setExpandedSharedFolderIDs((previous) => {
@@ -1234,6 +1226,7 @@ export function AppSidebar({
         <>
       <section style={appSidebarNavSectionStyle} aria-label="Live Feed">
         <AppSidebarSectionHeader label="Live Feed" />
+        {mailboxEnabled && <>
         <AppSidebarButton
           label="My Emails"
           active={homeActive && activeHomeView === "my-triage"}
@@ -1309,6 +1302,7 @@ export function AppSidebar({
           )}
           {sharedError && <div style={appSidebarSharedErrorStyle}>{sharedError}</div>}
         </div>
+        </>}
         <AppSidebarButton
           label="Updates"
           active={homeActive && activeHomeView === "updates"}

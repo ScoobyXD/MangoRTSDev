@@ -604,6 +604,10 @@ func TestProcessMapHTTPTileRejectsPreviousRepresentationETag(t *testing.T) {
 
 func TestProcessMapHTTPRechecksCurrentCompanyMembershipBeforeConditionalRead(t *testing.T) {
 	fixture := newProcessMapHTTPFixture(t)
+	other := fixture.repo.EnsureCompany("22222222-2222-4222-8222-222222222222", "Remaining Company")
+	if _, err := fixture.repo.AddCompanyMembership(fixture.viewer.CognitoSubject, other.CompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
 	path := "/v1/process-map/scene?company_id=" + url.QueryEscape(fixture.companyID)
 	first := fixture.request(t, fixture.viewer, http.MethodGet, path, "", nil)
 	if first.Code != http.StatusOK || first.Header().Get("ETag") == "" {
@@ -620,6 +624,10 @@ func TestProcessMapHTTPRechecksCurrentCompanyMembershipBeforeConditionalRead(t *
 
 func TestProcessMapHTTPTileFreshAndConditionalReads(t *testing.T) {
 	fixture := newProcessMapHTTPFixture(t)
+	other := fixture.repo.EnsureCompany("22222222-2222-4222-8222-222222222222", "Remaining Company")
+	if _, err := fixture.repo.AddCompanyMembership(fixture.viewer.CognitoSubject, other.CompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
 	fixture.putPlacement(t, fixture.admin, fixture.processA, 0, 0, 10, 8)
 	repo := &processMapTileReadCaptureRepo{Repository: fixture.repo}
 	fixture.server.repo = repo
@@ -708,6 +716,10 @@ func TestProcessMapHTTPTileConditionalMissUsesCompleteReadMetadata(t *testing.T)
 
 func TestProcessMapHTTPTileRechecksRevocationAfterConditionalMiss(t *testing.T) {
 	fixture := newProcessMapHTTPFixture(t)
+	other := fixture.repo.EnsureCompany("22222222-2222-4222-8222-222222222222", "Remaining Company")
+	if _, err := fixture.repo.AddCompanyMembership(fixture.viewer.CognitoSubject, other.CompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
 	repo := &processMapTileReadCaptureRepo{Repository: fixture.repo}
 	repo.metadata = func(ctx context.Context, query store.ProcessMapTileQuery) (store.ProcessMapTileMetadata, error) {
 		metadata, err := fixture.repo.GetProcessMapTileMetadata(ctx, query)

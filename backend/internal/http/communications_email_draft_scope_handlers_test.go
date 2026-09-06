@@ -282,6 +282,7 @@ func newCommunicationsEmailDraftScopeHTTPFixture(t *testing.T) communicationsEma
 
 func (fixture communicationsEmailDraftScopeHTTPFixture) request(t *testing.T, method, path string, body any, user domain.User, role string) *httptest.ResponseRecorder {
 	t.Helper()
+	user.MailboxEnabled = true
 	var payload []byte
 	if body != nil {
 		var err error

@@ -14,26 +14,11 @@ import (
 )
 
 type recordingCognitoAdmin struct {
-	emails          []string
 	acceptedEmails  []string
 	acceptedPasses  []string
 	acceptedSubject string
 	acceptErr       error
 	deleted         []string
-	createErr       error
-	status          string
-}
-
-func (c *recordingCognitoAdmin) AdminCreateUser(_ context.Context, email string) (authpkg.CognitoAdminCreateUserResult, error) {
-	c.emails = append(c.emails, email)
-	if c.createErr != nil {
-		return authpkg.CognitoAdminCreateUserResult{}, c.createErr
-	}
-	status := c.status
-	if status == "" {
-		status = "created"
-	}
-	return authpkg.CognitoAdminCreateUserResult{Status: status}, nil
 }
 
 func (c *recordingCognitoAdmin) AdminAcceptInvitation(_ context.Context, email, password string) (authpkg.CognitoAdminAcceptInvitationResult, error) {
@@ -111,8 +96,8 @@ func TestCreateInvitationRejectsExistingMangoUser(t *testing.T) {
 	if res.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want %d, body=%s", res.Code, http.StatusConflict, strings.TrimSpace(res.Body.String()))
 	}
-	if len(cognito.emails) != 0 {
-		t.Fatalf("cognito invite calls = %v, want none", cognito.emails)
+	if len(cognito.acceptedEmails) != 0 {
+		t.Fatalf("cognito invite calls = %v, want none", cognito.acceptedEmails)
 	}
 	var payload struct {
 		Error string `json:"error"`
@@ -162,20 +147,17 @@ func TestCreateInvitationForExistingMangoUserSkipsCognitoCreate(t *testing.T) {
 	if inviteRes.Code != http.StatusCreated {
 		t.Fatalf("invite status = %d, want %d, body=%s", inviteRes.Code, http.StatusCreated, strings.TrimSpace(inviteRes.Body.String()))
 	}
-	if len(cognito.emails) != 0 {
-		t.Fatalf("cognito invite calls = %v, want none for existing Mango user", cognito.emails)
+	if len(cognito.acceptedEmails) != 0 {
+		t.Fatalf("cognito invite calls = %v, want none for existing Mango user", cognito.acceptedEmails)
 	}
 	var invitePayload struct {
-		CognitoInviteStatus string `json:"cognito_invite_status"`
-		Invitation          struct {
-			Token string `json:"token"`
-		} `json:"invitation"`
+		Invitation domain.Invitation `json:"invitation"`
 	}
 	if err := json.NewDecoder(inviteRes.Body).Decode(&invitePayload); err != nil {
 		t.Fatal(err)
 	}
-	if invitePayload.CognitoInviteStatus != "existing_mango_user" {
-		t.Fatalf("cognito status = %q, want existing_mango_user", invitePayload.CognitoInviteStatus)
+	if invitePayload.Invitation.CognitoStatus != "existing_mango_user" {
+		t.Fatalf("cognito status = %q, want existing_mango_user", invitePayload.Invitation.CognitoStatus)
 	}
 
 	acceptReq := httptest.NewRequest(http.MethodPost, "/v1/invitations/accept", strings.NewReader(`{"token":"`+invitePayload.Invitation.Token+`","display_name":"Existing User"}`))
@@ -190,7 +172,7 @@ func TestCreateInvitationForExistingMangoUserSkipsCognitoCreate(t *testing.T) {
 	}
 }
 
-func TestCreateInvitationSendsCognitoForNewMangoUser(t *testing.T) {
+func TestCreateInvitationDoesNotPrecreateNewCognitoAccount(t *testing.T) {
 	t.Parallel()
 
 	key := mustRSAKey(t)
@@ -222,24 +204,21 @@ func TestCreateInvitationSendsCognitoForNewMangoUser(t *testing.T) {
 	if res.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want %d, body=%s", res.Code, http.StatusCreated, strings.TrimSpace(res.Body.String()))
 	}
-	if len(cognito.emails) != 1 || cognito.emails[0] != "new@example.com" {
-		t.Fatalf("cognito invite calls = %v, want [new@example.com]", cognito.emails)
+	if len(cognito.acceptedEmails) != 0 {
+		t.Fatalf("cognito invite calls = %v, want none before acceptance", cognito.acceptedEmails)
 	}
 	var payload struct {
-		CognitoInviteStatus string `json:"cognito_invite_status"`
+		Invitation domain.Invitation `json:"invitation"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.CognitoInviteStatus != "created" {
-		t.Fatalf("cognito status = %q, want created", payload.CognitoInviteStatus)
-	}
-	if len(cognito.acceptedEmails) != 0 {
-		t.Fatalf("accepted emails = %v, want none before invite acceptance", cognito.acceptedEmails)
+	if payload.Invitation.CognitoStatus != "not_started" {
+		t.Fatalf("cognito status = %q, want not_started", payload.Invitation.CognitoStatus)
 	}
 }
 
-func TestCreateInvitationNormalizesMixedCaseEmailBeforeCognitoCreate(t *testing.T) {
+func TestCreateInvitationNormalizesEmailWithoutCreatingCognitoAccount(t *testing.T) {
 	t.Parallel()
 
 	key := mustRSAKey(t)
@@ -271,8 +250,8 @@ func TestCreateInvitationNormalizesMixedCaseEmailBeforeCognitoCreate(t *testing.
 	if res.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want %d, body=%s", res.Code, http.StatusCreated, strings.TrimSpace(res.Body.String()))
 	}
-	if len(cognito.emails) != 1 || cognito.emails[0] != "new.user+sales@example.com" {
-		t.Fatalf("cognito invite calls = %v, want [new.user+sales@example.com]", cognito.emails)
+	if len(cognito.acceptedEmails) != 0 {
+		t.Fatalf("cognito invite calls = %v, want none before acceptance", cognito.acceptedEmails)
 	}
 	var payload struct {
 		Invitation struct {
@@ -351,7 +330,7 @@ func TestCreateInvitationSendsMangoOwnedInviteEmail(t *testing.T) {
 	}
 }
 
-func TestAcceptInvitationSetsCognitoPasswordFromToken(t *testing.T) {
+func TestAcceptInvitationCreatesNewAccountWithoutDisplayName(t *testing.T) {
 	t.Parallel()
 
 	key := mustRSAKey(t)
@@ -395,7 +374,7 @@ func TestAcceptInvitationSetsCognitoPasswordFromToken(t *testing.T) {
 	acceptReq := httptest.NewRequest(
 		http.MethodPost,
 		"/v1/invitations/accept",
-		strings.NewReader(`{"token":"`+invitePayload.Invitation.Token+`","email":"new@example.com","display_name":"New User","password":"NewPassw0rd!"}`),
+		strings.NewReader(`{"token":"`+invitePayload.Invitation.Token+`","email":"new@example.com","password":"NewPassw0rd!"}`),
 	)
 	acceptRes := httptest.NewRecorder()
 	handler.ServeHTTP(acceptRes, acceptReq)
@@ -412,8 +391,8 @@ func TestAcceptInvitationSetsCognitoPasswordFromToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if user.Email != "new@example.com" || user.DisplayName != "New User" {
-		t.Fatalf("accepted user = %+v, want invite email and display name", user)
+	if user.Email != "new@example.com" || user.DisplayName != "new@example.com" || user.MailboxEnabled {
+		t.Fatalf("accepted user = %+v, want email as display name and mailbox access off", user)
 	}
 	if _, err := repo.GetCompanyUser(companyID, user.UserID); err != nil {
 		t.Fatalf("membership was not created: %v", err)
@@ -581,8 +560,8 @@ func TestCreateInvitationRejectsCompanyUser(t *testing.T) {
 	if res.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d, body=%s", res.Code, http.StatusForbidden, strings.TrimSpace(res.Body.String()))
 	}
-	if len(cognito.emails) != 0 {
-		t.Fatalf("cognito invite calls = %v, want none", cognito.emails)
+	if len(cognito.acceptedEmails) != 0 {
+		t.Fatalf("cognito invite calls = %v, want none", cognito.acceptedEmails)
 	}
 }
 
@@ -893,8 +872,8 @@ func TestCompanyExplorerFolderShareRejectsNonCompanyUser(t *testing.T) {
 	if sharePayload.Error != "company_explorer_folder_share_user_not_found" {
 		t.Fatalf("share error = %q, want company_explorer_folder_share_user_not_found", sharePayload.Error)
 	}
-	if len(cognito.emails) != 0 || len(cognito.acceptedEmails) != 0 {
-		t.Fatalf("cognito calls = create %v accept %v, want none", cognito.emails, cognito.acceptedEmails)
+	if len(cognito.acceptedEmails) != 0 {
+		t.Fatalf("cognito accepts = %v, want none", cognito.acceptedEmails)
 	}
 	if _, err := repo.GetAuthUserByEmail(inviteeEmail); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("invitee Mango user error = %v, want ErrNotFound", err)
@@ -905,53 +884,6 @@ func TestCompanyExplorerFolderShareRejectsNonCompanyUser(t *testing.T) {
 	}
 	if len(shares) != 0 {
 		t.Fatalf("shares after rejected invite = %+v, want none", shares)
-	}
-}
-
-func TestPasswordResetRequestChecksMangoUser(t *testing.T) {
-	t.Parallel()
-
-	key := mustRSAKey(t)
-	repo := store.NewMemoryRepo()
-	const email = "reset@example.com"
-	if _, err := repo.UpsertAuthUser("reset-subject", email, "Reset User"); err != nil {
-		t.Fatal(err)
-	}
-	handler := NewServerWithOptions(repo, ServerOptions{
-		AuthValidator: testValidator(t, "kid", key),
-	}).Routes()
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/password-resets/request", strings.NewReader(`{"email":"`+email+`"}`))
-	res := httptest.NewRecorder()
-	handler.ServeHTTP(res, req)
-	if res.Code != http.StatusOK {
-		t.Fatalf("known user status = %d, want %d, body=%s", res.Code, http.StatusOK, strings.TrimSpace(res.Body.String()))
-	}
-	var okPayload struct {
-		Status           string `json:"status"`
-		ExpiresInSeconds int    `json:"expires_in_seconds"`
-	}
-	if err := json.NewDecoder(res.Body).Decode(&okPayload); err != nil {
-		t.Fatal(err)
-	}
-	if okPayload.Status != "reset_user_found" || okPayload.ExpiresInSeconds != 3600 {
-		t.Fatalf("password reset payload = %+v, want Cognito one-hour eligibility", okPayload)
-	}
-
-	missingReq := httptest.NewRequest(http.MethodPost, "/v1/password-resets/request", strings.NewReader(`{"email":"missing@example.com"}`))
-	missingRes := httptest.NewRecorder()
-	handler.ServeHTTP(missingRes, missingReq)
-	if missingRes.Code != http.StatusNotFound {
-		t.Fatalf("missing user status = %d, want %d, body=%s", missingRes.Code, http.StatusNotFound, strings.TrimSpace(missingRes.Body.String()))
-	}
-	var missingPayload struct {
-		Error string `json:"error"`
-	}
-	if err := json.NewDecoder(missingRes.Body).Decode(&missingPayload); err != nil {
-		t.Fatal(err)
-	}
-	if missingPayload.Error != "password_reset_user_not_found" {
-		t.Fatalf("missing user error = %q, want password_reset_user_not_found", missingPayload.Error)
 	}
 }
 
@@ -969,7 +901,7 @@ func TestDeleteCompanyUserDeletesCognitoAndAllowsReinvite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.AddCompanyMembership(adminSubject, companyID, domain.RoleCompanyAdmin); err != nil {
+	if _, err := repo.AddCompanyMembership(adminSubject, companyID, domain.RoleDevAdmin); err != nil {
 		t.Fatal(err)
 	}
 	invitation, err := repo.CreateInvitation(store.CreateInvitationInput{
@@ -1033,8 +965,8 @@ func TestDeleteCompanyUserDeletesCognitoAndAllowsReinvite(t *testing.T) {
 	if inviteRes.Code != http.StatusCreated {
 		t.Fatalf("reinvite status = %d, want %d, body=%s", inviteRes.Code, http.StatusCreated, strings.TrimSpace(inviteRes.Body.String()))
 	}
-	if len(cognito.emails) != 1 || cognito.emails[0] != targetEmail {
-		t.Fatalf("cognito invites = %v, want [%s]", cognito.emails, targetEmail)
+	if len(cognito.acceptedEmails) != 0 {
+		t.Fatalf("cognito invites = %v, want none before acceptance", cognito.acceptedEmails)
 	}
 }
 

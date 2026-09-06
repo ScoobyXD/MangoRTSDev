@@ -648,6 +648,10 @@ func TestRealtimeProcessMapMembershipRevocationClearsAndRejectsStaleActor(t *tes
 	token := "process-map-membership-revocation-token"
 	repo.EnsureCompany(companyID, "Process Map Membership Revocation")
 	user := mustRealtimeAuthUser(t, repo, companyID, "process-map-membership-revocation", domain.RoleCompanyUser)
+	other := repo.EnsureCompany("22222222-2222-4222-8222-222222222222", "Remaining Company")
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, other.CompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
 
 	// Finish fixture membership outbox work before the socket subscribes so the
 	// only compact hint observed below is the revocation transaction.
@@ -1269,7 +1273,7 @@ func mustRealtimeAuthUser(t *testing.T, repo *store.MemoryRepo, companyID, subje
 }
 
 func newRealtimeAuthServerForTest(repo *store.MemoryRepo, token string, user domain.User) *Server {
-	return NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
+	return newLegacyMailboxTestServer(repo, explicitLocalRealtimeTestOptions(ServerOptions{AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
 		token: {Subject: user.CognitoSubject, Email: user.Email, Name: user.DisplayName},
 	}}}))
 }

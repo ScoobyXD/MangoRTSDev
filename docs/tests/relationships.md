@@ -1,3 +1,16 @@
+# Current Signup Company Membership Business Logic Laws
+
+1. The first authenticated user context with no company membership creates one company and its exact `company_memberships` edge atomically with the existing company defaults.
+2. Ordinary initial-company creation grants only `company_admin` in that company; only the existing restricted developer bootstrap may grant `dev_admin`.
+3. Existing memberships prevent initial-company creation, and retries or concurrent requests create no duplicate company or membership.
+4. Initial-company creation records the existing membership events and advances only that company's permission versions unless the restricted developer bootstrap grants global access.
+5. Ordinary company-member removal rejects removal of a user's final company membership before changing the user, assignments, permissions, or events.
+6. Explicit developer-authorized identity deletion retains the existing complete identity and membership cleanup behavior.
+
+## Signup Company Membership Story
+
+After verified sign-in, Mango resolves the existing user identity and company memberships. A user with none receives one company and a company-admin membership in the same transaction as its default setup. An accepted invitation already supplies its target membership. Later ordinary removals preserve at least one membership; explicit identity deletion follows the established complete cleanup path.
+
 # Current AI Inspection Ownership Business Logic Laws
 
 1. `public.ai_runs` records the exact authenticated company and user accepted by the existing Send authorization rules and uses that owner's existing request UUID as `ai_runs_id`.

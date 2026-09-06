@@ -13,8 +13,6 @@ import (
 	"strings"
 )
 
-const cognitoPasswordResetTTLSeconds = 60 * 60
-
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -200,6 +198,10 @@ func (s *Server) handleCompanyUsersSubresource(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusConflict, "cannot_delete_self")
 		return
 	}
+	if !actor.IsDevAdmin && target.Role == domain.RoleDevAdmin {
+		writeError(w, http.StatusForbidden, "dev_admin_required")
+		return
+	}
 	if !actorCanManageCompany(actor, companyID) && domain.CanBypassResourcePermissions(target.Role) {
 		writeError(w, http.StatusForbidden, "company_admin_required")
 		return
@@ -219,6 +221,10 @@ func (s *Server) handleCompanyUsersSubresource(w http.ResponseWriter, r *http.Re
 		}
 	}
 	result, err := s.repo.DeleteCompanyUser(companyID, userID, actor.IsDevAdmin)
+	if errors.Is(err, store.ErrLastCompanyMembership) {
+		writeError(w, http.StatusConflict, "last_company_membership")
+		return
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "company_user_not_found")
 		return
@@ -507,30 +513,9 @@ func (s *Server) handleInvitations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cognitoStatus := "not_configured"
-	if s.cognitoAdmin != nil {
-		if existingMangoUser {
-			cognitoStatus = "existing_mango_user"
-		} else {
-			result, err := s.cognitoAdmin.AdminCreateUser(r.Context(), invitation.Email)
-			if err != nil {
-				log.Printf("failed to create cognito invitation user email=%s: %v", invitation.Email, err)
-				updated, updateErr := s.repo.UpdateInvitationDeliveryStatus(store.InvitationDeliveryStatusInput{
-					InvitationID:  invitation.InvitationID,
-					CognitoStatus: "failed",
-					CognitoError:  compactErrorDetail(err),
-				})
-				if updateErr != nil {
-					log.Printf("failed to persist cognito invite failure invitation_id=%s email=%s: %v", invitation.InvitationID, invitation.Email, updateErr)
-				} else {
-					invitation = updated
-					invitation.Token = inviteToken
-				}
-				writeError(w, http.StatusBadGateway, "failed_to_create_cognito_user")
-				return
-			}
-			cognitoStatus = firstNonBlank(result.Status, "created")
-		}
+	cognitoStatus := "not_started"
+	if existingMangoUser {
+		cognitoStatus = "existing_mango_user"
 	}
 	if updated, err := s.repo.UpdateInvitationDeliveryStatus(store.InvitationDeliveryStatusInput{
 		InvitationID:  invitation.InvitationID,
@@ -570,13 +555,11 @@ func (s *Server) handleInvitations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"invitation":            invitation,
-		"cognito_invite_status": cognitoStatus,
-		"cognito_user_status":   cognitoStatus,
-		"invite_email_status":   inviteEmailStatus,
-		"invite_email_error":    inviteEmailError,
-		"delivery_ok":           inviteEmailStatus == "sent",
-		"accept_url":            acceptURL,
+		"invitation":          invitation,
+		"invite_email_status": inviteEmailStatus,
+		"invite_email_error":  inviteEmailError,
+		"delivery_ok":         inviteEmailStatus == "sent",
+		"accept_url":          acceptURL,
 	})
 }
 
@@ -597,7 +580,12 @@ func (s *Server) handleInvitationValidate(w http.ResponseWriter, r *http.Request
 		writeInvitationError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"invitation": invitation})
+	_, accountErr := s.repo.GetAuthUserByEmail(invitation.Email)
+	if accountErr != nil && !errors.Is(accountErr, store.ErrNotFound) {
+		writeError(w, http.StatusInternalServerError, "failed_to_lookup_user")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"invitation": invitation, "account_exists": accountErr == nil})
 }
 
 func (s *Server) handleInvitationAccept(w http.ResponseWriter, r *http.Request) {
@@ -615,10 +603,6 @@ func (s *Server) handleInvitationAccept(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
-	if strings.TrimSpace(req.DisplayName) == "" {
-		writeError(w, http.StatusBadRequest, "display_name_required")
-		return
-	}
 	if strings.TrimSpace(req.Token) == "" {
 		writeError(w, http.StatusBadRequest, "invitation_token_required")
 		return
@@ -632,12 +616,11 @@ func (s *Server) handleInvitationAccept(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleInvitationAcceptWithPassword(w http.ResponseWriter, r *http.Request, token, displayName, email, password string) {
 	email = normalizeEmailForCompare(email)
-	password = strings.TrimSpace(password)
 	if email == "" {
 		writeError(w, http.StatusBadRequest, "email_required")
 		return
 	}
-	if password == "" {
+	if strings.TrimSpace(password) == "" {
 		writeError(w, http.StatusBadRequest, "password_required")
 		return
 	}
@@ -653,11 +636,28 @@ func (s *Server) handleInvitationAcceptWithPassword(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusForbidden, "invitation_email_mismatch")
 		return
 	}
+	if _, accountErr := s.repo.GetAuthUserByEmail(invitation.Email); accountErr == nil {
+		writeError(w, http.StatusConflict, "existing_account_sign_in_required")
+		return
+	} else if !errors.Is(accountErr, store.ErrNotFound) {
+		writeError(w, http.StatusInternalServerError, "failed_to_lookup_user")
+		return
+	}
+	displayName = firstNonBlank(displayName, invitation.Email)
 	if s.cognitoAdmin == nil {
 		writeError(w, http.StatusServiceUnavailable, "cognito_admin_not_configured")
 		return
 	}
 	acceptedUser, err := s.cognitoAdmin.AdminAcceptInvitation(r.Context(), invitation.Email, password)
+	var passwordError *auth.CognitoInvalidPasswordError
+	if errors.As(err, &passwordError) {
+		writeErrorMessage(w, http.StatusBadRequest, "invalid_signup_password", passwordError.Error())
+		return
+	}
+	if errors.Is(err, auth.ErrCognitoAccountExists) {
+		writeError(w, http.StatusConflict, "existing_account_sign_in_required")
+		return
+	}
 	if err != nil {
 		log.Printf("failed to set cognito invitation password email=%s company_id=%s invitation_id=%s: %v", invitation.Email, invitation.CompanyID, invitation.InvitationID, err)
 		writeError(w, http.StatusBadGateway, "failed_to_set_cognito_password")
@@ -691,6 +691,7 @@ func (s *Server) handleInvitationAcceptAuthenticated(w http.ResponseWriter, r *h
 		writeError(w, http.StatusBadRequest, "authenticated_email_required")
 		return
 	}
+	displayName = firstNonBlank(displayName, claims.Email)
 	invitation, err := s.repo.AcceptInvitation(token, claims.Subject, claims.Email, displayName)
 	if err != nil {
 		if writeInvitationError(w, err) {
@@ -808,39 +809,6 @@ func requestOrigin(r *http.Request) string {
 		}
 	}
 	return scheme + "://" + host
-}
-
-func (s *Server) handlePasswordResetRequest(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
-		return
-	}
-	var req struct {
-		Email string `json:"email"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json")
-		return
-	}
-	email := strings.TrimSpace(req.Email)
-	if email == "" {
-		writeError(w, http.StatusBadRequest, "email_required")
-		return
-	}
-	if _, err := s.repo.GetAuthUserByEmail(email); errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "password_reset_user_not_found")
-		return
-	} else if errors.Is(err, store.ErrInvalid) {
-		writeError(w, http.StatusBadRequest, "email_required")
-		return
-	} else if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_lookup_user")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status":             "reset_user_found",
-		"expires_in_seconds": cognitoPasswordResetTTLSeconds,
-	})
 }
 
 func requireDevAdmin(w http.ResponseWriter, r *http.Request) bool {

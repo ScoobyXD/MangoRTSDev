@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { readAuthConfig } from "../../auth/cognitoAuth";
+import { isAuthEnabled, readAuthConfig } from "../../auth/cognitoAuth";
 import { AccountFilterControl, useCompanyAccounts } from "../../modules/accounts/AccountFilterControl";
 import { entityMatchesAccountFilter } from "../../modules/accounts/accountsApi";
 import { createRequestJSON, requestJSON } from "../../modules/api/requestJSON";
@@ -452,6 +452,7 @@ export function HomePage({
   onNodeOverlayClose,
 }: HomePageProps) {
   const appSidebarOwnsNavigation = true;
+  const mailboxEnabled = me ? me.user.mailbox_enabled === true : !isAuthEnabled();
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
   const permissionsRequestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
@@ -466,7 +467,9 @@ export function HomePage({
   const [messages, setMessages] = useState<EmailMessage[]>([]);
   const [emailCollaborations, setEmailCollaborations] = useState<CommunicationsEmailCollaboration[]>([]);
   const [mailbox, setMailbox] = useState<EmailMailbox>("primary");
-  const [activeViewID, setActiveViewID] = useState<HomeViewID>(initialViewID);
+  const [selectedViewID, setActiveViewID] = useState<HomeViewID>(initialViewID);
+  const activeViewID = !mailboxEnabled && isArchivableHomeViewID(selectedViewID) ? "updates" : selectedViewID;
+  const mailViewActive = mailboxEnabled && isArchivableHomeViewID(activeViewID);
   const [selectedMessageID, setSelectedMessageID] = useState("");
   const [selectedMessageRowKey, setSelectedMessageRowKey] = useState("");
   const [selectedMessageIDs, setSelectedMessageIDs] = useState<Set<string>>(new Set());
@@ -703,10 +706,10 @@ export function HomePage({
     ? sharedInboxEmailConnectionIssue
     : null;
   const activeMailViewUsesSharedConnection = sharedInboxCanLoadMail(activeSharedInbox) && !activeSharedInboxConnectionIssue;
-  const activeMailViewHasEmailConnection = activeSharedInboxFolderID
+  const activeMailViewHasEmailConnection = mailViewActive && (activeSharedInboxFolderID
     ? activeMailViewUsesSharedConnection
-    : activePersonalMailViewNeedsConnection && status?.connected === true;
-  const activeMailAccountEmail = activeViewID === "shared-root"
+    : activePersonalMailViewNeedsConnection && status?.connected === true);
+  const activeMailAccountEmail = !mailViewActive || activeViewID === "shared-root"
     ? ""
     : activeSharedInboxFolderID
       ? activeSharedInbox?.account_email ?? ""
@@ -784,6 +787,7 @@ export function HomePage({
     ))
   ), [activeMailAccountEmail, activeMailDraftScopeAuthorized, activeSharedInboxFolderID, companyID, currentUserID, mailDrafts]);
   useEffect(() => {
+    if (!mailViewActive) return undefined;
     const localDrafts = readHomeMailDraftsForScope(
       companyID,
       currentUserID,
@@ -810,7 +814,7 @@ export function HomePage({
     return () => {
       cancelled = true;
     };
-  }, [activeMailAccountEmail, activeMailDraftScopeAuthorized, activeSharedInboxFolderID, companyID, currentUserID]);
+  }, [activeMailAccountEmail, activeMailDraftScopeAuthorized, activeSharedInboxFolderID, companyID, currentUserID, mailViewActive]);
   const loadSharedMailDrafts = useCallback((refresh = false) => {
     const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
     const accountEmail = sharedInboxID ? "" : activeMailAccountEmailRef.current;
@@ -820,10 +824,10 @@ export function HomePage({
       .catch((cause) => { if (activeEmailMailboxScopeKeyRef.current === scopeKey) throw cause; });
   }, [companyID]);
   useEffect(() => {
-    if (!companyID.trim() || !activeMailDraftScopeAuthorized) return void setSharedMailDrafts([]);
+    if (!mailViewActive || !companyID.trim() || !activeMailDraftScopeAuthorized) return void setSharedMailDrafts([]);
     setSharedMailDrafts([]);
     void loadSharedMailDrafts().catch(() => setSharedMailDrafts([]));
-  }, [activeMailAccountEmail, activeMailDraftScopeAuthorized, activeSharedInboxFolderID, companyID, loadSharedMailDrafts]);
+  }, [activeMailAccountEmail, activeMailDraftScopeAuthorized, activeSharedInboxFolderID, companyID, loadSharedMailDrafts, mailViewActive]);
   const draftMessages = useMemo(() => (
     unreadOnly
       ? []
@@ -870,7 +874,7 @@ export function HomePage({
   useEffect(() => {
     const sharedInboxID = compose.sharedInboxID.trim();
     const accountEmail = composeSignatureAccountEmail.trim();
-    if (!compose.open || !companyID.trim() || (!sharedInboxID && !accountEmail)) return undefined;
+    if (!mailboxEnabled || !compose.open || !companyID.trim() || (!sharedInboxID && !accountEmail)) return undefined;
     const initialBody = readHomeMailSignature(companyID, currentUserID, sharedInboxID, accountEmail);
     let cancelled = false;
     void getEmailSignature(companyID, sharedInboxID, accountEmail)
@@ -893,8 +897,9 @@ export function HomePage({
     return () => {
       cancelled = true;
     };
-  }, [companyID, compose.open, compose.sharedInboxID, composeSignatureAccountEmail, composeSignatureScopeKey, currentUserID]);
+  }, [companyID, compose.open, compose.sharedInboxID, composeSignatureAccountEmail, composeSignatureScopeKey, currentUserID, mailboxEnabled]);
   useEffect(() => {
+    if (!mailViewActive) return undefined;
     const localSignature = readHomeMailSignature(companyID, currentUserID, activeSharedInboxFolderID, activeMailAccountEmail);
     setEmailSignature(localSignature);
     setEmailSignatureScopeKey(activeSignatureScopeKey);
@@ -910,7 +915,7 @@ export function HomePage({
     return () => {
       cancelled = true;
     };
-  }, [activeMailAccountEmail, activeSharedInboxFolderID, activeSignatureScopeKey, companyID, currentUserID]);
+  }, [activeMailAccountEmail, activeSharedInboxFolderID, activeSignatureScopeKey, companyID, currentUserID, mailViewActive]);
   useEffect(() => {
     const pending = pendingAutoSignatureRef.current;
     if (!pending) return;
@@ -950,13 +955,14 @@ export function HomePage({
     return sharedInboxesRef.current.find((folder) => folder.folder_id === sharedInboxID || folder.shared_inbox_id === sharedInboxID) ?? null;
   }, []);
   const canLoadMailForView = useCallback((viewID: HomeViewID): boolean => {
+    if (!mailboxEnabled) return false;
     const sharedInboxID = sharedInboxIDForHomeView(viewID);
     if (sharedInboxID) {
       if (sharedInboxEmailConnectionIssue?.folderID === sharedInboxID) return false;
       return sharedInboxCanLoadMail(sharedInboxForHomeView(viewID));
     }
     return (viewID === "my-triage" || viewID === "primary") && status?.connected === true;
-  }, [sharedInboxEmailConnectionIssue?.folderID, sharedInboxForHomeView, status?.connected]);
+  }, [mailboxEnabled, sharedInboxEmailConnectionIssue?.folderID, sharedInboxForHomeView, status?.connected]);
   const sharedInboxPermissionsFolder = useMemo(
     () => sharedInboxPermissionsFolderID ? sharedInboxes.find((folder) => folder.folder_id === sharedInboxPermissionsFolderID) ?? null : null,
     [sharedInboxPermissionsFolderID, sharedInboxes],
@@ -1263,6 +1269,10 @@ export function HomePage({
     setSelectedThreadMessages([]);
   }, []);
   const loadStatus = useCallback(async (options: { clearError?: boolean } = {}): Promise<CommunicationsStatus | null> => {
+    if (!mailViewActive) {
+      setLoadingStatus(false);
+      return null;
+    }
     setLoadingStatus(true);
     if (options.clearError !== false) setError("");
     try {
@@ -1293,7 +1303,7 @@ export function HomePage({
     } finally {
       setLoadingStatus(false);
     }
-  }, [clearSelectedMessageState]);
+  }, [clearSelectedMessageState, mailViewActive]);
   const handleEmailAccessExpired = useCallback(async (accessError: unknown) => {
     setNotice("");
     if (archiveQueueFlushTimerRef.current !== null) {
@@ -1435,6 +1445,7 @@ export function HomePage({
     }, 300);
   }, [companyID, currentMailboxFolderOwner, loadFolders, mailboxFolderOwnerIsCurrent]);
   const loadSharedInboxes = useCallback(async (): Promise<boolean> => {
+    if (!mailViewActive) return false;
     if (sharedInboxesRequestInFlightRef.current) return false;
     sharedInboxesRequestInFlightRef.current = true;
     setLoadingSharedInboxes(true);
@@ -1450,7 +1461,7 @@ export function HomePage({
       sharedInboxesRequestInFlightRef.current = false;
       setLoadingSharedInboxes(false);
     }
-  }, [companyID]);
+  }, [companyID, mailViewActive]);
   const loadCompanyUsers = useCallback(async (): Promise<boolean> => {
     if (!companyID) return false;
     const [usersResult, groupsResult] = await Promise.allSettled([
@@ -2470,9 +2481,10 @@ export function HomePage({
   }, []);
   useEffect(() => { void loadStatus({ clearError: !preserveInitialOAuthError }); }, [loadStatus, preserveInitialOAuthError]);
   useEffect(() => { if (activeMailViewHasEmailConnection && isArchivableHomeViewID(activeViewID)) void loadFolders(); }, [activeEmailMailboxScopeKey, activeMailViewHasEmailConnection, activeViewID, loadFolders]);
-  useEffect(() => { if (status?.configured) void loadSharedInboxes(); }, [loadSharedInboxes, status?.configured]);
+  useEffect(() => { if (mailViewActive && status?.configured) void loadSharedInboxes(); }, [loadSharedInboxes, mailViewActive, status?.configured]);
   useEffect(() => { if (status?.connected || activeSharedTreeViewSelected || isInboxMatrixView || isUpdatesView) void loadCompanyUsers(); }, [activeSharedTreeViewSelected, isInboxMatrixView, isUpdatesView, loadCompanyUsers, status?.connected]);
   useEffect(() => {
+    if (!mailViewActive) return undefined;
     const onSharedInboxesUpdated = (event: Event) => {
       const detail = (event as CustomEvent<{ companyID?: string }>).detail;
       if (detail?.companyID && detail.companyID !== companyID) return;
@@ -2480,7 +2492,7 @@ export function HomePage({
     };
     window.addEventListener(EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED, onSharedInboxesUpdated);
     return () => window.removeEventListener(EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED, onSharedInboxesUpdated);
-  }, [companyID, loadSharedInboxes]);
+  }, [companyID, loadSharedInboxes, mailViewActive]);
   useEffect(() => {
     if (!isWorkspacePanelHomeViewID(activeViewID)) return;
     void loadLogicGatePanel();
@@ -2722,6 +2734,7 @@ export function HomePage({
     }
   }, [canLoadMailForView, companyID, currentMailboxRequestOwner, currentUserID, handleEmailAccessExpired, mailboxRequestOwnerIsCurrent]);
   const startConnection = async (provider: "google" | "microsoft") => {
+    if (!mailboxEnabled) return;
     setBusy(provider);
     setError("");
     try {
@@ -3622,7 +3635,7 @@ export function HomePage({
     }
   };
   useEffect(() => {
-    if (!companyID.trim() || !currentUserID.trim()) return undefined;
+    if (!mailboxEnabled || !companyID.trim() || !currentUserID.trim()) return undefined;
     let cancelled = false;
     const sendDueScheduledDrafts = () => {
       const now = Date.now();
@@ -3732,7 +3745,7 @@ export function HomePage({
       cancelled = true;
       window.clearInterval(timerID);
     };
-  }, [companyID, currentMessageListParams, currentUserID, setMailDraftsForScopeIfActive]);
+  }, [companyID, currentMessageListParams, currentUserID, mailboxEnabled, setMailDraftsForScopeIfActive]);
   const requestSharedInboxEmailConnection = useCallback((connectionError: unknown, accountEmail: string, createIntent?: CommunicationsSharedInboxCreateIntent): boolean => {
     const cleanAccountEmail = accountEmail.trim().toLowerCase();
     if (!cleanAccountEmail || !isSharedInboxEmailConnectionError(connectionError)) return false;
@@ -5548,16 +5561,16 @@ export function HomePage({
       {error && !status?.connected && <div style={errorStyle}>{error}</div>}
       {notice && !status?.connected && <div style={noticeStyle}>{notice}</div>}
       {(isUpdatesView || isInboxMatrixView) && <OutboundEmailUndoBanner />}
-      {loadingStatus ? (
+      {mailViewActive && loadingStatus ? (
         <main style={centerStyle}>Loading email connection</main>
-      ) : !status?.configured ? (
+      ) : mailViewActive && !status?.configured ? (
         <main style={centerStyle}>
           <section style={connectPanelStyle}>
             <h2 style={panelTitleStyle}>Email is not configured</h2>
             <p style={mutedTextStyle}>Set the Nylas environment variables on the backend, then restart the API.</p>
           </section>
         </main>
-      ) : showPersonalEmailConnectPanel ? (
+      ) : mailViewActive && showPersonalEmailConnectPanel ? (
         <main style={centerStyle}>
           <section style={connectPanelStyle}>
             <h2 style={panelTitleStyle}>Connect your company email</h2>
@@ -5945,7 +5958,7 @@ export function HomePage({
           }}
         />
       )}
-      {ownsEmailReferencePreview && (
+      {mailboxEnabled && ownsEmailReferencePreview && (
         <EmailReferencePreviewHost
           apiBase={apiBase}
           companyID={companyID}

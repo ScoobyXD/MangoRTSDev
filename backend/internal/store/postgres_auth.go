@@ -133,11 +133,11 @@ func (r *PostgresRepo) upsertAuthUserContext(ctx context.Context, cognitoSubject
 
 	var user domain.User
 	err = tx.QueryRowContext(txContext, `
-select user_id::text, cognito_subject, email, display_name, auth_claims_issued_at, created_timestamp, updated_timestamp
+select user_id::text, cognito_subject, email, display_name, mailbox_enabled, auth_claims_issued_at, created_timestamp, updated_timestamp
 from users
 where cognito_subject=$1
 for update`, cognitoSubject).Scan(
-		&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName,
+		&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName, &user.MailboxEnabled,
 		&user.AuthClaimsIssuedAt, &user.CreatedTimestamp, &user.UpdatedTimestamp,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -148,10 +148,10 @@ for update`, cognitoSubject).Scan(
 		err = tx.QueryRowContext(txContext, `
 insert into users (user_id, cognito_subject, email, display_name, auth_claims_issued_at, created_timestamp, updated_timestamp)
 values ($1::uuid, $2, $3, $4, coalesce($5::timestamptz, now()), now(), now())
-returning user_id::text, cognito_subject, email, display_name, auth_claims_issued_at, created_timestamp, updated_timestamp`,
+returning user_id::text, cognito_subject, email, display_name, mailbox_enabled, auth_claims_issued_at, created_timestamp, updated_timestamp`,
 			newUUIDv7String(), cognitoSubject, email, insertDisplayName, claimsIssuedAtValue,
 		).Scan(
-			&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName,
+			&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName, &user.MailboxEnabled,
 			&user.AuthClaimsIssuedAt, &user.CreatedTimestamp, &user.UpdatedTimestamp,
 		)
 		if err != nil {
@@ -198,10 +198,10 @@ set email=$2,
     auth_claims_issued_at=coalesce($4::timestamptz, greatest(auth_claims_issued_at, now())),
     updated_timestamp=case when $5 then now() else updated_timestamp end
 where user_id=$1::uuid
-returning user_id::text, cognito_subject, email, display_name, auth_claims_issued_at, created_timestamp, updated_timestamp`,
+returning user_id::text, cognito_subject, email, display_name, mailbox_enabled, auth_claims_issued_at, created_timestamp, updated_timestamp`,
 		user.UserID, updatedEmail, updatedDisplayName, claimsIssuedAtValue, profileChanged,
 	).Scan(
-		&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName,
+		&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName, &user.MailboxEnabled,
 		&user.AuthClaimsIssuedAt, &user.CreatedTimestamp, &user.UpdatedTimestamp,
 	)
 	if err != nil {
@@ -234,11 +234,11 @@ func (r *PostgresRepo) GetAuthUserContext(ctx context.Context, cognitoSubject st
 
 	var user domain.User
 	err := r.db.QueryRowContext(ctx,
-		`select user_id, cognito_subject, email, display_name, auth_claims_issued_at, created_timestamp, updated_timestamp
+		`select user_id, cognito_subject, email, display_name, mailbox_enabled, auth_claims_issued_at, created_timestamp, updated_timestamp
 		 from users
 		 where cognito_subject = $1`,
 		cognitoSubject,
-	).Scan(&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName, &user.AuthClaimsIssuedAt, &user.CreatedTimestamp, &user.UpdatedTimestamp)
+	).Scan(&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName, &user.MailboxEnabled, &user.AuthClaimsIssuedAt, &user.CreatedTimestamp, &user.UpdatedTimestamp)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.User{}, ErrNotFound
 	}
@@ -253,11 +253,29 @@ func (r *PostgresRepo) GetAuthUserByEmail(email string) (domain.User, error) {
 
 	var user domain.User
 	err := r.db.QueryRow(
-		`select user_id, cognito_subject, email, display_name, auth_claims_issued_at, created_timestamp, updated_timestamp
+		`select user_id, cognito_subject, email, display_name, mailbox_enabled, auth_claims_issued_at, created_timestamp, updated_timestamp
 		 from users
 		 where email = $1`,
 		email,
-	).Scan(&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName, &user.AuthClaimsIssuedAt, &user.CreatedTimestamp, &user.UpdatedTimestamp)
+	).Scan(&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName, &user.MailboxEnabled, &user.AuthClaimsIssuedAt, &user.CreatedTimestamp, &user.UpdatedTimestamp)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.User{}, ErrNotFound
+	}
+	return user, err
+}
+
+func (r *PostgresRepo) GetAuthUserByIDContext(ctx context.Context, userID string) (domain.User, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return domain.User{}, ErrInvalid
+	}
+	var user domain.User
+	err := r.db.QueryRowContext(ctx, `
+select user_id::text, cognito_subject, email, display_name, mailbox_enabled, auth_claims_issued_at, created_timestamp, updated_timestamp
+from users where user_id=$1::uuid`, userID).Scan(
+		&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName, &user.MailboxEnabled,
+		&user.AuthClaimsIssuedAt, &user.CreatedTimestamp, &user.UpdatedTimestamp,
+	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.User{}, ErrNotFound
 	}
@@ -439,6 +457,14 @@ join companies on companies.company_id=upserted.company_id`,
 }
 
 func (r *PostgresRepo) BootstrapDevAdminContext(ctx context.Context, cognitoSubject, companyName string) (domain.CompanyMembership, bool, error) {
+	return r.ensureInitialCompanyContext(ctx, cognitoSubject, companyName, domain.RoleDevAdmin)
+}
+
+func (r *PostgresRepo) EnsureInitialCompanyContext(ctx context.Context, cognitoSubject string) (domain.CompanyMembership, bool, error) {
+	return r.ensureInitialCompanyContext(ctx, cognitoSubject, "My Company", domain.RoleCompanyAdmin)
+}
+
+func (r *PostgresRepo) ensureInitialCompanyContext(ctx context.Context, cognitoSubject, companyName, role string) (domain.CompanyMembership, bool, error) {
 	cognitoSubject = strings.TrimSpace(cognitoSubject)
 	companyName = strings.TrimSpace(companyName)
 	if cognitoSubject == "" || companyName == "" {
@@ -497,7 +523,7 @@ values ($1::uuid, $2, now(), now())`, companyID, companyName); err != nil {
 	if err := r.ensureActionItemDefaultsTx(txContext, tx, companyID); err != nil {
 		return domain.CompanyMembership{}, false, err
 	}
-	affectedCompanyIDs, err := postgresMembershipAffectedCompanyIDsTx(txContext, tx, []string{companyID}, true)
+	affectedCompanyIDs, err := postgresMembershipAffectedCompanyIDsTx(txContext, tx, []string{companyID}, role == domain.RoleDevAdmin)
 	if err != nil {
 		return domain.CompanyMembership{}, false, err
 	}
@@ -508,9 +534,9 @@ values ($1::uuid, $2, now(), now())`, companyID, companyName); err != nil {
 	var membership domain.CompanyMembership
 	err = tx.QueryRowContext(txContext, `
 insert into company_memberships (company_id, user_id, role, created_timestamp, updated_timestamp)
-values ($1::uuid, $2::uuid, 'dev_admin', now(), now())
+values ($1::uuid, $2::uuid, $4, now(), now())
 returning company_id::text, $3::text, user_id::text, role, created_timestamp, updated_timestamp`,
-		companyID, userID, companyName,
+		companyID, userID, companyName, role,
 	).Scan(
 		&membership.CompanyID, &membership.CompanyName, &membership.UserID, &membership.Role,
 		&membership.CreatedTimestamp, &membership.UpdatedTimestamp,
@@ -722,7 +748,7 @@ func (r *PostgresRepo) ListCompanyUserOnboarding(companyID string) ([]domain.Com
 		     coalesce(li.invite_email_error, '') as invite_email_error,
 		     li.invite_email_sent_timestamp,
 		     coalesce(li.status = 'accepted', false) as invite_accepted,
-		     `+connectionStatus+` as google_connection_status,
+		     case when not u.mailbox_enabled then 'disabled' else `+connectionStatus+` end as google_connection_status,
 		     `+connectionAccountEmail+` as google_connection_account_email,
 		     cm.created_timestamp,
 		     `+memberUpdatedTimestamp+` as updated_timestamp
@@ -739,7 +765,7 @@ func (r *PostgresRepo) ListCompanyUserOnboarding(companyID string) ([]domain.Com
 		     coalesce(li.invite_email_error, '') as invite_email_error,
 		     li.invite_email_sent_timestamp,
 		     false as invite_accepted,
-		     'not_connected'::text as google_connection_status,
+		     'disabled'::text as google_connection_status,
 		     ''::text as google_connection_account_email,
 		     li.created_timestamp,
 		     li.updated_timestamp
@@ -1023,7 +1049,10 @@ order by company_id`, userID)
 		return DeleteCompanyUserResult{}, fmt.Errorf("iterate user memberships before deletion: %w", err)
 	}
 	membershipRows.Close()
-	deleteAllMemberships := deleteIdentity || len(originalMembershipCompanyIDs) == 1
+	if !deleteIdentity && len(originalMembershipCompanyIDs) == 1 {
+		return DeleteCompanyUserResult{}, ErrLastCompanyMembership
+	}
+	deleteAllMemberships := deleteIdentity
 	globalAccessChanged := hadGlobalAccess
 	fallbackCompanyIDs := originalMembershipCompanyIDs
 	if !deleteAllMemberships {
@@ -1542,15 +1571,14 @@ func (r *PostgresRepo) AcceptInvitation(token, cognitoSubject, email, displayNam
 		 values ($1, $2, $3, $4, now(), now())
 		 on conflict (cognito_subject) do update set
 		   email = case when excluded.email <> '' then excluded.email else users.email end,
-		   display_name = case when excluded.display_name <> '' then excluded.display_name else users.display_name end,
 		   auth_claims_issued_at = greatest(users.auth_claims_issued_at, now()),
 		   updated_timestamp = now()
-		 returning user_id, cognito_subject, email, display_name, auth_claims_issued_at, created_timestamp, updated_timestamp`,
+		 returning user_id, cognito_subject, email, display_name, mailbox_enabled, auth_claims_issued_at, created_timestamp, updated_timestamp`,
 		newUUIDv7String(),
 		cognitoSubject,
 		email,
 		displayName,
-	).Scan(&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName, &user.AuthClaimsIssuedAt, &user.CreatedTimestamp, &user.UpdatedTimestamp)
+	).Scan(&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName, &user.MailboxEnabled, &user.AuthClaimsIssuedAt, &user.CreatedTimestamp, &user.UpdatedTimestamp)
 	if err != nil {
 		return domain.Invitation{}, err
 	}

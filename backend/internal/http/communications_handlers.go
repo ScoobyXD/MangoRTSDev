@@ -1446,6 +1446,15 @@ func (s *Server) handleNylasOAuthCallback(w http.ResponseWriter, r *http.Request
 		return
 	}
 	log.Printf("nylas_oauth_callback outcome=state_valid request_id=%s user_id=%s provider=%s requested_email=%s strict_email=%t scope=%s", requestCorrelationID(r), state.UserID, state.Provider, state.Email, state.StrictEmail, communicationsConnectionScopeForOAuthState(state))
+	user, err := s.repo.GetAuthUserByIDContext(r.Context(), state.UserID)
+	if errors.Is(err, store.ErrNotFound) || (err == nil && !user.MailboxEnabled) {
+		s.redirectCommunications(w, r, "mailbox_disabled")
+		return
+	}
+	if err != nil {
+		s.redirectCommunications(w, r, "failed_to_load_user")
+		return
+	}
 	grant, err := s.nylasClient.ExchangeCode(r.Context(), code, s.nylasConfig.RedirectURI)
 	if err != nil {
 		log.Printf("nylas_oauth_callback outcome=redirect reason=token_exchange_failed request_id=%s user_id=%s provider=%s requested_email=%s strict_email=%t err=%v", requestCorrelationID(r), state.UserID, state.Provider, state.Email, state.StrictEmail, err)
@@ -1501,15 +1510,6 @@ func (s *Server) handleNylasOAuthCallback(w http.ResponseWriter, r *http.Request
 			Status:       "connected",
 		}
 		connection, err = s.repo.UpsertUserEmailConnection(connectionInput)
-		if errors.Is(err, store.ErrNotFound) && communicationsOAuthStateTargetsPersonalMailbox(state) && normalizeEmailForCompare(grant.Email) == normalizeEmailForCompare(state.Email) {
-			if recoveredUser, lookupErr := s.repo.GetAuthUserByEmail(state.Email); lookupErr == nil && strings.TrimSpace(recoveredUser.UserID) != "" {
-				log.Printf("nylas_oauth_callback outcome=recovering reason=state_user_not_found_by_email request_id=%s original_user_id=%s recovered_user_id=%s provider=%s account_email=%s scope=%s grant=%s", requestCorrelationID(r), state.UserID, recoveredUser.UserID, provider, normalizeEmailForCompare(grant.Email), connectionScope, grantIDLogValue(grant.GrantID))
-				connectionInput.UserID = recoveredUser.UserID
-				connection, err = s.repo.UpsertUserEmailConnection(connectionInput)
-			} else if lookupErr != nil && !errors.Is(lookupErr, store.ErrNotFound) {
-				log.Printf("nylas_oauth_callback outcome=warning reason=recover_user_by_email_failed request_id=%s original_user_id=%s provider=%s account_email=%s grant=%s err=%v", requestCorrelationID(r), state.UserID, provider, normalizeEmailForCompare(grant.Email), grantIDLogValue(grant.GrantID), lookupErr)
-			}
-		}
 	}
 	if errors.Is(err, store.ErrNotFound) {
 		s.deleteNylasOAuthGrantBestEffort(r.Context(), requestCorrelationID(r), "mango_user_not_found", grant)

@@ -179,6 +179,12 @@ func (s *Server) loadCommunicationsWebhookGrantContext(ctx context.Context, gran
 	connection, err := s.repo.GetUserEmailConnectionByGrantIDContext(ctx, grantID)
 	if err == nil {
 		connection.Scope = firstNonBlank(connection.Scope, "personal")
+		if err := s.checkPersonalMailboxConnection(ctx, connection); err != nil {
+			if errors.Is(err, errMailboxDisabled) {
+				return communicationsWebhookGrantContext{}, store.ErrNotFound
+			}
+			return communicationsWebhookGrantContext{}, err
+		}
 		return communicationsWebhookGrantContext{
 			connection: connection,
 			cacheScope: communicationsConnectionCacheScope(connection),

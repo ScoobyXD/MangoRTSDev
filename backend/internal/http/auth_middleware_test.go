@@ -895,6 +895,11 @@ func TestDeleteCompanyUserInvalidatesCachedCompanyAccess(t *testing.T) {
 	if _, err := baseRepo.AddCompanyMembership(targetSubject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
+	const remainingCompanyID = "22222222-2222-2222-2222-222222222222"
+	baseRepo.EnsureCompany(remainingCompanyID, "Remaining Company")
+	if _, err := baseRepo.AddCompanyMembership(targetSubject, remainingCompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
 	repo := &countingAuthRepo{Repository: baseRepo}
 	validator := &tokenClaimsValidator{claims: map[string]auth.Claims{
 		"admin-token":  {Subject: adminSubject, Email: admin.Email, Name: "Admin"},
@@ -1180,6 +1185,9 @@ func TestAuthJoinedWaiterReturnsOnOwnCancellation(t *testing.T) {
 	if _, err := base.UpsertAuthUser(subject, "cancel@example.com", "Cancel User"); err != nil {
 		t.Fatal(err)
 	}
+	if _, _, err := base.EnsureInitialCompanyContext(context.Background(), subject); err != nil {
+		t.Fatal(err)
+	}
 	repo := newBlockingAuthPoolRepo(base, 20)
 	server := NewServerWithOptions(repo, ServerOptions{DisableRealtimeSpine: true, DisableNotificationCleanup: true})
 	t.Cleanup(server.Close)
@@ -1228,6 +1236,9 @@ func TestAuthLiveWaiterRetriesAfterShortDeadlineLeader(t *testing.T) {
 	base := store.NewMemoryRepo()
 	const subject = "auth-short-deadline-leader"
 	if _, err := base.UpsertAuthUser(subject, "leader@example.com", "Leader User"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := base.EnsureInitialCompanyContext(context.Background(), subject); err != nil {
 		t.Fatal(err)
 	}
 	repo := newBlockingAuthPoolRepo(base, 20)
@@ -1418,6 +1429,10 @@ func TestConcurrentChangedClaimsSerializeBySubject(t *testing.T) {
 	base := store.NewMemoryRepo()
 	const subject = "serialized-claim-change"
 	if _, err := base.UpsertAuthUser(subject, "old@example.com", "Old Name"); err != nil {
+		t.Fatal(err)
+	}
+	company := base.EnsureCompany("96969696-9696-4696-8696-969696969696", "Claims Serialization")
+	if _, err := base.AddCompanyMembership(subject, company.CompanyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
 	repo := &blockingChangedClaimsRepo{Repository: base, started: make(chan struct{}), release: make(chan struct{})}

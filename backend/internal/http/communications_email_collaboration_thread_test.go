@@ -114,7 +114,7 @@ func ensureEmailCollaborationThreadTestCollaboration(t *testing.T, repo *store.M
 }
 
 func newEmailCollaborationThreadTestServer(repo store.Repository, client NylasClient) *Server {
-	server := NewServerWithOptions(repo, ServerOptions{
+	server := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasClient: client, NylasConfig: testNylasConfig(),
 		EmailQueue:                     &recordingEmailQueueSender{},
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
@@ -142,6 +142,7 @@ func performEmailCollaborationThreadTestRequest(t *testing.T, repo store.Reposit
 }
 
 func emailCollaborationThreadTestRequestWithActor(req *http.Request, user domain.User, role string) *http.Request {
+	user.MailboxEnabled = true
 	actor := ActorContext{
 		User: user,
 		Memberships: []domain.CompanyMembership{{

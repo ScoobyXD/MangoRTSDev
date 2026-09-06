@@ -60,7 +60,7 @@ func TestEmailRelationshipAttachmentRouteUsesInternalMessageIDAndStoredBytes(t *
 	storage := newFakeAttachmentObjectStorage()
 	seedFinalEmailMessageAttachment(t, repo, storage, companyID, collaboration.RootMessageID, attachmentID, creator.UserID, body)
 	client := &fakeNylasClient{downloadContent: []byte("provider bytes must not be served")}
-	server := NewServerWithOptions(repo, ServerOptions{
+	server := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasConfig: testNylasConfig(), NylasClient: client, AttachmentStorage: storage,
 		DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true,
 	})

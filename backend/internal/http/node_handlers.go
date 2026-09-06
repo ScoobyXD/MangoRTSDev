@@ -348,6 +348,11 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		}
 		details.Relationships = filterNodeRelationshipsByVisibleNodes(details.Relationships, visibleRelationshipNodeIDs)
 		details.RelationshipsCount = len(details.Relationships)
+		if mailboxDisabledForRequest(r) {
+			unfilteredInformationCount := len(details.Information)
+			details.Information = withoutNodeMailboxInformation(details.Information)
+			details.InformationCount -= unfilteredInformationCount - len(details.Information)
+		}
 		if details.InformationCount == 0 && len(details.Information) > 0 {
 			details.InformationCount = len(details.Information)
 		}
@@ -377,6 +382,9 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if rejectDurableInlineFileBytes(w, "node_projection", req.Information) {
+				return
+			}
+			if !requireMailboxInformationAccess(w, r, req.Type, req.Information) {
 				return
 			}
 			if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeNode, nodeID, "node_not_found") {
@@ -454,6 +462,9 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_load_node_projection")
 			return
+		}
+		if mailboxDisabledForRequest(r) {
+			items = withoutNodeMailboxProjections(items)
 		}
 		writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{
 			"company_id": companyID,
@@ -653,6 +664,9 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, projection := range projections {
+			if projection.InformationID == informationID && !requireMailboxInformationAccess(w, r, projection.Type, projection.Information) {
+				return
+			}
 			if projection.InformationID == informationID && strings.EqualFold(strings.TrimSpace(projection.Type), "Text box") {
 				writeError(w, http.StatusConflict, "editor_collaboration_required")
 				return
@@ -726,6 +740,9 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if rejectDurableInlineFileBytes(w, "node_content", req.Information) {
+			return
+		}
+		if !requireMailboxInformationAccess(w, r, req.Type, req.Information) {
 			return
 		}
 		if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeNode, nodeID, "node_not_found") {

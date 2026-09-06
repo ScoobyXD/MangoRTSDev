@@ -260,6 +260,7 @@ func TestSharedEmailDraftAttachmentReadRechecksPermissionAndLiveDraft(t *testing
 }
 
 func emailDraftAttachmentScopeRequest(user domain.User, companyID, role string) *http.Request {
+	user.MailboxEnabled = true
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	return req.WithContext(context.WithValue(req.Context(), actorContextKey{}, ActorContext{
 		User:        user,

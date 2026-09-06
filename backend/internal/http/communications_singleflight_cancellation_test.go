@@ -30,7 +30,7 @@ func TestCommunicationsJoinedReadWaiterReturnsOnOwnCancellation(t *testing.T) {
 			folderRelease:   release,
 			folderResult:    []NylasFolder{{ID: "inbox", Name: "Inbox"}},
 		}
-		server := NewServerWithOptions(store.NewMemoryRepo(), ServerOptions{NylasClient: client})
+		server := newLegacyMailboxTestServer(store.NewMemoryRepo(), ServerOptions{NylasClient: client})
 		server.nylasGate = newNylasRequestGate(0)
 		t.Cleanup(server.Close)
 

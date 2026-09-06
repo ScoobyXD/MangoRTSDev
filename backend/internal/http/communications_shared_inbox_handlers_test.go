@@ -14,6 +14,7 @@ import (
 )
 
 func sharedInboxRequestWithActor(req *http.Request, user domain.User, companyID, role string) *http.Request {
+	user.MailboxEnabled = true
 	return req.WithContext(context.WithValue(req.Context(), actorContextKey{}, ActorContext{
 		User: user,
 		Memberships: []domain.CompanyMembership{{

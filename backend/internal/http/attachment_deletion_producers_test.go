@@ -183,7 +183,7 @@ func TestAttachmentEmailWorkerRetiresCompletedMessageBeforeLaterFetchFails(t *te
 			if failRetirement {
 				repo.convergenceErr = errors.New("attachment retirement commit failed")
 			}
-			server := NewServerWithOptions(repo, ServerOptions{
+			server := newLegacyMailboxTestServer(repo, ServerOptions{
 				NylasClient: client, NylasConfig: testNylasConfig(), EmailWorkerOnly: true,
 				DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true, DisableRealtimeSpine: true,
 			})

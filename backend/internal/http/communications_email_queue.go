@@ -27,6 +27,13 @@ func (s *Server) enqueueCommunicationsEmailIngestionJob(ctx context.Context, job
 	if s == nil || s.emailQueue == nil {
 		return errors.New("email SQS sender is not configured")
 	}
+	connection, err := s.repo.GetEmailConnectionByIDContext(ctx, job.CompanyID, job.EmailConnectionID)
+	if err != nil {
+		return err
+	}
+	if err := s.checkPersonalMailboxConnection(ctx, connection); err != nil {
+		return err
+	}
 	if err := s.emailQueue.Send(ctx, emailqueue.Message{
 		SchemaVersion:     emailqueue.SchemaVersion,
 		Kind:              emailqueue.KindIngestion,
@@ -170,6 +177,16 @@ func (s *Server) processEmailIngestionDelivery(ctx context.Context, message emai
 	}
 	if job.CompanyID != message.CompanyID || job.EmailConnectionID != message.EmailConnectionID {
 		return false, store.ErrInvalid
+	}
+	connection, err := s.repo.GetEmailConnectionByIDContext(ctx, job.CompanyID, job.EmailConnectionID)
+	if err != nil {
+		return false, err
+	}
+	if err := s.checkPersonalMailboxConnection(ctx, connection); err != nil {
+		if errors.Is(err, errMailboxDisabled) {
+			return true, nil
+		}
+		return false, err
 	}
 	switch job.Status {
 	case store.CommunicationsEmailIngestionJobCompleted:
@@ -340,6 +357,12 @@ func (s *Server) processEmailReconciliationControl(ctx context.Context, message 
 		return false, err
 	}
 	for _, connection := range connections {
+		if err := s.checkPersonalMailboxConnection(ctx, connection); err != nil {
+			if errors.Is(err, errMailboxDisabled) {
+				continue
+			}
+			return false, err
+		}
 		lowerBound := connection.LastSuccessfulScanAt.UTC().Add(-emailReconciliationOverlap)
 		activationFloor := connection.IngestionStartedAt.UTC().Add(-time.Second)
 		if lowerBound.Before(activationFloor) {
@@ -373,6 +396,12 @@ func (s *Server) processEmailReconciliationConnection(ctx context.Context, messa
 	}
 	connection, err := s.repo.GetEmailConnectionByIDContext(ctx, message.CompanyID, message.EmailConnectionID)
 	if err != nil {
+		return false, err
+	}
+	if err := s.checkPersonalMailboxConnection(ctx, connection); err != nil {
+		if errors.Is(err, errMailboxDisabled) {
+			return true, nil
+		}
 		return false, err
 	}
 	if connection.Status != "connected" || strings.TrimSpace(connection.GrantID) == "" {

@@ -65,6 +65,7 @@ type fakeNylasClient struct {
 	detailCalls                 int
 	listErr                     error
 	exchangeErr                 error
+	exchangeCalls               int
 }
 
 type fakeNylasUpdateCall struct {
@@ -319,6 +320,7 @@ func (f *blockingCommunicationsNylasClient) pageCalls() int {
 func (f *fakeNylasClient) ExchangeCode(_ context.Context, _, _ string) (NylasGrant, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.exchangeCalls++
 	if f.exchangeErr != nil {
 		return NylasGrant{}, f.exchangeErr
 	}
@@ -729,7 +731,7 @@ func newCommunicationsSendTestFixture(t *testing.T) *communicationsSendTestFixtu
 		sizeOverrides: map[string]int64{},
 	}
 	nylas := &fakeNylasClient{}
-	server := NewServerWithOptions(countingRepo, ServerOptions{
+	server := newLegacyMailboxTestServer(countingRepo, ServerOptions{
 		AuthValidator:     testValidator(t, "kid", key),
 		NylasConfig:       testNylasConfig(),
 		NylasClient:       nylas,
@@ -1395,7 +1397,7 @@ func TestCommunicationsSendConvergesWhenWorkerCompletesBetweenPartialPersistence
 	var importedLocalID, providerOnlyID string
 	workerRaceRan := false
 	fixture.server.repo = &afterCommunicationsEmailThreadUpsertRepo{
-		Repository: fixture.countingRepo,
+		Repository: legacyMailboxTestRepository{Repository: fixture.countingRepo},
 		shouldRun: func(input store.CommunicationsEmailThreadUpsertInput, _ domain.CommunicationsEmailThread) bool {
 			return len(input.Messages) == 1 && input.Messages[0].ID == "sent-message" &&
 				!input.Messages[0].DownloadComplete && len(input.Messages[0].Attachments) == 2
@@ -1953,7 +1955,7 @@ func TestCommunicationsAuthURLIncludesSignedState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := NewServerWithOptions(repo, ServerOptions{
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key),
 		NylasConfig:   testNylasConfig(),
 		NylasClient:   &fakeNylasClient{},
@@ -2022,7 +2024,7 @@ func TestCommunicationsAuthURLSharedInboxIntentRequiresManagerOrAdmin(t *testing
 	if _, err := repo.AddCompanyMembership(manager.CognitoSubject, companyID, domain.RoleCompanyManager); err != nil {
 		t.Fatal(err)
 	}
-	handler := NewServerWithOptions(repo, ServerOptions{
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key),
 		NylasConfig:   testNylasConfig(),
 		NylasClient:   &fakeNylasClient{},
@@ -2113,7 +2115,7 @@ func TestNylasCallbackStoresGrantAndRejectsEmailMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	nylas := &fakeNylasClient{grant: NylasGrant{GrantID: "grant-1", Email: user.Email, Provider: "microsoft"}}
-	handler := NewServerWithOptions(repo, ServerOptions{
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasConfig: config,
 		NylasClient: nylas,
 	}).Routes()
@@ -2147,7 +2149,7 @@ func TestNylasCallbackStoresGrantAndRejectsEmailMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	mismatchNylas := &fakeNylasClient{grant: NylasGrant{GrantID: "grant-2", Email: "other@example.com", Provider: "google"}}
-	mismatchHandler := NewServerWithOptions(mismatchRepo, ServerOptions{
+	mismatchHandler := newLegacyMailboxTestServer(mismatchRepo, ServerOptions{
 		NylasConfig: config,
 		NylasClient: mismatchNylas,
 	}).Routes()
@@ -2187,7 +2189,7 @@ func TestNylasCallbackRejectsPersonalAccountEmailMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	nylas := &fakeNylasClient{grant: NylasGrant{GrantID: "grant-1", Email: "mailbox@example.com", Provider: "google"}}
-	handler := NewServerWithOptions(repo, ServerOptions{
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasConfig: config,
 		NylasClient: nylas,
 	}).Routes()
@@ -2209,7 +2211,7 @@ func TestNylasCallbackRejectsPersonalAccountEmailMismatch(t *testing.T) {
 	}
 }
 
-func TestNylasCallbackRecoversPersonalUserByEmailWhenStateUserIDIsStale(t *testing.T) {
+func TestNylasCallbackRejectsStaleUserWithoutRecoveringByEmail(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -2229,7 +2231,7 @@ func TestNylasCallbackRecoversPersonalUserByEmailWhenStateUserIDIsStale(t *testi
 		t.Fatal(err)
 	}
 	nylas := &fakeNylasClient{grant: NylasGrant{GrantID: "grant-1", Email: user.Email, Provider: "google"}}
-	handler := NewServerWithOptions(repo, ServerOptions{
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasConfig: config,
 		NylasClient: nylas,
 	}).Routes()
@@ -2240,22 +2242,18 @@ func TestNylasCallbackRecoversPersonalUserByEmailWhenStateUserIDIsStale(t *testi
 	if rec.Code != http.StatusFound {
 		t.Fatalf("callback status = %d, body=%s", rec.Code, rec.Body.String())
 	}
-	if strings.Contains(rec.Header().Get("Location"), "nylas_error=") {
-		t.Fatalf("callback redirect = %s, want success", rec.Header().Get("Location"))
+	if !strings.Contains(rec.Header().Get("Location"), "nylas_error=mailbox_disabled") {
+		t.Fatalf("callback redirect = %s, want mailbox_disabled", rec.Header().Get("Location"))
 	}
-	connection, err := repo.GetUserEmailConnection(user.UserID)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := repo.GetUserEmailConnection(user.UserID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("stale callback created connection: %v", err)
 	}
-	if connection.UserID != user.UserID || connection.AccountEmail != user.Email || connection.GrantID != "grant-1" {
-		t.Fatalf("connection = %+v, want recovered user connection", connection)
-	}
-	if len(nylas.deletedGrants) != 0 {
-		t.Fatalf("deleted grants = %v, want none", nylas.deletedGrants)
+	if nylas.exchangeCalls != 0 || len(nylas.deletedGrants) != 0 {
+		t.Fatal("stale callback contacted provider")
 	}
 }
 
-func TestNylasCallbackDeletesGrantWhenConnectionStoreFails(t *testing.T) {
+func TestNylasCallbackRejectsMissingUserBeforeCreatingGrant(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -2271,7 +2269,7 @@ func TestNylasCallbackDeletesGrantWhenConnectionStoreFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	nylas := &fakeNylasClient{grant: NylasGrant{GrantID: "orphan-grant", Email: "missing@example.com", Provider: "google"}}
-	handler := NewServerWithOptions(repo, ServerOptions{
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasConfig: config,
 		NylasClient: nylas,
 	}).Routes()
@@ -2282,11 +2280,11 @@ func TestNylasCallbackDeletesGrantWhenConnectionStoreFails(t *testing.T) {
 	if rec.Code != http.StatusFound {
 		t.Fatalf("callback status = %d, body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Header().Get("Location"), "nylas_error=mango_user_not_found") {
-		t.Fatalf("callback redirect = %s, want mango_user_not_found", rec.Header().Get("Location"))
+	if !strings.Contains(rec.Header().Get("Location"), "nylas_error=mailbox_disabled") {
+		t.Fatalf("callback redirect = %s, want mailbox_disabled", rec.Header().Get("Location"))
 	}
-	if len(nylas.deletedGrants) != 1 || nylas.deletedGrants[0] != "orphan-grant" {
-		t.Fatalf("deleted grants = %v, want orphan grant cleanup", nylas.deletedGrants)
+	if nylas.exchangeCalls != 0 || len(nylas.deletedGrants) != 0 {
+		t.Fatal("missing-user callback contacted provider")
 	}
 }
 
@@ -2319,7 +2317,7 @@ func TestNylasCallbackStoresSharedAccountWithoutOverwritingPersonalConnection(t 
 		t.Fatal(err)
 	}
 	nylas := &fakeNylasClient{grant: NylasGrant{GrantID: "shared-grant", Email: "shared@example.com", Provider: "google"}}
-	handler := NewServerWithOptions(repo, ServerOptions{
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasConfig: config,
 		NylasClient: nylas,
 	}).Routes()
@@ -2392,7 +2390,7 @@ func TestNylasCallbackCreatesSharedInboxFromOAuthIntent(t *testing.T) {
 		t.Fatal(err)
 	}
 	nylas := &fakeNylasClient{grant: NylasGrant{GrantID: "shared-oauth-grant", Email: "support@example.com", Provider: "google"}}
-	handler := NewServerWithOptions(repo, ServerOptions{
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasConfig: config,
 		NylasClient: nylas,
 	}).Routes()
@@ -2477,7 +2475,7 @@ func TestNylasCallbackLinksExistingSharedInboxFromOAuthIntent(t *testing.T) {
 		t.Fatal(err)
 	}
 	nylas := &fakeNylasClient{grant: NylasGrant{GrantID: "shared-link-grant", Email: "support@example.com", Provider: "google"}}
-	handler := NewServerWithOptions(repo, ServerOptions{
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasConfig: config,
 		NylasClient: nylas,
 	}).Routes()
@@ -2547,7 +2545,7 @@ func TestNylasCallbackRejectsSharedInboxOAuthIntentForCompanyUser(t *testing.T) 
 		t.Fatal(err)
 	}
 	nylas := &fakeNylasClient{grant: NylasGrant{GrantID: "regular-shared-grant", Email: "support@example.com", Provider: "google"}}
-	handler := NewServerWithOptions(repo, ServerOptions{
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasConfig: config,
 		NylasClient: nylas,
 	}).Routes()
@@ -2613,7 +2611,7 @@ func TestNylasCallbackTreatsStrictUserMailboxAsPersonalConnection(t *testing.T) 
 		t.Fatal(err)
 	}
 	nylas := &fakeNylasClient{grant: NylasGrant{GrantID: "new-grant", Email: user.Email, Provider: "google"}}
-	handler := NewServerWithOptions(repo, ServerOptions{
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasConfig: config,
 		NylasClient: nylas,
 	}).Routes()
@@ -2664,7 +2662,7 @@ func TestCommunicationsHandlersReadProviderAndQueueVisibleIngestion(t *testing.T
 		folders:  []NylasFolder{{ID: "inbox", Name: "Inbox", Attributes: []string{"\\Inbox"}}},
 		messages: []NylasMessage{providerMessage}, message: providerMessage,
 	}
-	handler := NewServerWithOptions(repo, ServerOptions{
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas,
 		EmailQueue: &recordingEmailQueueSender{},
 	}).Routes()
@@ -2748,7 +2746,7 @@ func TestCommunicationsProviderListAndDetailUseConnectionScopedStoredIdentities(
 		},
 	}
 	repo := &recordingCommunicationsEmailIdentityRepo{Repository: baseRepo}
-	handler := NewServerWithOptions(repo, ServerOptions{
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas,
 	}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
@@ -2846,7 +2844,7 @@ func TestCommunicationsStoredSearchAndSelectedMessageIngestion(t *testing.T) {
 		Unread: true, Folders: []string{"INBOX"},
 	}
 	nylas := &fakeNylasClient{message: providerMessage, messagesByID: map[string]NylasMessage{"provider-only": providerMessage}}
-	handler := NewServerWithOptions(repo, ServerOptions{
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas,
 		EmailQueue: &recordingEmailQueueSender{},
 	}).Routes()
@@ -2962,7 +2960,7 @@ func TestCommunicationsSendResolvesLargeMangoAttachmentWithQueryCompanyID(t *tes
 	}
 	nylas := &fakeNylasClient{}
 	storage := newFakeAttachmentObjectStorage()
-	handler := NewServerWithOptions(repo, ServerOptions{
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{
 		AuthValidator:     testValidator(t, "kid", key),
 		NylasConfig:       testNylasConfig(),
 		NylasClient:       nylas,
@@ -3006,7 +3004,7 @@ func TestCommunicationsSendRejectsRawAttachmentContent(t *testing.T) {
 	}
 	nylas := &fakeNylasClient{}
 	storage := newFakeAttachmentObjectStorage()
-	handler := NewServerWithOptions(repo, ServerOptions{
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{
 		AuthValidator:     testValidator(t, "kid", key),
 		NylasConfig:       testNylasConfig(),
 		NylasClient:       nylas,
@@ -3046,7 +3044,7 @@ func TestCommunicationsSendRejectsInlineDataURLBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	nylas := &fakeNylasClient{}
-	handler := NewServerWithOptions(repo, ServerOptions{
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key),
 		NylasConfig:   testNylasConfig(),
 		NylasClient:   nylas,
@@ -3104,7 +3102,7 @@ func TestCommunicationsFoldersUseSharedInboxConnection(t *testing.T) {
 	nylas := &fakeNylasClient{
 		folders: []NylasFolder{{ID: "archive", Name: "Archive", Attributes: []string{"\\Archive"}, TotalCount: &totalCount}},
 	}
-	handler := NewServerWithOptions(repo, ServerOptions{
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key),
 		NylasConfig:   testNylasConfig(),
 		NylasClient:   nylas,
@@ -3131,7 +3129,7 @@ func TestCommunicationsFoldersWebhookInvalidationFencesInFlightProviderResult(t 
 		folderRelease:   release,
 		folderResult:    []NylasFolder{{ID: "inbox", Name: "Inbox before commit"}},
 	}
-	server := NewServerWithOptions(store.NewMemoryRepo(), ServerOptions{
+	server := newLegacyMailboxTestServer(store.NewMemoryRepo(), ServerOptions{
 		NylasClient:                    client,
 		DisableNotificationCleanup:     true,
 		DisableAttachmentUploadCleanup: true,
@@ -3221,7 +3219,7 @@ func TestCommunicationsFoldersInvalidationFencesRequestQueuedBeforeProviderStart
 		folderStarted:   providerStarted,
 		folderResult:    []NylasFolder{{ID: "inbox", Name: "Post-commit provider result"}},
 	}
-	server := NewServerWithOptions(store.NewMemoryRepo(), ServerOptions{
+	server := newLegacyMailboxTestServer(store.NewMemoryRepo(), ServerOptions{
 		NylasClient:                    client,
 		DisableNotificationCleanup:     true,
 		DisableAttachmentUploadCleanup: true,
@@ -3305,7 +3303,7 @@ func TestCommunicationsPersonalReadsSelectExactOwnedAccount(t *testing.T) {
 			"grant-other":     []NylasMessage{{ID: "message-other", Subject: "Other user", Folders: []string{"INBOX"}}},
 		},
 	}
-	handler := NewServerWithOptions(repo, ServerOptions{
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas,
 	}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", actor.CognitoSubject, actor.Email)
@@ -3378,7 +3376,7 @@ func TestCommunicationsSendUsesSharedInboxConnectionAndRequiresEdit(t *testing.T
 	}
 	nylas := &fakeNylasClient{}
 	storage := newFakeAttachmentObjectStorage()
-	handler := NewServerWithOptions(repo, ServerOptions{
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{
 		AuthValidator:     testValidator(t, "kid", key),
 		NylasConfig:       testNylasConfig(),
 		NylasClient:       nylas,
@@ -3506,7 +3504,7 @@ func TestNylasGrantWebhooksPauseAndResumePermanentConnection(t *testing.T) {
 	}
 	config := testNylasConfig()
 	config.WebhookSecret = "webhook-secret"
-	server := NewServerWithOptions(repo, ServerOptions{
+	server := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasConfig: config, NylasClient: &fakeNylasClient{},
 	})
 	defer server.Close()
@@ -3644,7 +3642,7 @@ func TestCommunicationsStarMessagePreservesGmailInboxLabel(t *testing.T) {
 	message := NylasMessage{ID: "message-1", Subject: "Hello", Folders: []string{"INBOX", "UNREAD", "CATEGORY_PERSONAL", "SNOOZED", "CHAT", "Label_123"}}
 	seedPersonalV3EmailMessageForCommunicationsTest(t, repo, companyID, user.UserID, user.Email, "google", message)
 	nylas := &fakeNylasClient{message: message}
-	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas}).Routes()
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 	assertJSONStatus(t, handler, http.MethodPut, "/v1/communications/messages/message-1?company_id="+url.QueryEscape(companyID), `{"starred":true}`, token, http.StatusOK)
 	if nylas.update.Starred == nil || !*nylas.update.Starred || nylas.update.Folders != nil {
@@ -3672,7 +3670,7 @@ func TestCommunicationsArchiveMessageEndpointIsRemovedForGmail(t *testing.T) {
 	message := NylasMessage{ID: "message-1", Subject: "Hello", Folders: []string{"INBOX", "UNREAD", "CATEGORY_PERSONAL", "SNOOZED", "CHAT", "STARRED", "Label_123"}}
 	seedPersonalV3EmailMessageForCommunicationsTest(t, repo, companyID, user.UserID, user.Email, "google", message)
 	nylas := &fakeNylasClient{message: message}
-	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas}).Routes()
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/message-1/archive?company_id="+url.QueryEscape(companyID), "", token, http.StatusNotFound)
 	if len(nylas.updateCalls) != 0 {
@@ -3700,7 +3698,7 @@ func TestCommunicationsArchiveMessageEndpointIsRemovedForMicrosoft(t *testing.T)
 	message := NylasMessage{ID: "message-1", Subject: "Hello", Folders: []string{"inbox-id"}}
 	seedPersonalV3EmailMessageForCommunicationsTest(t, repo, companyID, user.UserID, user.Email, "microsoft", message)
 	nylas := &fakeNylasClient{folders: []NylasFolder{{ID: "inbox-id", Name: "Inbox"}, {ID: "archive-id", Name: "Archive"}}, message: message}
-	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas}).Routes()
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/message-1/archive?company_id="+url.QueryEscape(companyID), "", token, http.StatusNotFound)
 	if len(nylas.updateCalls) != 0 || nylas.detailCalls != 0 {
@@ -3731,7 +3729,7 @@ func TestCommunicationsArchiveBatchOnlyCreatesCompactSQSItems(t *testing.T) {
 	seedPersonalV3EmailMessageForCommunicationsTest(t, repo, companyID, user.UserID, user.Email, "google", message2)
 	nylas := &fakeNylasClient{messagesByID: map[string]NylasMessage{"message-1": message1, "message-2": message2}}
 	queue := &recordingEmailQueueSender{}
-	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas, EmailQueue: queue}).Routes()
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas, EmailQueue: queue}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 	body := `{"message_ids":["message-1","message-2","message-1"," "]}`
 	path := "/v1/communications/messages/archive-batch?company_id=" + url.QueryEscape(companyID)
@@ -3804,7 +3802,7 @@ func TestCommunicationsArchiveBatchRejectsObsoleteBackgroundSwitch(t *testing.T)
 	nylas := &fakeNylasClient{messagesByID: messagesByID}
 	queue := &recordingEmailQueueSender{}
 	workerRepo := &emailOutboxBoundaryRepo{Repository: repo}
-	server := NewServerWithOptions(workerRepo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas, EmailQueue: queue})
+	server := newLegacyMailboxTestServer(workerRepo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas, EmailQueue: queue})
 	defer server.Close()
 	handler := server.Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
@@ -3845,7 +3843,7 @@ func TestCommunicationsArchiveBatchRequestRetryResendsExistingUnsentItem(t *test
 		ID: "archive-retry-message", Subject: "Retry archive queue send", Folders: []string{"INBOX"},
 	})
 	queue := &recordingEmailQueueSender{err: errors.New("temporary SQS send failure")}
-	server := NewServerWithOptions(repo, ServerOptions{
+	server := newLegacyMailboxTestServer(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: &fakeNylasClient{}, EmailQueue: queue,
 	})
 	defer server.Close()
@@ -3899,7 +3897,7 @@ func TestCommunicationsArchiveBatchUsesSharedInboxJobScope(t *testing.T) {
 	seedSharedV3EmailMessageForCommunicationsTest(t, repo, companyID, folder.FolderID, "support@example.com", "google", message)
 	nylas := &fakeNylasClient{messagesByID: map[string]NylasMessage{message.ID: message}}
 	queue := &recordingEmailQueueSender{}
-	server := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas, EmailQueue: queue})
+	server := newLegacyMailboxTestServer(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas, EmailQueue: queue})
 	defer server.Close()
 	handler := server.Routes()
 	token := "Bearer " + testJWT(t, key, "kid", actor.CognitoSubject, actor.Email)
@@ -3954,7 +3952,7 @@ func TestCommunicationsUnarchiveMessageAddsGmailInboxLabel(t *testing.T) {
 	message := NylasMessage{ID: "message-1", Subject: "Hello", Folders: []string{"UNREAD", "CATEGORY_PERSONAL", "Label_123"}}
 	seedPersonalV3EmailMessageForCommunicationsTest(t, repo, companyID, user.UserID, user.Email, "google", message)
 	nylas := &fakeNylasClient{message: message}
-	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas}).Routes()
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/message-1/unarchive?company_id="+url.QueryEscape(companyID), "", token, http.StatusOK)
 	if got, want := strings.Join(nylas.update.Folders, ","), "Label_123,INBOX"; got != want {
@@ -3982,7 +3980,7 @@ func TestCommunicationsUnarchiveMessageMovesFolderProvidersToInboxFolder(t *test
 	message := NylasMessage{ID: "message-1", Subject: "Hello", Folders: []string{"archive-id"}}
 	seedPersonalV3EmailMessageForCommunicationsTest(t, repo, companyID, user.UserID, user.Email, "microsoft", message)
 	nylas := &fakeNylasClient{folders: []NylasFolder{{ID: "inbox-id", Name: "Inbox"}, {ID: "archive-id", Name: "Archive"}}, message: message}
-	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas}).Routes()
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: nylas}).Routes()
 	token := "Bearer " + testJWT(t, key, "kid", subject, user.Email)
 	assertJSONStatus(t, handler, http.MethodPost, "/v1/communications/messages/message-1/unarchive?company_id="+url.QueryEscape(companyID), "", token, http.StatusOK)
 	if len(nylas.update.Folders) != 1 || nylas.update.Folders[0] != "inbox-id" || nylas.detailCalls != 0 {
@@ -3996,7 +3994,7 @@ func TestNylasWebhookRequestCancellationStopsBlockedGrantLookup(t *testing.T) {
 	config := testNylasConfig()
 	config.WebhookSecret = "webhook-secret"
 	queue := &recordingEmailQueueSender{}
-	server := NewServerWithOptions(repo, ServerOptions{NylasConfig: config, NylasClient: &fakeNylasClient{}, EmailQueue: queue})
+	server := newLegacyMailboxTestServer(repo, ServerOptions{NylasConfig: config, NylasClient: &fakeNylasClient{}, EmailQueue: queue})
 	defer server.Close()
 	handler := server.Routes()
 	body := `{"type":"message.created","data":{"object":{"id":"cancel-message","thread_id":"cancel-thread","grant_id":"cancel-grant"}}}`
@@ -4067,7 +4065,7 @@ func TestSharedNylasWebhookAudienceFailureRetriesFromDurableOutboxWithoutInflati
 	repo := &failOnceWebhookAudienceRepo{Repository: baseRepo, failures: 1}
 	config := testNylasConfig()
 	config.WebhookSecret = "webhook-secret"
-	server := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{NylasConfig: config, NylasClient: &fakeNylasClient{}}))
+	server := newLegacyMailboxTestServer(repo, explicitLocalRealtimeTestOptions(ServerOptions{NylasConfig: config, NylasClient: &fakeNylasClient{}}))
 	defer server.Close()
 	networkConn := subscribeRecordingRealtimeConnection(t, server, "shared-webhook-retry-connection", companyID, user.UserID, realtimeSharedMailboxScope(folder.FolderID))
 	handler := server.Routes()
@@ -4128,7 +4126,7 @@ func TestNylasWebhookVerifiesSignatureDeduplicatesAndStoresReadStatus(t *testing
 	config.WebhookSecret = "webhook-secret"
 	nylas := &fakeNylasClient{}
 	ingestionQueue := &recordingEmailQueueSender{}
-	server := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{
+	server := newLegacyMailboxTestServer(repo, explicitLocalRealtimeTestOptions(ServerOptions{
 		NylasConfig: config,
 		EmailQueue:  ingestionQueue,
 		NylasClient: nylas,
@@ -4275,7 +4273,7 @@ func TestNylasWebhookQueuesLiveIngestionWithoutSynchronousCollaborationAdvance(t
 	}}
 	participantToken := "collaboration-webhook-participant-token"
 	queue := &recordingEmailQueueSender{}
-	server := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{
+	server := newLegacyMailboxTestServer(repo, explicitLocalRealtimeTestOptions(ServerOptions{
 		NylasConfig: config,
 		NylasClient: nylas,
 		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{
@@ -4351,7 +4349,7 @@ func TestNylasWebhookStoresSharedReadStatusForSharedInbox(t *testing.T) {
 	}
 	config := testNylasConfig()
 	config.WebhookSecret = "webhook-secret"
-	server := NewServerWithOptions(repo, ServerOptions{NylasConfig: config})
+	server := newLegacyMailboxTestServer(repo, ServerOptions{NylasConfig: config})
 	defer server.Close()
 	handler := server.Routes()
 
@@ -4506,7 +4504,7 @@ func TestNylasWebhookDoesNotAdvanceSharedEmailCollaboration(t *testing.T) {
 		To:   []NylasEmailAddress{{Email: "support@example.com"}},
 	}}
 	participantToken := "shared-collaboration-participant-token"
-	server := NewServerWithOptions(repo, ServerOptions{
+	server := newLegacyMailboxTestServer(repo, ServerOptions{
 		NylasConfig: config,
 		EmailQueue:  &recordingEmailQueueSender{},
 		NylasClient: nylas,
@@ -4580,7 +4578,7 @@ func TestNylasWebhookPublishesSharedMailboxHintOnlyToCurrentAudience(t *testing.
 	config.WebhookSecret = "webhook-secret"
 	nylas := &fakeNylasClient{}
 	ingestionQueue := &recordingEmailQueueSender{}
-	server := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{
+	server := newLegacyMailboxTestServer(repo, explicitLocalRealtimeTestOptions(ServerOptions{
 		NylasConfig: config,
 		EmailQueue:  ingestionQueue,
 		NylasClient: nylas,
@@ -4750,7 +4748,7 @@ func TestCommunicationsNylasAuthErrorMarksReauthRequired(t *testing.T) {
 	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{UserID: user.UserID, Provider: "google", AccountEmail: user.Email, GrantID: "grant-1", Status: "connected"}); err != nil {
 		t.Fatal(err)
 	}
-	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: &fakeNylasClient{listErr: NylasAPIError{StatusCode: http.StatusUnauthorized, Code: "unauthorized"}}}).Routes()
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: &fakeNylasClient{listErr: NylasAPIError{StatusCode: http.StatusUnauthorized, Code: "unauthorized"}}}).Routes()
 	path := "/v1/communications/messages?refresh=true&company_id=" + url.QueryEscape(companyID)
 	req := httptest.NewRequest(http.MethodGet, path, nil)
 	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, user.Email))
@@ -4782,7 +4780,7 @@ func TestCommunicationsStoredReauthRequiredReturnsConflict(t *testing.T) {
 	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{UserID: user.UserID, Provider: "google", AccountEmail: user.Email, GrantID: "grant-1", Status: "reauth_required"}); err != nil {
 		t.Fatal(err)
 	}
-	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: &fakeNylasClient{}}).Routes()
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: &fakeNylasClient{}}).Routes()
 	req := httptest.NewRequest(http.MethodGet, "/v1/communications/messages?company_id="+url.QueryEscape(companyID), nil)
 	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, user.Email))
 	rec := httptest.NewRecorder()
@@ -4843,7 +4841,7 @@ func TestCommunicationsSharedNylasAuthErrorMarksCompanyConnectionReauthRequired(
 	}); err != nil {
 		t.Fatal(err)
 	}
-	handler := NewServerWithOptions(repo, ServerOptions{
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key),
 		NylasConfig:   testNylasConfig(),
 		NylasClient:   &fakeNylasClient{listErr: NylasAPIError{StatusCode: http.StatusUnauthorized, Code: "unauthorized"}},
@@ -4927,7 +4925,7 @@ func TestCommunicationsStoredSharedReauthRequiredReturnsConflict(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	handler := NewServerWithOptions(repo, ServerOptions{
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{
 		AuthValidator: testValidator(t, "kid", key),
 		NylasConfig:   testNylasConfig(),
 		NylasClient:   &fakeNylasClient{},
@@ -4960,7 +4958,7 @@ func TestCommunicationsNylasRateLimitPreservesRetryAfter(t *testing.T) {
 	if _, err := repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{UserID: user.UserID, Provider: "google", AccountEmail: user.Email, GrantID: "grant-1", Status: "connected"}); err != nil {
 		t.Fatal(err)
 	}
-	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: &fakeNylasClient{listErr: NylasAPIError{StatusCode: http.StatusTooManyRequests, Code: "rate_limited", RetryAfter: "3"}}}).Routes()
+	handler := newLegacyMailboxTestServer(repo, ServerOptions{AuthValidator: testValidator(t, "kid", key), NylasConfig: testNylasConfig(), NylasClient: &fakeNylasClient{listErr: NylasAPIError{StatusCode: http.StatusTooManyRequests, Code: "rate_limited", RetryAfter: "3"}}}).Routes()
 	req := httptest.NewRequest(http.MethodGet, "/v1/communications/messages?refresh=true&company_id="+url.QueryEscape(companyID), nil)
 	req.Header.Set("Authorization", "Bearer "+testJWT(t, key, "kid", subject, user.Email))
 	rec := httptest.NewRecorder()

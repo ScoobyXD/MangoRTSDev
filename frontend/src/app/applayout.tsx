@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderHomeIcon, HeaderLogicGateArenaIcon, HeaderMapIcon, HeaderMyWorkIcon, HeaderProjectManagementIcon, HeaderTeamsIcon } from "../icons/index.js";
-import type { CurrentUserResponse } from "../auth/cognitoAuth";
+import { isAuthEnabled, type CurrentUserResponse } from "../auth/cognitoAuth";
 import { getActiveCompanyID } from "../auth/currentCompany";
 import FrameCanvas from "./framecanvas";
 import FrameRightClickMenu from "./framerightclickmenu";
@@ -422,6 +422,7 @@ const processMapLogicGateOverlayHeaderStyle: React.CSSProperties = {
 };
 
 const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onNavigate, overrideContent }) => {
+  const mailboxEnabled = me ? me.user.mailbox_enabled === true : !isAuthEnabled();
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const activeCompanyID = getActiveCompanyID();
   const myWorkSubjectID = me?.user.user_id?.trim() || me?.user.email?.trim() || "local";
@@ -2013,6 +2014,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
           activePage={activePrimaryPage}
           activeHomeView={homeViewID}
           currentUserID={me?.user.user_id?.trim() ?? ""}
+          mailboxEnabled={mailboxEnabled}
           pinTree={sidebarPinTree}
           pinDropActive={pinDropActive}
           explorerSelectionTargetFrameIDs={sidebarExplorerSelectionTargetFrameIDs}
@@ -2573,7 +2575,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
           </label>
         </FrameRightClickMenu>
       )}
-      {!homePageOwnsEmailReferencePreview && (
+      {mailboxEnabled && !homePageOwnsEmailReferencePreview && (
         <EmailReferencePreviewHost
           apiBase={apiBase}
           companyID={activeCompanyID}
