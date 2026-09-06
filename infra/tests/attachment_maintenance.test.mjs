@@ -31,7 +31,7 @@ test("recovery reuses environment storage and secret selector without HTTP or pr
   assert.match(task, /MANGORTS_RUNTIME_ROLE", value = "attachment-maintenance"/);
   assert.match(task, /tags\s*=\s*local\.tags/);
   assert.match(task, /skip_destroy\s*=\s*true/);
-  assert.doesNotMatch(task, /NYLAS|COGNITO|OPENAI|VALKEY|portMappings|healthCheck/);
+  assert.doesNotMatch(task, /NYLAS|COGNITO|VALKEY|portMappings|healthCheck/);
   assert.match(maintenance, /subnets\s*=\s*local\.ecs_subnet_ids/);
   assert.match(maintenance, /security_groups\s*=\s*\[aws_security_group\.ecs\.id\]/);
   assert.match(maintenance, /assign_public_ip\s*=\s*false/);
@@ -39,7 +39,7 @@ test("recovery reuses environment storage and secret selector without HTTP or pr
 
 test("recovery enters the shared finite drain before creating any application service", () => {
   assert.ok(main.indexOf('if runtimeRole == "attachment-maintenance"') < main.indexOf("buildRepository()"));
-  assert.ok(main.indexOf("runAttachmentMaintenance(") < main.indexOf("buildAssistantConfig("));
+  assert.ok(main.indexOf("runAttachmentMaintenance(") < main.indexOf("buildNylasConfig("));
   assert.match(main, /time\.AfterFunc\(16\*time\.Minute/);
   assert.match(main, /runAttachmentMaintenance\([\s\S]*?if err != nil \{\s*log\.Fatal\(err\)/);
   assert.equal([...role.matchAll(/attachmentcleanup\.DrainPending\(/g)].length, 1);

@@ -77,12 +77,6 @@ email_from_address = "no-reply@example.com"
 bootstrap_admin_emails = ""
 bootstrap_company_name  = "MangoRTS Bootstrap"
 
-# Mango chat. Store only the raw key in Secrets Manager and pass its ARN here.
-assistant_model           = "gpt-5.6-luna"
-openai_api_key_secret_arn = "arn:aws:secretsmanager:us-west-1:123456789012:secret:mangorts/dev/openai-api-key-replace"
-# Optional chat dictation. Use a separate Deepgram key held only in Secrets Manager.
-deepgram_api_key_secret_arn = ""
-
 # Deprecated compatibility aliases accepted by the dev root:
 # bootstrap_dev_admin_emails = ""
 # bootstrap_dev_company_name  = "MangoRTS Bootstrap"

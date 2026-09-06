@@ -72,19 +72,6 @@ resource "aws_ecs_cluster" "main" {
 
   lifecycle {
     precondition {
-      condition = (
-        (trimspace(var.assistant_model) == "" && trimspace(var.openai_api_key_secret_arn) == "") ||
-        (var.environment == "dev" && trimspace(var.assistant_model) != "" && trimspace(var.openai_api_key_secret_arn) != "")
-      )
-      error_message = "Mango chat may be enabled only in dev, with both assistant_model and openai_api_key_secret_arn set."
-    }
-
-    precondition {
-      condition     = trimspace(var.deepgram_api_key_secret_arn) == "" || local.assistant_enabled
-      error_message = "Mango dictation requires enabled dev chat; leave deepgram_api_key_secret_arn empty to disable dictation."
-    }
-
-    precondition {
       condition = !(
         var.email_sqs_enabled &&
         var.backend_desired_count > 0
@@ -161,9 +148,6 @@ resource "aws_ecs_task_definition" "backend" {
           { name = "DB_USER", value = local.db_user },
           { name = "DB_SSLMODE", value = "require" }
         ],
-        local.assistant_enabled ? [
-          { name = "MANGORTS_ASSISTANT_MODEL", value = trimspace(var.assistant_model) }
-        ] : [],
         var.realtime_valkey_enabled ? [
           { name = "MANGORTS_VALKEY_REQUIRED", value = "true" },
           { name = "MANGORTS_VALKEY_ENDPOINT", value = "${aws_elasticache_serverless_cache.realtime[0].endpoint[0].address}:${aws_elasticache_serverless_cache.realtime[0].endpoint[0].port}" },
@@ -199,12 +183,6 @@ resource "aws_ecs_task_definition" "backend" {
         [
           { name = "DB_PASSWORD", valueFrom = local.db_password_secret_value_from }
         ],
-        local.assistant_enabled ? [
-          { name = "OPENAI_API_KEY", valueFrom = trimspace(var.openai_api_key_secret_arn) }
-        ] : [],
-        local.dictation_enabled ? [
-          { name = "DEEPGRAM_API_KEY", valueFrom = trimspace(var.deepgram_api_key_secret_arn) }
-        ] : [],
         local.nylas_enabled ? [
           { name = "NYLAS_API_KEY", valueFrom = var.nylas_api_key_secret_arn },
           { name = "NYLAS_STATE_SECRET", valueFrom = var.nylas_state_secret_arn }

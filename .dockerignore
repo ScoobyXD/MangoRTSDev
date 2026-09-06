@@ -1,4 +1,4 @@
-# The API builds from the repository root to package its approved Pi content.
+# The API builds from the repository root.
 # Only source/dependency manifests needed by this image enter its context.
 **
 !backend/go.mod
@@ -16,14 +16,6 @@
 !backend/internal/realtime/*.go
 !backend/internal/sourceaudit/*.go
 !backend/internal/store/*.go
-!ai/AGENTS.md
-!ai/skills/mango-process/SKILL.md
-!ai/skills/mango-node-chat/SKILL.md
-!ai/runtime/package.json
-!ai/runtime/package-lock.json
-!ai/runtime/main.mjs
-!ai/runtime/runtime.mjs
-!ai/runtime/response-validation.mjs
 **/*_test.go
 **/*.test.mjs
 **/node_modules

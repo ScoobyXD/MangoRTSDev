@@ -9514,20 +9514,3 @@ $$;
 
 CREATE TRIGGER trg_process_step_map_prune_route AFTER DELETE ON public.resource_operational_relationships
 FOR EACH ROW EXECUTE FUNCTION public.trg_process_step_map_prune_route();
-
--- Completed foreground Send inspections, using each authenticated owner's request identity.
-CREATE TABLE public.ai_runs (
-    company_id uuid NOT NULL,
-    user_id uuid NOT NULL,
-    ai_runs_id uuid NOT NULL,
-    inspection_json jsonb NOT NULL,
-    start_time timestamp with time zone NOT NULL,
-    finish_time timestamp with time zone NOT NULL,
-    CONSTRAINT ai_runs_pkey PRIMARY KEY (company_id, user_id, ai_runs_id),
-    CONSTRAINT ai_runs_company_fkey FOREIGN KEY (company_id)
-      REFERENCES public.companies(company_id) ON DELETE CASCADE,
-    CONSTRAINT ai_runs_user_fkey FOREIGN KEY (user_id)
-      REFERENCES public.users(user_id) ON DELETE CASCADE,
-    CONSTRAINT ai_runs_time_chk CHECK (finish_time >= start_time),
-    CONSTRAINT ai_runs_inspection_chk CHECK (jsonb_typeof(inspection_json) = 'array')
-);

@@ -74,6 +74,8 @@
   min-width: 0;
 }
 .mango-assistant-input {
+  display: block;
+  width: 100%;
   min-height: 32px;
   max-height: 120px;
   overflow-y: auto;
@@ -86,22 +88,10 @@
   font-size: 13px;
   line-height: 20px;
   white-space: pre-wrap;
+  resize: none;
 }
-.mango-assistant-input[aria-disabled="true"] { opacity: 0.55; }
-.mango-assistant-input:has(> p:only-child > br.ProseMirror-trailingBreak:only-child)::before { content: attr(data-placeholder); float: left; height: 0; color: #64748b; pointer-events: none; }
-.mango-assistant-input .mango-editor-entity-link { max-width: 100%; }
-.mango-assistant-reasoning { display: flex; align-items: center; gap: 5px; color: #64748b; font-size: 11px; font-weight: 650; white-space: nowrap; }
-.mango-assistant-reasoning select {
-  height: 32px;
-  padding: 0 7px;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  border-radius: 7px;
-  background: #fff;
-  color: #334155;
-  font: inherit;
-  cursor: pointer;
-}
-.mango-assistant-reasoning select:disabled { opacity: 0.5; cursor: default; }
+.mango-assistant-input:disabled { opacity: 0.55; }
+.mango-assistant-input::placeholder { color: #64748b; }
 
 .mango-assistant .mango-assistant-collapse,
 .mango-assistant .mango-assistant-expand {
@@ -122,39 +112,8 @@
 .mango-assistant .mango-assistant-collapse svg,
 .mango-assistant .mango-assistant-expand svg { width: 16px; height: 16px; }
 .mango-assistant .mango-assistant-send { min-height: 32px; background: #475569; color: #fff; }
-.mango-assistant .mango-assistant-microphone { position: relative; display: grid; place-items: center; width: 32px; height: 32px; padding: 6px; flex-shrink: 0; }
-.mango-assistant-microphone svg { width: 18px; height: 18px; }
-.mango-assistant .mango-assistant-microphone[aria-pressed="true"] { color: #b91c1c; background: #fee2e2; border-color: #fca5a5; }
-.mango-assistant-sound-waves { position: absolute; inset: -4px; pointer-events: none; opacity: 0; transform: scale(.8); transition: opacity 120ms, transform 100ms; }
-.mango-assistant-sound-waves svg { width: 100%; height: 100%; }
-.mango-assistant-sound-waves[data-active="true"] { opacity: calc(.45 + var(--voice-level) * .55); transform: scale(calc(.8 + var(--voice-level) * .3)); }
-.mango-assistant-sound-waves[data-active="true"] path { transform-origin: center; animation: mango-voice-wave 650ms ease-in-out infinite alternate; }
-.mango-assistant-sound-waves[data-active="true"] path + path { animation-delay: -325ms; }
-@keyframes mango-voice-wave { to { transform: scaleX(1.12); } }
-@media (prefers-reduced-motion: reduce) {
-  .mango-assistant-sound-waves { transition: none; }
-  .mango-assistant-sound-waves[data-active="true"] { opacity: 1; transform: none; }
-  .mango-assistant-sound-waves[data-active="true"] path { animation: none; }
-}
-.mango-assistant-transcript { border-bottom: 1px solid rgba(148, 163, 184, 0.25); }
 .mango-assistant-header { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 9px 10px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); font-size: 12px; }
-.mango-assistant-header .mango-assistant-clear { margin-left: auto; }
-.mango-assistant-messages { max-height: min(42vh, 360px); overflow-y: auto; overscroll-behavior: contain; padding: 12px; }
-.mango-assistant-message { margin-bottom: 12px; padding: 10px; font-size: 13px; line-height: 1.5; }
-.mango-assistant-message:last-child { margin-bottom: 0; }
-.mango-assistant-message strong { display: block; font-size: 11px; color: #64748b; margin-bottom: 3px; }
-.mango-assistant-message p { white-space: pre-wrap; overflow-wrap: anywhere; }
-.mango-assistant-question { background: #eaf0f6; border-radius: 8px; margin-left: 10%; }
-.mango-assistant-hint { color: #64748b; font-size: 12px; }
 .mango-assistant-availability { padding: 0 12px 8px; max-height: 40px; overflow-y: auto; font-size: 11px; line-height: 16px; color: #64748b; }
-.mango-assistant .mango-assistant-resource { margin-top: 5px; max-width: 100%; overflow-wrap: anywhere; color: #0e7490; text-align: left; }
-.mango-assistant-context { position: fixed; inset: 10vh max(16px, calc((100vw - 820px) / 2)); display: flex; flex-direction: column; gap: 12px; padding: 18px; border: 1px solid #cbd5e1; border-radius: 12px; background: #fff; color: #111827; box-shadow: 0 18px 60px #0f172a40; font-size: 13px; }
-.mango-assistant-context header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.mango-assistant-context header button { padding: 5px 9px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; cursor: pointer; }
-.mango-assistant-context-calls { min-height: 0; overflow-y: auto; }
-.mango-assistant-context details { margin-bottom: 12px; }
-.mango-assistant-context summary { padding: 8px 0; cursor: pointer; font-weight: 650; }
-.mango-assistant-context pre { margin: 6px 0 12px; padding: 10px; border-radius: 6px; background: #f1f5f9; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
 
 /* Lock app viewport to full-screen and prevent browser scrollbars. */
 html, body, #root {

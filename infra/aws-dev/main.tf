@@ -77,9 +77,6 @@ module "platform" {
   bootstrap_company_name = local.effective_bootstrap_company_name
   origin_verify_secret   = local.effective_origin_verify_secret
 
-  assistant_model             = var.assistant_model
-  openai_api_key_secret_arn   = var.openai_api_key_secret_arn
-  deepgram_api_key_secret_arn = var.deepgram_api_key_secret_arn
 
   nylas_client_id          = var.nylas_client_id
   nylas_api_base_url       = var.nylas_api_base_url

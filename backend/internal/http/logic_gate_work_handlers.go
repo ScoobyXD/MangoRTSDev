@@ -280,7 +280,7 @@ func (s *Server) handleLogicGateWorkNodeStateV2(w http.ResponseWriter, r *http.R
 	}
 	stop()
 
-	input := store.LogicGateNodeAssignmentMoveInput{CompanyID: companyID, LogicGateID: logicGateID, NodeID: nodeID, MutationOrigin: store.MutationOriginKanban, ExpectedNodeWork: assistantExpectedNodeWork(r)}
+	input := store.LogicGateNodeAssignmentMoveInput{CompanyID: companyID, LogicGateID: logicGateID, NodeID: nodeID, MutationOrigin: store.MutationOriginKanban}
 	if !s.requireEntityEdit(w, r, companyID, store.EntityTypeNode, nodeID, "node_not_found") || !s.requireLogicGateWorkExistingSourceEditAccess(w, r, companyID, logicGateID, nodeID) {
 		return
 	}

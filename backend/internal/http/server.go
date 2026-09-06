@@ -38,9 +38,6 @@ type BootstrapDevAdminConfig struct {
 
 type Server struct {
 	repo                                   store.Repository
-	assistant                              *mangoAssistant
-	deepgramAPIKey                         string
-	transcriptionClient                    *http.Client
 	realtimeRegistry                       *realtimeSubscriptionRegistry
 	realtimeTickets                        *realtimeTicketStore
 	realtimeBackplane                      realtime.Backplane
@@ -114,7 +111,6 @@ type Server struct {
 }
 
 type ServerOptions struct {
-	Assistant                      AssistantConfig
 	DisableAttachmentUploadCleanup bool
 	AuthValidator                  AuthTokenValidator
 	TestAuthHeaderEnabled          bool
@@ -196,9 +192,6 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 	}
 	server := &Server{
 		repo:                               repo,
-		assistant:                          newMangoAssistant(options.Assistant),
-		deepgramAPIKey:                     strings.TrimSpace(options.Assistant.DeepgramAPIKey),
-		transcriptionClient:                newTranscriptionClient(),
 		realtimeRegistry:                   newRealtimeSubscriptionRegistry(),
 		realtimeTickets:                    newRealtimeTicketStore(realtimeTicketSecret),
 		realtimeBackplane:                  options.RealtimeBackplane,
@@ -256,9 +249,6 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 }
 
 func (s *Server) Close() {
-	if s != nil && s.assistant != nil && s.assistant.stop != nil {
-		s.assistant.stop()
-	}
 	if s != nil {
 		s.realtimeSpineReady.Store(false)
 	}
@@ -294,11 +284,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v2/nodes/", s.handleNodeViewV2Subresource)
 	mux.HandleFunc("/v2/logic-gates/", s.handleLogicGateWorkV2Subresource)
 	mux.HandleFunc("/v1/me", s.handleMe)
-	mux.HandleFunc("/v1/assistant/status", s.handleAssistantStatus)
-	mux.HandleFunc("/v1/assistant/chat", s.handleAssistantChat)
-	mux.HandleFunc("/v1/assistant/transcriptions", s.handleAssistantTranscription)
-	mux.HandleFunc("/v1/assistant/trace", s.handleAssistantTrace)
-	mux.HandleFunc("/v1/assistant/result", s.handleAssistantResult)
 	mux.HandleFunc("/v1/companies", s.handleCompanies)
 	mux.HandleFunc("/v1/companies/", s.handleCompanySubresource)
 	mux.HandleFunc("/v1/invitations", s.handleInvitations)
