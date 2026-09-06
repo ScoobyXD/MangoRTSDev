@@ -105,6 +105,8 @@ resource "aws_cloudwatch_event_rule" "attachment_maintenance" {
   schedule_expression = "rate(1 day)"
   state               = "ENABLED"
   tags                = local.tags
+
+  depends_on = [aws_iam_role_policy_attachment.github_deploy_attachment_maintenance]
 }
 
 resource "aws_cloudwatch_event_target" "attachment_maintenance" {
@@ -150,6 +152,8 @@ resource "aws_cloudwatch_event_rule" "attachment_maintenance_failed" {
     }
   })
   tags = local.tags
+
+  depends_on = [aws_iam_role_policy_attachment.github_deploy_attachment_maintenance]
 }
 
 # RunTask can return HTTP 200 with placement failures and create no task event.
@@ -170,6 +174,8 @@ resource "aws_cloudwatch_event_rule" "attachment_maintenance_succeeded" {
     }
   })
   tags = local.tags
+
+  depends_on = [aws_iam_role_policy_attachment.github_deploy_attachment_maintenance]
 }
 
 resource "aws_cloudwatch_metric_alarm" "attachment_maintenance_overdue" {
