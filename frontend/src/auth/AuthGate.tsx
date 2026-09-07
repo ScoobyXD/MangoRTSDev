@@ -798,12 +798,7 @@ function LoginPage({ onChallenge, onAuthenticated, onNavigate, loadError }: { on
     await onAuthenticated();
   };
   return (
-    <AuthPanel title="Sign In / Login" onNavigate={onNavigate} error={error || loadError} wide actions={
-      <>
-        <AuthSecondaryButton type="button" disabled={busy !== null} onClick={() => onNavigate("/accept-invite")}>Accept invite</AuthSecondaryButton>
-        <AuthSecondaryButton type="button" disabled={busy !== null} onClick={() => onNavigate("/forgot-password")}>Forgot password</AuthSecondaryButton>
-      </>
-    }>
+    <AuthPanel title="Sign In / Login" onNavigate={onNavigate} error={error || loadError} wide>
       <div className="mango-auth-columns">
       <form aria-label="Sign Up" style={authFormStyle} onSubmit={async (event) => {
         event.preventDefault();
@@ -837,7 +832,10 @@ function LoginPage({ onChallenge, onAuthenticated, onNavigate, loadError }: { on
         <h1 className="mango-auth-section-title">Sign Up</h1>
         <AuthTextField label="Email" value={signupEmail} onChange={(event) => setSignupEmail(event.target.value)} type="email" placeholder="you@company.com" autoComplete="email" required disabled={busy !== null} />
         <AuthTextField label="Create password" value={signupPassword} onChange={(event) => setSignupPassword(event.target.value)} type="password" placeholder="Create password" autoComplete="new-password" required minLength={6} disabled={busy !== null} />
-        <AuthPrimaryButton disabled={busy !== null}>{busy === "signup" ? "Waiting for confirmation" : "Sign up"}</AuthPrimaryButton>
+        <div className="mango-auth-split-actions">
+          <AuthPrimaryButton disabled={busy !== null}>{busy === "signup" ? "Waiting for confirmation" : "Sign up"}</AuthPrimaryButton>
+          <AuthSecondaryButton type="button" disabled={busy !== null} onClick={() => onNavigate("/accept-invite")}>Accept invite</AuthSecondaryButton>
+        </div>
       </form>
       <form aria-label="Sign In" style={authFormStyle} onSubmit={async (event) => {
         event.preventDefault();
@@ -858,7 +856,10 @@ function LoginPage({ onChallenge, onAuthenticated, onNavigate, loadError }: { on
         <h1 className="mango-auth-section-title">Sign In</h1>
         <AuthTextField label="Email" value={email} onChange={(event) => setEmail(event.target.value)} type="email" placeholder="you@company.com" autoComplete="email" required disabled={busy !== null} />
         <AuthTextField label="Password" value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password" autoComplete="current-password" required disabled={busy !== null} />
-        <AuthPrimaryButton disabled={busy !== null}>{busy === "signin" ? "Signing in" : "Sign in"}</AuthPrimaryButton>
+        <div className="mango-auth-split-actions">
+          <AuthPrimaryButton disabled={busy !== null}>{busy === "signin" ? "Signing in" : "Sign in"}</AuthPrimaryButton>
+          <AuthSecondaryButton type="button" disabled={busy !== null} onClick={() => onNavigate("/forgot-password")}>Forgot password</AuthSecondaryButton>
+        </div>
       </form>
       </div>
       {message && <div role="status" style={authInfoMessageStyle}>{message}</div>}
@@ -1530,22 +1531,19 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
   );
 }
 
-function AuthPanel({ title, error, children, wide = false, actions, onNavigate }: { title: string; error?: string; children: React.ReactNode; wide?: boolean; actions?: React.ReactNode; onNavigate: (path: string) => void }) {
+function AuthPanel({ title, error, children, wide = false, onNavigate }: { title: string; error?: string; children: React.ReactNode; wide?: boolean; onNavigate: (path: string) => void }) {
   const [showOffer, setShowOffer] = useState(false);
   return (
     <div className="mango-auth-landing">
       <AuthWallpaper />
       <div className="mango-auth-scroll">
-        <header className="mango-auth-topbar">
-          <nav className="mango-auth-nav" aria-label="Landing navigation">
-            <button type="button" aria-pressed={!showOffer} onClick={() => {
-              setShowOffer(false);
-              if (!wide) onNavigate("/login");
-            }}>Sign In / Login</button>
-            <button type="button" aria-pressed={showOffer} onClick={() => setShowOffer(true)}>What We Offer</button>
-          </nav>
-          {actions && <div className="mango-auth-actions">{actions}</div>}
-        </header>
+        <nav className="mango-auth-nav" aria-label="Landing navigation">
+          <button type="button" aria-pressed={!showOffer} onClick={() => {
+            setShowOffer(false);
+            if (!wide) onNavigate("/login");
+          }}>Sign In / Login</button>
+          <button type="button" aria-pressed={showOffer} onClick={() => setShowOffer(true)}>What We Offer</button>
+        </nav>
         <main className="mango-auth-content">
           <section className={`mango-auth-panel${wide ? " mango-auth-panel-wide" : ""}`} aria-label={title} hidden={showOffer}>
             {!wide && <h1 className="mango-auth-section-title">{title}</h1>}
