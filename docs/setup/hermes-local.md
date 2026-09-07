@@ -81,6 +81,8 @@ Use Ctrl+C in the backend terminal. The launcher stops the shared container and 
 
 Each launcher records its own container launch ID. Cleanup verifies that label and stops the exact inspected Docker container ID, so an older or failed launcher cannot stop a newer replacement with the same shared name. Explicit `-StopExisting` also stops only the inspected owned container ID.
 
+The launcher removes its stopped container explicitly while retaining every named volume. If startup fails, it first prints the last 30 log lines from that same verified container. An early exit also reports Docker's exit code; container output remains available until this cleanup finishes.
+
 Existing per-account volumes named `mangorts-hermes-<company_id>-<user_id>` are retained and mounted directly at their matching `/data/profiles/<profile>` path inside this same container. Their files are not copied, moved, reset or assigned to another identity. The old `mango-scope.json` must match the exact pair. The shared root also records each profile's volume source and refuses a later source change, which prevents an older volume from hiding newer private state.
 
 On the first transition, `-StopExisting` can stop the selected account's owned old container and the owned shared container. If another account's old local Hermes container is still running, startup reports its name and stops. Stop that container in Docker Desktop while retaining its volume, then rerun the launcher. The launcher never starts a second Hermes gateway alongside it.
@@ -101,6 +103,9 @@ Do not delete any of these named volumes to fix a startup error: they contain na
 | Other local Hermes containers are running | Stop the named old container in Docker Desktop without removing its volume, then rerun the launcher. |
 | Active AI runs block the first shared startup | Finish or explicitly Stop those runs in the currently running Mango app before the one-time cutover. |
 | Encrypted service credentials are missing or unreadable | Restore the matching `service-seeds.dpapi` file under the original Windows user profile. Do not replace the seeds or delete the native volume. |
+| `Hermes startup failed (PermissionError)` | Check directory ownership. Hermes runs as UID/GID `10001:10001`; the shared `/data/profiles` parent must allow that user to create new membership profiles. |
+
+A failed launch with the old image can leave the shared volume's `profiles` directory owned by `root` with mode `0755`. Rebuilding the image does not change ownership inside an existing volume. If inspection confirms this exact condition, stop Hermes and correct ownership of only that parent directory to `10001:10001`. Do not recursively change private profiles or delete any stored data. The current image already creates this directory with the correct owner in a fresh volume.
 
 The launcher does not create scheduled jobs, provision cloud Hermes infrastructure, or apply live database changes. See [Hermes runtime details](../../hermes/README.md) for the native API and persistence contract.
 

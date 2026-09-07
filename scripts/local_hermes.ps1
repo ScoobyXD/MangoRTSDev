@@ -300,7 +300,7 @@ function Remove-StoppedLocalHermesContainer {
   if ($ContainerID -notmatch '^[0-9a-f]{64}$') { throw "Invalid inspected Hermes container identity." }
   & $Docker container stop --time 10 $ContainerID | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "Unable to stop the existing local Hermes container." }
-  # An interrupted Docker client may leave a stopped --rm container. Keep its volume.
+  # Remove only the stopped container; its named data volumes remain intact.
   $containerRemains = & {
     $ErrorActionPreference = 'Continue'
     & $Docker container inspect --format '{{.Id}}' $ContainerID *> $null
@@ -382,7 +382,7 @@ function Start-LocalHermes {
   # Arguments contain only fixed settings and validated UUIDs, never credentials.
   $launchID = [guid]::NewGuid().ToString('N')
   $dockerArgs = @(
-    'run', '--rm', '--interactive', '--name', $Settings.Name,
+    'run', '--interactive', '--name', $Settings.Name,
     '--label', 'mangorts.local-hermes=true', '--label', 'mangorts.hermes-gateway=shared',
     '--label', "mangorts.hermes-launch=$launchID",
     '--publish', '127.0.0.1:8642:8642', '--read-only', '--cap-drop', 'ALL',
@@ -444,7 +444,7 @@ function Start-LocalHermes {
     try {
       # One bounded startup wait; the app does not poll running AI jobs.
       do {
-        if ($process.HasExited) { throw "Hermes exited during startup. Check its startup output above." }
+        if ($process.HasExited) { throw "Hermes exited during startup (Docker exit code $($process.ExitCode))." }
         try {
           $response = $client.GetAsync("http://127.0.0.1:8642/p/$($Settings.Profile)/v1/capabilities").GetAwaiter().GetResult()
           try {
@@ -472,13 +472,13 @@ function Start-LocalHermes {
     Write-Host "Shared Hermes gateway is ready for $($Settings.Profiles.Count) Mango membership profiles."
     return $runtime
   } catch {
-    Stop-LocalHermes -Runtime $runtime
+    Stop-LocalHermes -Runtime $runtime -ShowStartupOutput
     throw
   }
 }
 
 function Stop-LocalHermes {
-  param([object]$Runtime)
+  param([object]$Runtime, [switch]$ShowStartupOutput)
   if ($null -eq $Runtime) { return }
   try {
     # A failed concurrent launch or an older launcher's finally block must not
@@ -494,13 +494,17 @@ function Stop-LocalHermes {
     if ($identity.Count -ne 2 -or $identity[0] -notmatch '^[0-9a-f]{64}$') { return }
     $labels = $identity[1] | ConvertFrom-Json
     if ($labels.'mangorts.hermes-launch' -cne $Runtime.LaunchID) { return }
-    $stopped = & {
-      $ErrorActionPreference = 'Continue'
-      & $Runtime.Settings.Docker container stop --time 10 $identity[0] *> $null
-      $LASTEXITCODE -eq 0
+    if ($ShowStartupOutput) {
+      Write-Host 'Hermes startup output (last 30 lines):'
+      & {
+        $ErrorActionPreference = 'Continue'
+        & $Runtime.Settings.Docker logs --tail 30 $identity[0] 2>&1 | ForEach-Object { Write-Host $_ }
+      }
     }
-    if (-not $stopped -and -not $Runtime.Process.HasExited) {
-      Write-Warning "Docker could not stop local Hermes. Stop container $($Runtime.Settings.Name) in Docker Desktop."
+    try {
+      Remove-StoppedLocalHermesContainer -Docker $Runtime.Settings.Docker -ContainerID $identity[0]
+    } catch {
+      Write-Warning "Docker could not clean up local Hermes. Stop and remove container $($Runtime.Settings.Name) in Docker Desktop while retaining its volumes."
     }
   } finally { $Runtime.Process.Dispose() }
   # The named /data volume is deliberately retained across backend restarts.
