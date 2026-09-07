@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createRequire } from "node:module";
+import { resolve } from "node:path";
 import React, { act } from "react";
 import { JSDOM } from "jsdom";
+import type { TiptapEditorHTMLElement } from "@tiptap/core";
 import type { ProcessMapDetailsContents } from "../../../../frontend/src/pages/process-map/ProcessMapDetails.js";
 
-test("Process Map reuses inherited typed RACI, the saved policy command, permissions, and the existing SOP document", async () => {
+test("the open Process editor preserves document identity, Step cards, inherited RACI, and read-only access", async () => {
+  const { IDBKeyRange, indexedDB } = createRequire(resolve("frontend/package.json"))("fake-indexeddb");
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: "http://process-details.test/", pretendToBeVisual: true });
   const restores: Array<() => void> = [];
   const install = (name: string, value: unknown) => {
@@ -12,43 +16,66 @@ test("Process Map reuses inherited typed RACI, the saved policy command, permiss
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
     restores.push(() => { if (prior) Object.defineProperty(globalThis, name, prior); else delete (globalThis as Record<string, unknown>)[name]; });
   };
-  for (const name of ["window", "document", "navigator", "self", "Node", "Element", "HTMLElement", "HTMLInputElement", "HTMLDivElement", "HTMLSpanElement", "HTMLButtonElement", "Event", "EventTarget", "CustomEvent", "MouseEvent", "KeyboardEvent", "FocusEvent", "MutationObserver", "localStorage", "sessionStorage"]) install(name, name === "window" || name === "self" ? dom.window : (dom.window as unknown as Record<string, unknown>)[name]);
+  for (const name of ["window", "document", "navigator", "self", "Node", "NodeFilter", "Element", "HTMLElement", "HTMLInputElement", "HTMLDivElement", "HTMLSpanElement", "HTMLButtonElement", "DocumentFragment", "DOMParser", "Event", "EventTarget", "CustomEvent", "MouseEvent", "KeyboardEvent", "FocusEvent", "InputEvent", "MutationObserver", "Range", "Selection", "localStorage", "sessionStorage"]) install(name, name === "window" || name === "self" ? dom.window : (dom.window as unknown as Record<string, unknown>)[name]);
   install("IS_REACT_ACT_ENVIRONMENT", true);
   install("getComputedStyle", dom.window.getComputedStyle.bind(dom.window));
   install("requestAnimationFrame", (callback: FrameRequestCallback) => setTimeout(() => callback(Date.now()), 0));
   install("cancelAnimationFrame", clearTimeout);
-  const requests: Array<{ path: string; method: string; options?: RequestInit }> = [];
-  const group = { company_id: "details-company", role: "responsible", principal_type: "group", principal_id: "review-team", principal_name: "Review Team", user_id: "", created_timestamp: "" };
-  const policy = { assignment_mode: "customized", effective_assignment_mode: "customized", effective_source: { resource_type: "company_explorer_folder", resource_id: "folder-one" }, gvic_assignments: [group], revision: "revision-one" };
-  let conflict = true;
-  const response = (value: unknown) => new Response(JSON.stringify(value), { status: 200, headers: { "content-type": "application/json" } });
+  install("indexedDB", indexedDB);
+  install("IDBKeyRange", IDBKeyRange);
+  const observers: Array<{ target?: Element; rootMargin: string; callback: IntersectionObserverCallback }> = [];
+  install("IntersectionObserver", class {
+    target?: Element;
+    rootMargin: string;
+    constructor(readonly callback: IntersectionObserverCallback, options: IntersectionObserverInit) { this.rootMargin = options.rootMargin ?? ""; observers.push(this); }
+    observe(target: Element) { this.target = target; }
+    disconnect() { this.target = undefined; }
+  });
+  const markNearViewport = (target: Element) => {
+    const observer = observers.find((entry) => entry.target === target && entry.rootMargin === "600px 0px");
+    assert.ok(observer);
+    observer.callback([{ target, isIntersecting: true, intersectionRatio: 1 } as IntersectionObserverEntry], observer as unknown as IntersectionObserver);
+  };
+  dom.window.HTMLElement.prototype.scrollIntoView = () => undefined;
+  dom.window.Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+  dom.window.Range.prototype.getBoundingClientRect = () => new dom.window.DOMRect();
+  const requests: Array<{ path: string; method: string }> = [];
+  const response = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
+  const body = { format: "mango-tiptap-json", schema_version: 1, document: { type: "doc", content: [{ type: "paragraph" }] } };
+  const steps = [{ process_step_id: "step-one", logic_gate_id: "new-process", name: "Prepare", position: 1000 }];
+  let failNextSave = false;
+  let holdRetrySave = false;
+  let releaseRetrySave: (() => void) | undefined;
+  let savedStepBody: unknown;
   install("fetch", async (input: string, options?: RequestInit) => {
     const url = new URL(input, "http://process-details.test");
     const method = options?.method ?? "GET";
-    requests.push({ path: url.pathname, method, options });
+    requests.push({ path: url.pathname, method });
+    if (url.pathname === "/v1/realtime/ticket") return response({});
     if (url.pathname.endsWith("/users")) return response({ users: [] });
-    if (url.pathname.endsWith("/user-groups")) return response({ groups: [{ company_id: "details-company", group_id: "review-team", name: "Review Team", position: 1000 }], members: [] });
-    if (url.pathname.endsWith("/gvic")) {
-      if (method === "PUT" && conflict) {
-        conflict = false;
-        policy.revision = "revision-two";
-        return new Response(JSON.stringify({ error: "version_conflict" }), { status: 409, headers: { "content-type": "application/json" } });
+    if (url.pathname.endsWith("/view")) return response({ can_edit: !url.pathname.includes("readonly"), logic_gate: { logic_gate_id: url.pathname.split("/")[3], header: "Procedure" }, information: [], projections: [{ information_id: "existing-sop", type: "Text box", information: "", updated_timestamp: "2026-09-05" }] });
+    if (url.pathname.endsWith("/work")) return response({ logic_gate: { logic_gate_id: url.pathname.split("/")[3], header: "Procedure" }, permissions: { can_edit: !url.pathname.includes("readonly"), can_resolve_requests: false }, steps: steps.map((step) => ({ ...step, logic_gate_id: url.pathname.split("/")[3] })), relationships: [], nodes: [] });
+    if (url.pathname.startsWith("/v1/editor-json/")) {
+      if (method === "POST") {
+        assert.equal(url.pathname, "/v1/editor-json/process_step/step-one/documents/step-one", "Step instructions use their canonical editor identity");
+        if (failNextSave) { failNextSave = false; return response({ error: "Test Step save failed" }, 500); }
+        if (holdRetrySave) await new Promise<void>((resolveSave) => { releaseRetrySave = resolveSave; });
+        const commit = JSON.parse(String(options?.body));
+        savedStepBody = commit.document;
+        return response({ operation_id: commit.operation_id, revision: 2, committed_at: "2026-09-07T12:00:00Z" });
       }
-      if (method === "PUT") return response({ ...policy, gvic_assignments: JSON.parse(String(options?.body)).gvic_assignments, revision: "revision-three" });
-      return response(policy);
+      assert.equal(method, "GET");
+      return response({ revision: 1, schema_version: 1, document: body });
     }
-    if (url.pathname.endsWith("/view")) return response({ can_edit: !url.pathname.includes("readonly"), logic_gate: { logic_gate_id: "saved-process", header: "Procedure" }, information: [], projections: [{ information_id: "existing-sop", type: "Text box", information: "", updated_timestamp: "2026-09-05" }] });
-    if (url.pathname.endsWith("/work")) return response({ logic_gate: { logic_gate_id: url.pathname.split("/")[3], header: "Procedure" }, permissions: { can_edit: !url.pathname.includes("readonly"), can_resolve_requests: false }, steps: [], relationships: [], nodes: [] });
     assert.fail(`Unexpected request ${method} ${url.pathname}`);
   });
-  const [{ createRoot }, { ProcessMapDetails }, { EDITOR_TEXT_BLOCK_TYPE }] = await Promise.all([
-    import("react-dom/client"), import("../../../../frontend/src/pages/process-map/ProcessMapDetails.js"), import("../../../../frontend/src/modules/editor/editorProjection.js"),
+  const [{ createRoot }, { ProcessMapDetails }] = await Promise.all([
+    import("react-dom/client"), import("../../../../frontend/src/pages/process-map/ProcessMapDetails.js"),
   ]);
-  assert.equal(EDITOR_TEXT_BLOCK_TYPE, "Text box");
   const root = createRoot(dom.window.document.getElementById("root")!);
   let contents: ProcessMapDetailsContents = {};
   let busy = true;
-  const render = (processID: string, isNew: boolean, folderID = "folder-one", refreshVersion = 0) => root.render(<ProcessMapDetails key={processID} apiBase="http://process-details.test" companyID="details-company" processID={processID} isNew={isNew} folderID={folderID} refreshVersion={refreshVersion} onChange={(next) => { contents = next; }} onBusyChange={(next) => { busy = next; }} />);
+  const render = (processID: string, isNew: boolean, focusStepID?: string, refreshVersion = 0) => root.render(<ProcessMapDetails key={processID} apiBase="http://process-details.test" companyID="details-company" processID={processID} isNew={isNew} steps={isNew ? steps : undefined} focusStepID={focusStepID} refreshVersion={refreshVersion} onChange={(next) => { contents = next; }} onBusyChange={(next) => { busy = next; }} />);
   const settle = async (predicate: () => boolean) => {
     const deadline = Date.now() + 3000;
     while (!predicate()) {
@@ -56,50 +83,59 @@ test("Process Map reuses inherited typed RACI, the saved policy command, permiss
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
     }
   };
-  const removeGroup = async () => {
-    const assigned = dom.window.document.querySelector<HTMLButtonElement>('button[aria-label="Responsible people and groups"]')!;
-    await act(async () => assigned.click());
-    const remove = dom.window.document.querySelector<HTMLButtonElement>('button[aria-label="Remove Review Team from Responsible"]');
-    assert.ok(remove, [...dom.window.document.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")).join(" | "));
-    await act(async () => remove.click());
-  };
+  const stepsTab = () => [...dom.window.document.querySelectorAll<HTMLButtonElement>('[aria-label="Process editor sections"] button')].find((tab) => tab.textContent === "Steps")!;
+  const editorTab = () => [...stepsTab().parentElement!.querySelectorAll<HTMLButtonElement>("button")].find((tab) => tab.textContent === "Editor")!;
+  const editorDocument = (id: string) => dom.window.document.querySelector(`[data-process-sop-document-id="${id}"]`);
   try {
     await act(async () => render("new-process", true));
-    await settle(() => !busy && !dom.window.document.querySelector<HTMLButtonElement>('[data-raci-add-principal="responsible"]')?.disabled);
-    assert.deepEqual(contents, {}, "untouched inherited assignments are omitted from creation");
-    assert.match(dom.window.document.body.textContent ?? "", /Review Team/);
-    await removeGroup();
-    assert.deepEqual(contents.gvic_assignments, [], "explicitly clearing inherited assignments sends an empty complete policy");
-    await act(async () => render("new-process", true, "folder-two"));
-    await settle(() => !busy);
-    assert.deepEqual(contents.gvic_assignments, [], "changing Folder preserves explicit user choices");
-    assert.equal(requests.some((request) => request.method !== "GET"), false, "creation does not write a policy before Save");
+    await settle(() => !busy && Boolean(editorDocument("logic-gate-overview")));
+    assert.equal(Object.hasOwn(contents, "gvic_assignments"), false, "removing RACI controls must preserve live Folder inheritance");
+    assert.equal(dom.window.document.querySelector('[data-raci-add-principal], .process-map-details__toggle'), null);
+    assert.equal(editorTab().getAttribute("aria-pressed"), "true");
+    const overview = editorDocument("logic-gate-overview");
+    const stepCard = dom.window.document.querySelector('[data-process-step-id="step-one"]');
+    assert.ok(stepCard, "the existing Step instruction card must be mounted");
+    await act(async () => render("new-process", true, "step-one"));
+    await settle(() => stepsTab().getAttribute("aria-pressed") === "true");
+    assert.equal(editorDocument("logic-gate-overview"), overview, "opening Steps preserves the overview editor and its pending text");
+    assert.equal(dom.window.document.querySelector('[data-process-step-id="step-one"]'), stepCard);
+    await act(async () => editorTab().click());
+    assert.equal(editorTab().getAttribute("aria-pressed"), "true");
+    assert.equal(dom.window.document.querySelector('[data-process-step-id="step-one"]'), stepCard, "returning to Editor preserves the Step editor");
+    assert.equal(requests.some((request) => request.method !== "GET"), false, "the new Process remains local until Save");
+
     await act(async () => render("saved-process", false));
-    await settle(() => !busy && !dom.window.document.querySelector<HTMLButtonElement>('[data-raci-add-principal="responsible"]')?.disabled);
-    await removeGroup();
-    await settle(() => !busy);
-    const write = requests.find((request) => request.method === "PUT")!;
-    assert.equal(write.path, "/v1/resources/logic_gate/saved-process/gvic");
-    assert.equal(new Headers(write.options?.headers).get("If-Match"), "revision-one");
-    assert.deepEqual(JSON.parse(String(write.options?.body)).gvic_assignments, []);
-    assert.match(dom.window.document.body.textContent ?? "", /Assignments changed elsewhere/);
-    await removeGroup();
-    await settle(() => !busy);
-    assert.equal(new Headers(requests.filter((request) => request.method === "PUT").at(-1)?.options?.headers).get("If-Match"), "revision-two", "a conflict reloads the current policy revision for the next edit");
-    const toggle = dom.window.document.querySelector<HTMLButtonElement>(".process-map-details__toggle")!;
-    await act(async () => toggle.click());
-    await settle(() => Boolean(dom.window.document.querySelector('[data-process-sop-document-id="existing-sop"]')));
-    await settle(() => requests.some((request) => request.path.endsWith("/saved-process/work")) && !dom.window.document.body.textContent?.includes("Loading steps…"));
+    await settle(() => !busy && Boolean(editorDocument("existing-sop")) && Boolean(dom.window.document.querySelector('[data-process-step-id="step-one"]')));
+    const savedEditor = editorDocument("existing-sop");
     assert.doesNotMatch(dom.window.document.body.textContent ?? "", /Could not load the Process steps/);
-    const editor = dom.window.document.querySelector('[data-process-sop-document-id="existing-sop"]');
-    group.principal_name = "Renamed Review Team";
-    const policyReads = requests.filter((request) => request.path.endsWith("/gvic")).length;
-    await act(async () => render("saved-process", false, "folder-one", 1));
-    await settle(() => requests.filter((request) => request.path.endsWith("/gvic")).length > policyReads);
-    assert.equal(dom.window.document.querySelector('[data-process-sop-document-id="existing-sop"]'), editor, "canonical policy refresh preserves the open SOP editor");
-    await act(async () => render("readonly-process", false));
+    await act(async () => render("saved-process", false, undefined, 1));
     await settle(() => !busy);
-    assert.equal(dom.window.document.querySelector<HTMLButtonElement>('[data-raci-add-principal="responsible"]')?.disabled, true, "the map respects the existing Process edit permission");
+    assert.equal(editorDocument("existing-sop"), savedEditor, "canonical refresh retains the exact existing SOP editor");
+    await act(async () => stepsTab().click());
+    const savedStep = dom.window.document.querySelector<HTMLElement>('[data-process-step-id="step-one"] [data-mango-editor-format="tiptap_json"]')!;
+    await act(async () => { markNearViewport(savedStep); savedStep.dispatchEvent(new dom.window.MouseEvent("dblclick", { bubbles: true })); });
+    await settle(() => Boolean(savedStep.querySelector(".mango-tiptap-prosemirror")));
+    const activeStep = savedStep.querySelector<TiptapEditorHTMLElement>(".mango-tiptap-prosemirror")!;
+    failNextSave = true;
+    holdRetrySave = true;
+    await act(async () => { activeStep.focus(); activeStep.editor!.commands.insertContentAt(1, "Retry these instructions."); });
+    await settle(() => Boolean(dom.window.document.querySelector(".process-map-details__error")));
+    assert.match(savedStep.textContent ?? "", /Retry these instructions/, "a failed save keeps the Step's pending instructions");
+    const retryButton = dom.window.document.querySelector<HTMLButtonElement>(".process-map-details__error button")!;
+    await act(async () => retryButton.click());
+    await settle(() => Boolean(releaseRetrySave));
+    assert.equal(busy, true, "retry keeps navigation blocked until the server acknowledges the Step save");
+    await act(async () => { releaseRetrySave!(); });
+    await settle(() => !busy);
+    assert.equal(dom.window.document.querySelector(".process-map-details__error"), null, "a successful Retry clears the Process error");
+    assert.match(JSON.stringify(savedStepBody), /Retry these instructions/, "Retry saves the original pending Step text");
+    assert.equal(requests.filter((request) => request.path.startsWith("/v1/editor-json/") && request.method === "POST").length, 2, "one failed save and one Retry use the same editor command");
+    await act(async () => render("readonly-process", false));
+    await settle(() => !busy && Boolean(editorDocument("existing-sop")));
+    const bold = dom.window.document.querySelector<HTMLButtonElement>('button[aria-label="Bold"]');
+    assert.ok(bold);
+    assert.equal(bold.disabled, true, "the map respects the existing Process edit permission");
+    assert.equal(requests.some((request) => request.path.endsWith("/gvic") || request.path.endsWith("/user-groups")), false, "the editor must not read or change hidden RACI assignments");
   } finally {
     await act(async () => root.unmount());
     dom.window.close();

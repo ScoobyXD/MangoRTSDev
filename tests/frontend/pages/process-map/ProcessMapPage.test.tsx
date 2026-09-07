@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createRequire } from "node:module";
+import { resolve } from "node:path";
 import { JSDOM } from "jsdom";
 import React, { act } from "react";
+import type { TiptapEditorHTMLElement } from "@tiptap/core";
 import type { WorkspaceProcessDefinition } from "../../../../frontend/src/modules/workspace/workspaceEntityCommands.js";
 import { readProcessMapDeckGLTestProps, resetProcessMapDeckGLTestStub } from "../../modules/process-map/processMapDeckGLTestStub.js";
 import { resetProcessMapRealtimeTestStub } from "../../modules/process-map/processMapRealtimeTestStub.js";
@@ -24,6 +27,7 @@ async function settle(condition: () => boolean, message: string) {
 let fixtureNumber = 0;
 
 async function harness(reducedMotion = false) {
+  const { IDBKeyRange, indexedDB } = createRequire(resolve("frontend/package.json"))("fake-indexeddb");
   const apiBase = `http://process-page-${++fixtureNumber}.test`;
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: apiBase, pretendToBeVisual: true });
   // Expose standard animation events so React does not register a vendor-prefixed name in jsdom.
@@ -36,11 +40,31 @@ async function harness(reducedMotion = false) {
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
     restores.push(() => { if (previous) Object.defineProperty(globalThis, name, previous); else delete (globalThis as Record<string, unknown>)[name]; });
   };
-  for (const name of ["window", "document", "navigator", "sessionStorage", "localStorage", "Node", "Text", "Element", "HTMLElement", "HTMLInputElement", "Event", "CustomEvent", "MouseEvent", "KeyboardEvent", "MutationObserver"]) {
-    install(name, name === "window" ? dom.window : (dom.window as unknown as Record<string, unknown>)[name]);
+  for (const name of ["window", "self", "document", "navigator", "sessionStorage", "localStorage", "Node", "NodeFilter", "Text", "Element", "HTMLElement", "HTMLInputElement", "DocumentFragment", "DOMParser", "Event", "EventTarget", "CustomEvent", "MouseEvent", "KeyboardEvent", "FocusEvent", "InputEvent", "MutationObserver", "Range", "Selection"]) {
+    install(name, name === "window" || name === "self" ? dom.window : (dom.window as unknown as Record<string, unknown>)[name]);
   }
   install("getComputedStyle", dom.window.getComputedStyle.bind(dom.window));
   install("IS_REACT_ACT_ENVIRONMENT", true);
+  install("requestAnimationFrame", (callback: FrameRequestCallback) => setTimeout(() => callback(Date.now()), 0));
+  install("cancelAnimationFrame", clearTimeout);
+  install("indexedDB", indexedDB);
+  install("IDBKeyRange", IDBKeyRange);
+  const observers: Array<{ target?: Element; rootMargin: string; callback: IntersectionObserverCallback }> = [];
+  install("IntersectionObserver", class {
+    target?: Element;
+    rootMargin: string;
+    constructor(readonly callback: IntersectionObserverCallback, options: IntersectionObserverInit = {}) { this.rootMargin = options.rootMargin ?? ""; observers.push(this); }
+    observe(target: Element) { this.target = target; }
+    disconnect() { this.target = undefined; }
+  });
+  const markNearViewport = (target: Element) => {
+    const observer = observers.find((entry) => entry.target === target && entry.rootMargin === "600px 0px");
+    assert.ok(observer);
+    observer.callback([{ target, isIntersecting: true, intersectionRatio: 1 } as IntersectionObserverEntry], observer as unknown as IntersectionObserver);
+  };
+  dom.window.HTMLElement.prototype.scrollIntoView = () => undefined;
+  dom.window.Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+  dom.window.Range.prototype.getBoundingClientRect = () => new dom.window.DOMRect();
   resetProcessMapDeckGLTestStub();
   resetProcessMapRealtimeTestStub();
   const folders = [
@@ -51,14 +75,19 @@ async function harness(reducedMotion = false) {
   dom.window.addEventListener(EVENT_COMPANY_EXPLORER_PROCESS_CREATED, (event) => revealed.push((event as CustomEvent).detail));
   const workReads: Array<{ path: string; cache?: RequestCache }> = [];
   const saved = new Map<string, Batch>();
-  const state = { companyID, active: true, batchStatus: 200, commitThenFail: false, recoveryFolderID: childFolderID, holdBatch: false, releaseBatch: null as (() => void) | null };
+  const state = { companyID, active: true, batchStatus: 200, editorSaveStatus: 200, commitThenFail: false, recoveryFolderID: childFolderID, holdBatch: false, releaseBatch: null as (() => void) | null };
   install("fetch", async (input: string, options?: RequestInit) => {
     const url = new URL(input, apiBase);
     const request = { path: url.pathname, method: options?.method ?? "GET", body: options?.body ? JSON.parse(String(options.body)) : {} };
     requests.push(request);
     if (/^\/v1\/companies\/[^/]+\/users$/.test(request.path)) return reply({ users: [] });
-    if (/^\/v1\/companies\/[^/]+\/user-groups$/.test(request.path)) return reply({ groups: [], members: [] });
-    if (/^\/v1\/resources\/(company_explorer_folder|logic_gate)\/[^/]+\/gvic$/.test(request.path)) return reply({ assignment_mode: "customized", effective_assignment_mode: "customized", revision: "1", gvic_assignments: [] });
+    if (request.path.startsWith("/v1/editor-json/")) {
+      if (request.method === "POST") return state.editorSaveStatus === 200
+        ? reply({ operation_id: request.body.operation_id, revision: 2, committed_at: "2026-09-07T12:00:00Z" })
+        : reply({ error: "Could not save Process instructions" }, state.editorSaveStatus);
+      assert.equal(request.method, "GET");
+      return reply({ revision: 1, schema_version: 1, document: { format: "mango-tiptap-json", schema_version: 1, document: { type: "doc", content: [{ type: "paragraph" }] } } });
+    }
     if (request.path === "/v1/process-map/scene" || request.path === "/v1/process-map/changes") return reply({ bounds: null, process_map_read_version: 1, tile_size: 256, min_tile_zoom: 0, max_tile_zoom: 22, validated_tiles: [], protected_geometry_changed: false });
     const tile = request.path.match(/^\/v1\/process-map\/tiles\/(\d+)\/(-?\d+)\/(-?\d+)$/);
     if (tile) return reply({ z: Number(tile[1]), x: Number(tile[2]), y: Number(tile[3]), process_map_read_version: 1, placements: [], traces: [] });
@@ -181,7 +210,7 @@ async function harness(reducedMotion = false) {
   };
   const dispose = async () => { await act(async () => root.unmount()); resetProcessMapDeckGLTestStub(); resetProcessMapRealtimeTestStub(); restores.reverse().forEach((restore) => restore()); dom.window.close(); };
   await render();
-  return { dom, container, state, requests, workReads, opened, revealed, render, findButton, button, click, input, key, renameStep, pointer, animationEnd, finishExit, setReducedMotion, cards, preventsUnload, mutations, batches, reopenSaved, chooseFolder, start, dispose };
+  return { dom, container, state, requests, workReads, opened, revealed, render, findButton, button, click, input, key, renameStep, pointer, animationEnd, finishExit, setReducedMotion, cards, preventsUnload, mutations, batches, reopenSaved, chooseFolder, start, dispose, markNearViewport };
 }
 
 test("Process Map authors Steps and connections locally and saves their exact identities and geometry in one batch", async () => {
@@ -194,6 +223,9 @@ test("Process Map authors Steps and connections locally and saves their exact id
     assert.equal(h.cards().length, 0);
     assert.deepEqual(h.opened, []);
     assert.equal(h.mutations().length, 0);
+    assert.equal(h.container.querySelector(".process-map-page__actions, .process-map-details__toggle, [data-raci-add-principal]"), null);
+    assert.ok(h.container.querySelector('[aria-label="Process SOP editor"]'), "the Process editor opens without a disclosure button");
+    assert.match(h.container.querySelector(".process-step-map__empty")!.textContent!, /Start this process with a right-click or by pressing the plus button\./);
     assert.equal(h.button("Save Process").disabled, true);
     await h.input('[placeholder="Untitled Process"]', "  Order fulfilment  ");
     assert.equal(h.button("Save Process").disabled, true, "a Process requires an existing Folder");
@@ -234,6 +266,7 @@ test("Process Map authors Steps and connections locally and saves their exact id
     assert.equal(h.batches().length, 1);
     assert.equal(h.mutations().length, 1, "Save must not issue placement or individual Step writes");
     const batch = h.batches()[0], definition = batch.process_definition;
+    assert.equal(Object.hasOwn(definition, "gvic_assignments"), false, "Save must omit RACI overrides to retain live Folder inheritance");
     assert.deepEqual(Object.keys(batch).sort(), ["company_id", "entity_kind", "folder_id", "items", "mutation_origin", "process_definition", "relationships"]);
     assert.equal(batch.company_id, companyID);
     assert.equal(batch.entity_kind, "logic_gate");
@@ -260,7 +293,42 @@ test("Process Map authors Steps and connections locally and saves their exact id
     assert.deepEqual(h.opened, [], "opening the Process on the map does not open Board / SOP");
     assert.ok(h.container.querySelector('[aria-label="Process outline: Order fulfilment"]'), "saving must retain the named Process boundary");
     await h.click("Open Board / SOP");
+    await settle(() => h.opened.length === 1, "Open Board / SOP did not finish flushing the editors");
     assert.deepEqual(h.opened, [{ id: definition.logic_gate_id, label: "Order fulfilment" }]);
+  } finally { await h.dispose(); }
+});
+
+test("Open Board / SOP flushes pending instructions and preserves the map when an earlier save failed", async () => {
+  const h = await harness();
+  try {
+    await h.start();
+    await h.input('[placeholder="Untitled Process"]', "Save before opening Board");
+    await h.chooseFolder();
+    await h.click("Save Process");
+    await settle(() => Boolean(h.container.querySelector('.process-map-focus.is-exiting')), "Save did not return to the company map");
+    await h.finishExit();
+    await h.reopenSaved();
+    const overview = h.container.querySelector<HTMLElement>('[data-process-sop-document-id="logic-gate-overview"]')!;
+    assert.ok(overview);
+    await act(async () => { h.markNearViewport(overview); });
+    await act(async () => { overview.dispatchEvent(new h.dom.window.MouseEvent("dblclick", { bubbles: true })); });
+    await settle(() => Boolean(overview.querySelector(".mango-tiptap-prosemirror")), "saved overview did not activate");
+    const activeEditor = overview.querySelector<TiptapEditorHTMLElement>(".mango-tiptap-prosemirror")!;
+    h.state.editorSaveStatus = 500;
+    await act(async () => { activeEditor.focus(); activeEditor.editor!.commands.insertContentAt(1, "Keep these Process instructions."); });
+    await settle(() => Boolean(h.container.querySelector(".process-map-details__error")) && h.findButton("Open Board / SOP")?.disabled === false, "the failed autosave did not leave recovery controls available");
+    await h.click("Open Board / SOP");
+    await settle(() => h.findButton("Open Board / SOP")?.disabled === false, "the failed flush did not restore the Open Board control");
+    assert.deepEqual(h.opened, [], "an unsuccessful flush must not open a second editor with unsaved instructions");
+    assert.ok(h.container.querySelector('[aria-label="Saved Process map"]'));
+    assert.match(overview.textContent ?? "", /Keep these Process instructions/);
+    h.state.editorSaveStatus = 200;
+    await h.click("Open Board / SOP");
+    await settle(() => h.opened.length === 1, "the Board did not open after a successful instruction save");
+    const writes = h.requests.filter((request) => request.path.startsWith("/v1/editor-json/") && request.method === "POST");
+    assert.ok(writes.length >= 3, "the action must flush again after the initial failed autosave");
+    assert.match(JSON.stringify(writes.at(-1)!.body.document), /Keep these Process instructions/);
+    assert.equal(h.opened[0].id, h.batches()[0].process_definition.logic_gate_id);
   } finally { await h.dispose(); }
 });
 
@@ -538,7 +606,7 @@ test("Page Create Folder uses the canonical Folder POST and stays on the company
   } finally { await h.dispose(); }
 });
 
-test("one creation card and Hover mode remain available from the company map through draft and saved Step creation", async () => {
+test("the company creation card gives way to the Process editor and each new Step opens its instruction card", async () => {
   const h = await harness();
   const actions = () => {
     const cards = [...h.container.querySelectorAll<HTMLElement>(".process-map-page__actions")].filter((card) => !card.closest('[aria-hidden="true"], [inert]'));
@@ -549,6 +617,15 @@ test("one creation card and Hover mode remain available from the company map thr
     assert.ok(h.container.querySelector(".process-map-page__canvas")!.contains(cards[0]));
     return hover;
   };
+  const focusedActions = () => {
+    assert.equal(h.container.querySelector(".process-map-page__actions"), null, "focused Processes omit the company action card");
+    assert.equal(h.findButton("+ Create Folder"), undefined);
+    assert.equal(h.findButton("+ Create Process"), undefined);
+    assert.equal(h.button("+ Create Step").disabled, false);
+    const tabs = [...h.container.querySelectorAll<HTMLButtonElement>('[aria-label="Process editor sections"] button')];
+    assert.equal(tabs.find((tab) => tab.textContent === "Steps")?.getAttribute("aria-pressed"), "true", "creating a Step opens the Steps tab");
+    assert.equal(h.container.querySelectorAll("[data-process-step-id]").length, h.cards().length, "each canonical Step has its existing instruction card");
+  };
   try {
     const hover = actions();
     assert.equal(hover.checked, false);
@@ -556,9 +633,7 @@ test("one creation card and Hover mode remain available from the company map thr
     assert.equal(h.button("+ Create Process").disabled, false);
     await act(async () => hover.click());
     await h.start(true);
-    assert.equal(actions().checked, true);
-    assert.equal(h.button("+ Create Folder").disabled, true);
-    assert.equal(h.button("+ Create Process").disabled, true);
+    focusedActions();
     assert.equal(h.container.querySelector('[placeholder="Untitled Process"]'), null, "a new draft starts with a compact filename, not a large name field");
     assert.equal(h.button("Name Process").firstChild!.textContent, "Untitled Process");
     await h.input('[placeholder="Untitled Process"]', "Shipping");
@@ -567,6 +642,7 @@ test("one creation card and Hover mode remain available from the company map thr
     await h.chooseFolder();
     const firstStepID = h.cards()[0].dataset.stepMapId;
     await h.click("+ Create Step");
+    focusedActions();
     assert.equal(h.cards().length, 2);
     assert.equal(h.cards()[0].dataset.stepMapId, firstStepID, "the persistent control must add to the current draft");
     assert.equal(h.dom.window.document.querySelector('[role="dialog"]'), null, "Create Step must not replace the current Process");
@@ -577,31 +653,27 @@ test("one creation card and Hover mode remain available from the company map thr
     assert.equal(actions().checked, true);
     await h.reopenSaved();
     await settle(() => Boolean(h.container.querySelector('[aria-label="Saved Process map"]')) && h.findButton("+ Create Step")?.disabled === false, "saved Step creation did not become available");
-    assert.equal(actions().checked, true);
-    assert.equal(h.button("+ Create Folder").disabled, true);
-    assert.equal(h.button("+ Create Process").disabled, true);
+    assert.equal(h.container.querySelector(".process-map-page__actions"), null);
     const processID = h.batches()[0].process_definition.logic_gate_id;
     await h.click("+ Create Step");
     await settle(() => h.cards().length === 3 && h.findButton("+ Create Step")?.disabled === false, "saved creation card did not add a Step");
     assert.equal(h.cards()[0].dataset.stepMapId, firstStepID);
     assert.equal(h.batches().length, 1, "adding a saved Step must not create another Process");
     assert.deepEqual(h.mutations().at(-1), { path: `/v2/logic-gates/${processID}/steps`, method: "POST", body: { company_id: companyID, name: "New step" } });
-    assert.equal(actions().checked, true);
+    focusedActions();
     assert.deepEqual(h.opened, []);
   } finally { await h.dispose(); }
 });
 
-test("Folder and Process creation stay disabled inside a draft and become available again on the company map", async () => {
+test("Folder and Process creation disappear inside a draft and return on the company map", async () => {
   const h = await harness();
   try {
     await h.start(true);
     await h.input('[placeholder="Untitled Process"]', "Order fulfilment");
     await h.chooseFolder();
     const stepID = h.cards()[0].dataset.stepMapId;
-    assert.equal(h.button("+ Create Folder").disabled, true);
-    assert.equal(h.button("+ Create Process").disabled, true);
-    await h.click("+ Create Folder");
-    await h.click("+ Create Process");
+    assert.equal(h.findButton("+ Create Folder"), undefined);
+    assert.equal(h.findButton("+ Create Process"), undefined);
     assert.equal(h.container.querySelector('[role="dialog"]'), null);
     assert.equal(h.cards()[0].dataset.stepMapId, stepID);
     assert.equal(h.button("Name Process").firstChild!.textContent, "Order fulfilment");

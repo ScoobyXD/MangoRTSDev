@@ -20,7 +20,7 @@ type Request = { path: string; method: string; body: Record<string, any> };
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 async function flush() { await act(async () => { for (let index = 0; index < 16; index += 1) await Promise.resolve(); }); }
 
-async function harness(isNew = false, normalizeZoom = true) {
+async function harness(isNew = false, normalizeZoom = true, authoring = false) {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: "http://localhost/", pretendToBeVisual: true });
   const restores: Array<() => void> = [];
   const install = (name: string, value: unknown) => {
@@ -73,6 +73,7 @@ async function harness(isNew = false, normalizeZoom = true) {
   const root = createRoot(container);
   const localCalls: string[] = [];
   const busyStates: boolean[] = [];
+  const createdStepIDs: string[] = [];
   const commands: ProcessStepMapCommands = {
     readLayout: async () => state.layout,
     saveLayout: async (layout) => {
@@ -111,7 +112,7 @@ async function harness(isNew = false, normalizeZoom = true) {
   const onBusyChange = (busy: boolean) => busyStates.push(busy);
   const renderActions = ({ createStep, disabled }: ProcessStepMapActions) => <div aria-label="Canvas actions"><button type="button" disabled={disabled} onClick={createStep}>Create Step</button></div>;
   const render = () => {
-    const props = { steps: [...state.steps], relationships: [...state.relationships], canEdit: state.canEdit, onChanged: render, onBusyChange, processName: "Order Process", hoverModeEnabled: state.hoverModeEnabled, renderActions };
+    const props = { steps: [...state.steps], relationships: [...state.relationships], canEdit: state.canEdit, onChanged: render, onBusyChange, onStepCreated: (stepID: string) => createdStepIDs.push(stepID), authoring, processName: "Order Process", hoverModeEnabled: state.hoverModeEnabled, renderActions };
     root.render(isNew
       ? <ProcessStepMapEditor key={state.processID} {...props} commands={commands} saveMode="new" />
       : <ProcessStepMap apiBase="http://localhost" companyID="company" processID={state.processID} {...props} />);
@@ -143,7 +144,7 @@ async function harness(isNew = false, normalizeZoom = true) {
   const key = async (element: Element, value: string) => { await act(async () => element.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true }))); await flush(); };
   const writes = () => requests.filter((request) => request.method === "PUT");
   const dispose = async () => { await act(async () => root.unmount()); restores.reverse().forEach((restore) => restore()); dom.window.close(); };
-  return { dom, container, state, requests, localCalls, busyStates, mount, render, button, click, input, doubleClick, pointer, key, writes, dispose };
+  return { dom, container, state, requests, localCalls, busyStates, createdStepIDs, mount, render, button, click, input, doubleClick, pointer, key, writes, dispose };
 }
 
 function cameraFixture(h: Awaited<ReturnType<typeof harness>>) {
@@ -512,6 +513,7 @@ test("canvas creates and names Steps inline without inspectors or separate zoom 
     assert.equal(h.container.querySelector(".process-step-map__zoom"), null);
     await h.click("Create Step");
     assert.equal(h.requests.filter((request) => request.method === "POST" && request.path.endsWith("/steps")).length, 1);
+    assert.deepEqual(h.createdStepIDs, ["new"]);
     assert.ok(h.container.querySelector('[data-step-map-id="new"].is-selected'));
     assert.equal(h.container.querySelector('[aria-label="Selected Step"]'), null);
     const step = h.container.querySelector<HTMLElement>('[data-step-map-id="new"]')!;
@@ -545,11 +547,42 @@ test("focused canvas context menus create Steps without offering Folder or Proce
     assert.ok(menu);
     const items = [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
     assert.deepEqual(items.map((item) => item.textContent), ["Create Step"]);
+    await h.pointer(items[0], "pointerdown", 410, 310);
+    assert.ok(h.dom.window.document.querySelector('[aria-label="Process map creation"]'), "pressing a menu action must keep it available for the click");
     await act(async () => items[0].click());
     await flush();
     assert.ok(h.container.querySelector('[data-step-map-id="new"] input[aria-label="Step name"]'));
     assert.deepEqual(h.localCalls, ["create"]);
+    assert.deepEqual(h.createdStepIDs, ["new"]);
     assert.deepEqual(h.requests, []);
+  } finally { await h.dispose(); }
+});
+
+test("outside pointer presses dismiss map menus even when the canvas or Step stops propagation", async () => {
+  const h = await harness(true);
+  try {
+    await h.mount();
+    const viewport = h.container.querySelector(".process-step-map__viewport")!;
+    await h.pointer(viewport, "contextmenu", 400, 300);
+    await h.pointer(viewport, "pointerdown", 200, 150);
+    assert.equal(h.dom.window.document.querySelector('[aria-label="Process map creation"]'), null);
+    await h.pointer(viewport, "pointerup", 200, 150);
+    await h.pointer(viewport, "contextmenu", 400, 300);
+    await h.pointer(h.button("Move Receive"), "pointerdown", 100, 100);
+    assert.equal(h.dom.window.document.querySelector('[aria-label="Process map creation"]'), null);
+    await h.key(viewport, "Escape");
+    assert.deepEqual(h.localCalls, []);
+  } finally { await h.dispose(); }
+});
+
+test("failed Step creation does not notify the editor of a created Step", async () => {
+  const h = await harness();
+  try {
+    h.state.customFetch = (request) => request.method === "POST" && request.path.endsWith("/steps") ? Promise.resolve(response({ error: "Cannot create Step" }, 500)) : null;
+    await h.mount();
+    await h.click("Create Step");
+    assert.deepEqual(h.createdStepIDs, []);
+    assert.ok(h.container.querySelector('[role="alert"]'));
   } finally { await h.dispose(); }
 });
 
@@ -1119,4 +1152,49 @@ test("initial Process framing leaves room around the outline and never rewrites 
     await flush();
     assert.equal(canvas.style.transform, moved, "refresh never resets a camera the user moved");
   } finally { await h.dispose(); }
+});
+
+test("authoring frames have equal initial margins for empty and saved Processes and retain world size while navigating", async () => {
+  for (const isNew of [true, false]) {
+    const h = await harness(isNew, false, true);
+    try {
+      if (isNew) {
+        h.state.steps = [];
+        h.state.relationships = [];
+        h.state.layout = { revision: 0, steps: [], routes: [] };
+      }
+      const before = structuredClone(h.state.layout);
+      h.dom.window.document.head.innerHTML = '<style>.process-step-map__viewport { padding: 24px; }</style>';
+      Object.defineProperties(h.dom.window.HTMLElement.prototype, {
+        clientWidth: { configurable: true, get() { return this.classList.contains("process-step-map__viewport") ? 1200 : 0; } },
+        clientHeight: { configurable: true, get() { return this.classList.contains("process-step-map__viewport") ? 800 : 0; } },
+      });
+      await h.mount();
+      assert.ok(h.container.querySelector(".process-step-map--authoring"));
+      const viewport = h.container.querySelector<HTMLElement>(".process-step-map__viewport")!;
+      const canvas = h.container.querySelector<HTMLElement>(".process-step-map__canvas")!;
+      const extent = canvas.parentElement!;
+      const width = Number.parseFloat(extent.style.width), height = Number.parseFloat(extent.style.height);
+      const transform = canvas.style.transform.match(/^translate\(([-\d.e+]+)px, ([-\d.e+]+)px\) scale\(([-\d.e+]+)\)$/)!;
+      const x = Number(transform[1]), y = Number(transform[2]), zoom = Number(transform[3]);
+      near(24 + x, 1200 - (24 + x + width * zoom), "left and right frame margins must match");
+      near(24 + y, 800 - (24 + y + height * zoom), "top and bottom frame margins must match");
+      near(24 + x, 24 + y, "horizontal and vertical frame margins must match");
+      assert.equal(extent.style.minWidth, "");
+      assert.equal(extent.style.minHeight, "");
+      if (isNew) assert.match(h.container.textContent ?? "", /Start this process with a right-click or by pressing the plus button/);
+      await h.pointer(viewport, "pointerdown", 100, 100);
+      await h.pointer(viewport, "pointerup", 130, 120);
+      await act(async () => viewport.dispatchEvent(new h.dom.window.WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: 300, clientY: 250, deltaY: -100 })));
+      const navigated = canvas.style.transform;
+      await act(async () => h.render());
+      await flush();
+      assert.equal(canvas.style.transform, navigated, "refresh must preserve navigation");
+      near(Number.parseFloat(extent.style.width), width, "zoom must not resize the frame in world space");
+      near(Number.parseFloat(extent.style.height), height);
+      assert.deepEqual(h.state.layout, before);
+      assert.equal(h.writes().length, 0);
+      assert.deepEqual(h.localCalls, []);
+    } finally { await h.dispose(); }
+  }
 });

@@ -20,13 +20,14 @@ export type LogicGateTiptapEditorSurfaceProps = Omit<MangoTiptapEditorProps, "re
   apiBase: string;
   steps?: readonly ProcessStep[];
   onStepBodyChange?: (stepID: string, body: MangoTiptapDocument) => void;
+  section?: "overview" | "steps";
   focusInformationID?: string;
   focusMentionUserID?: string;
   focusRequestID?: number;
 };
 
 export const LogicGateTiptapEditorSurface: React.FC<LogicGateTiptapEditorSurfaceProps> = ({
-  apiBase, steps: localSteps, onStepBodyChange, focusInformationID, focusMentionUserID, focusRequestID,
+  apiBase, steps: localSteps, onStepBodyChange, section, focusInformationID, focusMentionUserID, focusRequestID,
   leadingContent, className, style, onSaveStateChange, onFocus, ...props
 }) => {
   const { companyID, resourceID: processID, documentID, saveMode = "server" } = props;
@@ -109,6 +110,10 @@ export const LogicGateTiptapEditorSurface: React.FC<LogicGateTiptapEditorSurface
     setActiveDocument((current) => documentIDs.has(current) ? current : documentID);
     publishSaveState();
   }, [documentID, documentIDs, publishSaveState]);
+  useEffect(() => {
+    if (section === "overview") setActiveDocument(documentID);
+    else if (section === "steps") setActiveDocument((current) => current !== documentID && documentIDs.has(current) ? current : steps[0]?.process_step_id ?? documentID);
+  }, [section, documentID, documentIDs, steps]);
   const attachmentContext = props.attachmentContext ?? {
     apiBase, companyID, resourceType: "logic_gate" as const, resourceID: processID, informationID: documentID,
     editorSurface: "logic_gate_editor" as const, requestJSON: props.requestJSON, onError: props.onError,
@@ -131,16 +136,19 @@ export const LogicGateTiptapEditorSurface: React.FC<LogicGateTiptapEditorSurface
 
   if (unavailable) return <div className="mango-process-instructions" style={style}><div role="alert" className="mango-process-instructions__error">This Process is unavailable.</div></div>;
 
-  return <div ref={rootRef} className={["mango-process-instructions", className].filter(Boolean).join(" ")} style={style}>
+  return <div ref={rootRef} className={["mango-process-instructions", className].filter(Boolean).join(" ")} style={style} data-process-editor-section={section}>
     {leadingContent}
+    <div hidden={section === "steps"}>
     <LazyMangoTiptapEditor {...props} resourceType="logic_gate" ariaLabel="Process editor"
       {...documentCallbacks(documentID)}
       editable={canEdit}
-      formattingControllerActive={activeDocument === documentID}
+      formattingControllerActive={section !== "steps" && activeDocument === documentID}
       onFocus={() => { setActiveDocument(documentID); onFocus?.(); }} />
+    </div>
     {loadError && <div role="alert" className="mango-process-instructions__error">{loadError}</div>}
     {saveMode !== "local" && !snapshot && !loadError && <div role="status" className="mango-process-instructions__loading">Loading steps…</div>}
-    <div className="mango-process-instructions__steps">
+    <div className="mango-process-instructions__steps" hidden={section === "overview"}>
+      {section === "steps" && steps.length === 0 && <p className="mango-process-instructions__loading">Start this process with a right-click or by pressing the plus button.</p>}
       {steps.map((step, index) => <section key={step.process_step_id} className="mango-process-instructions__step" aria-label={`Step ${index + 1}: ${step.name}`} data-process-step-id={step.process_step_id}>
         <div className="mango-process-instructions__heading">
           <h3><span className="mango-process-instructions__number">{index + 1}</span>{step.name}</h3>
@@ -153,7 +161,7 @@ export const LogicGateTiptapEditorSurface: React.FC<LogicGateTiptapEditorSurface
           editable={canEdit}
           ariaLabel="Step instructions" placeholder="Write instructions for this step…"
           style={{ minHeight: 112 }} attachmentContext={attachmentContext} mentionUsers={props.mentionUsers}
-          formattingControllerActive={activeDocument === step.process_step_id}
+          formattingControllerActive={section !== "overview" && activeDocument === step.process_step_id}
           onFocus={() => { setActiveDocument(step.process_step_id); onFocus?.(); }}
           {...documentCallbacks(step.process_step_id)}
           onEntityLink={props.onEntityLink} onEntityOpen={props.onEntityOpen}

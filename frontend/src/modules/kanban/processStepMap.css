@@ -37,6 +37,8 @@
 .process-step-map__waypoint { position:absolute; width:16px; height:16px; transform:translate(-50%,-50%); padding:0; border:2px solid white; border-radius:4px; background:#237abc; box-shadow:0 1px 4px #17477555; cursor:move; touch-action:none; z-index:2; }
 .process-step-map__process-outline { position:absolute; inset:0; box-sizing:border-box; border:2px solid #19f07aeb; border-radius:3px; pointer-events:none; }
 .process-step-map__process-outline > span { position:absolute; top:0; left:24px; transform:translateY(-50%); max-width:calc(100% - 48px); box-sizing:border-box; padding:0 10px; background:#fff; color:#1e293b; font-size:13px; font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.process-step-map--authoring .process-step-map__viewport { padding:24px; }
+.process-step-map--authoring .process-step-map__process-outline { border-color:#22d3ee; }
 .process-step-map__empty { position:absolute; left:40px; top:40px; max-width:280px; color:#63738a; font-size:13px; line-height:1.6; }
 .process-step-map__status { position:absolute; z-index:5; background:rgba(255,255,255,.86); box-shadow:0 6px 28px #26344914; backdrop-filter:blur(16px); border:1px solid rgba(223,228,236,.7); border-radius:14px; left:16px; bottom:16px; max-width:calc(100% - 32px); padding:9px 12px; box-sizing:border-box; color:#63738a; font-size:11px; }
 .process-step-map__status.is-hidden { width:1px; height:1px; margin:-1px; padding:0; border:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
@@ -55,6 +57,7 @@
 .process-step-map__hover-preview { position:absolute; top:calc(100% + 10px); left:0; z-index:4; width:max-content; max-width:260px; padding:10px 12px; border-radius:10px; background:rgba(255,255,255,.94); box-shadow:0 6px 24px #2634491f; color:#273449; font-size:12px; font-weight:650; overflow-wrap:anywhere; pointer-events:none; }
 .process-step-map__hover-preview span { display:block; margin-top:4px; color:#63738a; font-size:11px; font-weight:400; }
 @media (max-width:700px) {
+  .process-step-map--authoring .process-step-map__viewport { padding:16px; }
   .process-step-map__viewport { padding:100px 12px 12px; }
   .process-step-map__status { left:12px; bottom:12px; max-width:calc(100% - 24px); }
   .process-step-map__error, .process-step-map__confirm { top:100px; left:12px; max-width:calc(100% - 24px); }
