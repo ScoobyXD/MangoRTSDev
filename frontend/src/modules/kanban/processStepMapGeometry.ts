@@ -9,6 +9,8 @@ export type ProcessStepMapLayout = { revision: number; steps: StepMapBox[]; rout
 export const STEP_MAP_GRID = 16;
 export const STEP_MAP_MIN_WIDTH = 112;
 export const STEP_MAP_MIN_HEIGHT = 56;
+export const STEP_MAP_DEFAULT_WIDTH = 256;
+export const STEP_MAP_DEFAULT_HEIGHT = 80;
 export const STEP_MAP_MAX_SIZE = 10000;
 export const STEP_MAP_MAX_COORDINATE = 1000000;
 
@@ -27,7 +29,7 @@ export function completeStepMapLayout(layout: ProcessStepMapLayout, steps: reado
     if (savedIDs.has(step.process_step_id)) continue;
     let box: StepMapBox;
     do {
-      box = { process_step_id: step.process_step_id, x: 64 + (slot % 4) * 288, y: 64 + Math.floor(slot / 4) * 208, width: STEP_MAP_MIN_WIDTH, height: STEP_MAP_MIN_HEIGHT };
+      box = { process_step_id: step.process_step_id, x: 64 + (slot % 4) * 288, y: 64 + Math.floor(slot / 4) * 208, width: STEP_MAP_DEFAULT_WIDTH, height: STEP_MAP_DEFAULT_HEIGHT };
       slot += 1;
     } while (boxes.some((other) => box.x < other.x + other.width + 16 && box.x + box.width + 16 > other.x && box.y < other.y + other.height + 16 && box.y + box.height + 16 > other.y));
     boxes.push(box);

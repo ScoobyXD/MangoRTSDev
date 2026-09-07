@@ -3,6 +3,7 @@ import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { useAppFloatingMenuDismissal } from "../../app/AppModalPortal.js";
 import { NODE_ICON_GRADIENT_END, NODE_ICON_GRADIENT_START } from "../../icons/EntityIcons.js";
 import { APIHTTPError, isAbortError } from "../api/requestJSON.js";
+import { readMangoTiptapDocumentText } from "../editor/tiptap/mangoTiptapDocument.js";
 import { createProcessStep, createProcessStepRelationship, deleteProcessStep, deleteProcessStepRelationship, updateProcessStep, type ProcessStepMutationResult } from "./kanbanApi.js";
 import type { ProcessStep, ProcessStepRelationship } from "./processWork.js";
 import { completeStepMapLayout, defaultStepMapRoute, moveStepMapBox, snapStepMapCoordinate, stepMapAnchors, stepMapBounds, stepMapPath, stepMapSequence, STEP_MAP_GRID, type ProcessStepMapLayout, type StepMapBox, type StepMapPoint, type StepMapResizeHandle } from "./processStepMapGeometry.js";
@@ -162,8 +163,9 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
     return () => { mounted.current = false; readGeneration.current += 1; readController.current?.abort(); gesture.current = null; current.current.onBusyChange?.(false); };
   }, []);
   useEffect(() => { onBusyChange?.(loading || busy || gestureActive); }, [onBusyChange, loading, busy, gestureActive]);
-  // The board refreshes these canonical arrays on Process realtime events, including layout changes.
-  useEffect(() => { void load(); }, [load, steps, relationships]);
+  const stepIDs = steps.map((step) => step.process_step_id).join(",");
+  // Canonical Process refreshes replace relationships, including for layout changes; text edits do not.
+  useEffect(() => { void load(); }, [load, stepIDs, relationships]);
   useEffect(() => {
     if (canEdit) return;
     if (editingRef.current) setName(current.current.steps.find((step) => step.process_step_id === editingRef.current)?.name ?? "");
@@ -181,6 +183,7 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
   const boxes = useMemo(() => new Map(display.steps.map((box) => [box.process_step_id, box])), [display.steps]);
   const sequence = useMemo(() => stepMapSequence(display.steps, relationships), [display.steps, relationships]);
   const stepByID = useMemo(() => new Map(steps.map((step) => [step.process_step_id, step])), [steps]);
+  const stepPreviews = useMemo(() => new Map(steps.map((step) => [step.process_step_id, readMangoTiptapDocumentText(step.body_json).replace(/\s+/g, " ").trim()])), [steps]);
   const routes = useMemo(() => relationships.flatMap((edge) => {
     const source = boxes.get(edge.source.resource_id), target = boxes.get(edge.target.resource_id);
     if (!source || !target) return [];
@@ -486,7 +489,7 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
                 event.stopPropagation();
                 if (event.key === "Enter" || event.key === "Escape") { event.preventDefault(); finishRename(event.key === "Escape"); event.currentTarget.closest<HTMLElement>("article")?.focus(); }
               }} /> : <button className="process-step-map__step-title" type="button" title="Drag to move. Double-click or press F2 to name. Arrow keys move one grid square; Shift moves four." aria-label={`Move ${step.name}`} aria-disabled={disabled} onFocus={() => setSelection({ kind: "step", id: step.process_step_id })} onClick={() => { if (!disabled) setSelection({ kind: "step", id: step.process_step_id }); }} onKeyDown={(event) => { if (event.key === "F2") { event.preventDefault(); startRename(step); } else keyMove(event, box); }}>{step.name}</button>}
-              <span className="process-step-map__step-label">Step</span>
+              {stepPreviews.get(step.process_step_id) && <span className="process-step-map__step-preview">{stepPreviews.get(step.process_step_id)}</span>}
               {resizeHandles.map((handle) => <button key={handle} type="button" className="process-step-map__resize" data-resize-handle={handle} aria-label={`Resize ${step.name}${handle === "se" ? "" : ` ${handle}`}`} title="Drag to resize, or use arrow keys." aria-disabled={disabled} onFocus={() => setSelection({ kind: "step", id: step.process_step_id })} onPointerDown={(event) => startGesture(event, "resize", step.process_step_id, 0, handle)} onKeyDown={(event) => keyMove(event, box, handle)} />)}
               {hovered && <div className="process-step-map__hover-preview" role="tooltip">{step.name}<span>{canEdit ? "Double-click to name this Step." : "Step connections are highlighted."}</span></div>}
             </article>;

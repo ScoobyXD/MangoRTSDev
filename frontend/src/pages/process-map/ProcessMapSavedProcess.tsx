@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { APIHTTPError, isAbortError } from "../../modules/api/requestJSON.js";
 import { ProcessStepMap, type ProcessStepMapEditorProps } from "../../modules/kanban/ProcessStepMap.js";
 import { clearProcessWorkCache, getCachedProcessWork, getProcessWorkSingleFlight, invalidateLogicGateArenaViewCache, PROCESS_WORK_UPDATED_EVENT } from "../../modules/kanban/kanbanApi.js";
 import type { ProcessWorkSnapshot } from "../../modules/kanban/processWork.js";
+import type { MangoTiptapDocument } from "../../modules/editor/tiptap/mangoTiptapDocument.js";
 import { createCoalescedCanonicalRefresh } from "../../modules/realtime/coalescedCanonicalRefresh.js";
 import { subscribeRealtimeScope } from "../../modules/realtime/realtimeWebSocket.js";
 
@@ -13,7 +14,7 @@ export type ProcessMapSavedProcessProps = {
   onBusyChange?: (busy: boolean) => void;
   hoverModeEnabled?: boolean;
   renderActions?: ProcessStepMapEditorProps["renderActions"];
-  renderDetails?: (canEdit: boolean, refreshVersion: number, focusStepID?: string) => ReactNode;
+  renderDetails?: (canEdit: boolean, refreshVersion: number, focusStepID: string | undefined, onStepBodyChange: (stepID: string, body: MangoTiptapDocument) => void) => ReactNode;
 };
 
 export function ProcessMapSavedProcess(props: ProcessMapSavedProcessProps) {
@@ -31,6 +32,12 @@ function SavedProcess({ apiBase, companyID, processID, onBusyChange, hoverModeEn
   const refreshRef = useRef<() => void>(() => undefined);
   const busyCallback = useRef(onBusyChange);
   busyCallback.current = onBusyChange;
+  const updateStepBody = useCallback((stepID: string, body: MangoTiptapDocument) => {
+    setSnapshot((current) => {
+      if (!current?.steps.some((step) => step.process_step_id === stepID && step.body_json !== body)) return current;
+      return { ...current, steps: current.steps.map((step) => step.process_step_id === stepID ? { ...step, body_json: body } : step) };
+    });
+  }, []);
 
   useEffect(() => { onBusyChange?.(loading || mapBusy); }, [onBusyChange, loading, mapBusy]);
   useEffect(() => () => busyCallback.current?.(false), []);
@@ -91,7 +98,7 @@ function SavedProcess({ apiBase, companyID, processID, onBusyChange, hoverModeEn
   }, [apiBase, companyID, processID, retry]);
 
   return <section aria-label="Saved Process map" className="process-map-saved-process">
-    {snapshot && renderDetails?.(!loading && !error && snapshot.permissions.can_edit, refreshVersion, focusStepID)}
+    {snapshot && renderDetails?.(!loading && !error && snapshot.permissions.can_edit, refreshVersion, focusStepID, updateStepBody)}
     {loading && <div role="status" className="process-map-authoring-notice">Loading Process…</div>}
     {error && <div role="alert" className="process-map-authoring-error">{error} <button type="button" onClick={() => setRetry((value) => value + 1)}>Retry</button></div>}
     {!snapshot && renderActions?.({ createStep: () => {}, disabled: true, busy: loading })}

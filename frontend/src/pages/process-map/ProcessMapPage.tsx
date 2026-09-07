@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { useAppFloatingMenuDismissal } from "../../app/AppModalPortal.js";
 import { requestJSON } from "../../modules/api/requestJSON.js";
 import { emitDashboardEvent, emitExplorerContextUpdated, EVENT_COMPANY_EXPLORER_PROCESS_CREATED } from "../../modules/dashboardEvents.js";
@@ -23,6 +23,7 @@ export function ProcessMapPage(props: ProcessMapPageProps) {
 
 function ProcessMapCompanyPage({ apiBase, companyID, onOpenLogicGate, active = true }: ProcessMapPageProps) {
   const [hoverModeEnabled, setHoverModeEnabled] = useState(false);
+  const [editorWidth, setEditorWidth] = useState(380);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [exiting, setExiting] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -104,8 +105,8 @@ function ProcessMapCompanyPage({ apiBase, companyID, onOpenLogicGate, active = t
         <ProcessMapSurface apiBase={apiBase} companyID={companyID} hoverModeEnabled={hoverModeEnabled} savedProcessID={savedProcessID} onOpenLogicGate={(processID, name, folderID) => changeWorkspace({ kind: "saved", processID, name, folderID: folderID ?? "" })} onCreateFolder={createFolder} onCreateProcess={(parentID) => createProcess(parentID)} onCreateStep={(parentID) => createProcess(parentID, true)} />
       </div>
       {!workspace && <ProcessMapActions onCreateFolder={() => createFolder()} onCreateProcess={() => createProcess()} onCreateStep={() => createProcess(undefined, true)} hoverModeEnabled={hoverModeEnabled} onHoverModeChange={setHoverModeEnabled} />}
-      {workspace && <div className={`process-map-focus${exiting ? " is-exiting" : ""}`} aria-hidden={exiting ? true : undefined} ref={(element) => element?.toggleAttribute("inert", exiting)} onAnimationEnd={(event) => { if (exiting && event.target === event.currentTarget && event.animationName === "process-map-exit") finishExit(); }}>
-      {workspace?.kind === "new" && <ProcessMapCreateProcess key={workspace.processID} apiBase={apiBase} companyID={companyID} processID={workspace.processID} firstStep={workspace.firstStep} initialFolderID={workspace.folderID} folders={folders} foldersLoading={foldersLoading || !!folderError} active={active} onSaved={saved} onBack={() => changeWorkspace(null)} onBusyChange={setBusy} hoverModeEnabled={hoverModeEnabled} />}
+      {workspace && <div className={`process-map-focus${exiting ? " is-exiting" : ""}`} style={{ "--process-editor-width": `${editorWidth}px` } as CSSProperties} aria-hidden={exiting ? true : undefined} ref={(element) => element?.toggleAttribute("inert", exiting)} onAnimationEnd={(event) => { if (exiting && event.target === event.currentTarget && event.animationName === "process-map-exit") finishExit(); }}>
+      {workspace?.kind === "new" && <ProcessMapCreateProcess key={workspace.processID} apiBase={apiBase} companyID={companyID} processID={workspace.processID} firstStep={workspace.firstStep} initialFolderID={workspace.folderID} folders={folders} foldersLoading={foldersLoading || !!folderError} active={active} onSaved={saved} onBack={() => changeWorkspace(null)} onBusyChange={setBusy} hoverModeEnabled={hoverModeEnabled} editorWidth={editorWidth} onEditorWidthChange={setEditorWidth} />}
       {workspace?.kind === "saved" && <section key={workspace.processID} className="process-map-workspace" aria-label="Saved Process map">
         <div className="process-map-workspace__path" aria-label="Process location">
           <button type="button" disabled={busy || detailsBusy} onClick={() => changeWorkspace(null)}>← Company map</button><span aria-hidden="true">/</span>
@@ -116,7 +117,7 @@ function ProcessMapCompanyPage({ apiBase, companyID, onOpenLogicGate, active = t
           </div>
         </div>
         <ProcessMapSavedProcess apiBase={apiBase} companyID={companyID} processID={workspace.processID} onBusyChange={setBusy} hoverModeEnabled={hoverModeEnabled}
-          renderDetails={(canEdit, refreshVersion, focusStepID) => <ProcessMapDetails apiBase={apiBase} companyID={companyID} processID={workspace.processID} canEdit={canEdit} refreshVersion={refreshVersion} disabled={busy} onBusyChange={setDetailsBusy} focusStepID={focusStepID} />}
+          renderDetails={(canEdit, refreshVersion, focusStepID, onStepBodyChange) => <ProcessMapDetails apiBase={apiBase} companyID={companyID} processID={workspace.processID} canEdit={canEdit} refreshVersion={refreshVersion} disabled={busy} onBusyChange={setDetailsBusy} focusStepID={focusStepID} onStepBodyChange={onStepBodyChange} editorWidth={editorWidth} onEditorWidthChange={setEditorWidth} />}
           renderActions={({ createStep, disabled }) => <button type="button" className="process-map-workspace__add-step" aria-label="+ Create Step" title="Create Step" disabled={disabled} onClick={createStep}>+</button>} />
       </section>}
       </div>}

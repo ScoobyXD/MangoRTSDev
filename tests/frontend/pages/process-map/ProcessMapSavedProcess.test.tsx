@@ -3,6 +3,7 @@ import test from "node:test";
 import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import type { ProcessWorkSnapshot } from "../../../../frontend/src/modules/kanban/processWork.js";
+import type { MangoTiptapDocument } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapDocument.js";
 
 async function settle(condition: () => boolean, message: string) {
   const deadline = Date.now() + 3000;
@@ -40,6 +41,7 @@ test("saved Process map refreshes canonical Steps and permissions, retries denia
   let processID = "first", denied = false;
   const work: ProcessWorkSnapshot = { logic_gate: { logic_gate_id: "first", header: "Saved procedure" }, permissions: { can_edit: true, can_resolve_requests: false }, steps: [{ process_step_id: "first-step", logic_gate_id: "first", name: "Review request", position: 1000 }], relationships: [], nodes: [] };
   let pendingWork: Promise<Response> | null = null;
+  let savedStepX = 64;
   let releaseWork!: (response: Response) => void;
   const requests: string[] = [];
   const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -62,7 +64,7 @@ test("saved Process map refreshes canonical Steps and permissions, retries denia
       return reply({ step });
     }
     assert.equal(options?.method ?? "GET", "GET");
-    return reply({ revision: 1, steps: [], routes: [] });
+    return reply({ revision: 1, steps: id === "first" ? [{ process_step_id: "first-step", x: savedStepX, y: 64, width: 224, height: 112 }] : [], routes: [] });
   });
   const [{ createRoot }, { ProcessMapSavedProcess }, { clearProcessWorkCache, getCachedProcessWork, dispatchLogicGateWorkUpdated }, { updateRealtimeHealth, realtimeHealthKey }] = await Promise.all([
     import("react-dom/client"), import("../../../../frontend/src/pages/process-map/ProcessMapSavedProcess.js"),
@@ -73,8 +75,9 @@ test("saved Process map refreshes canonical Steps and permissions, retries denia
   const container = dom.window.document.getElementById("root")!;
   const root = createRoot(container);
   const busy: boolean[] = [];
+  let updateStepBody!: (stepID: string, body: MangoTiptapDocument) => void;
   const button = (name: string) => [...container.querySelectorAll<HTMLButtonElement>("button")].find((element) => element.textContent === name);
-  const render = () => root.render(<ProcessMapSavedProcess apiBase={apiBase} companyID={companyID} processID={processID} onBusyChange={(value) => busy.push(value)} renderDetails={(canEdit, refreshVersion) => <div data-process-details={processID} data-can-edit={canEdit} data-refresh-version={refreshVersion}>Process assignments and SOP</div>} renderActions={({ createStep, disabled }) => <button type="button" disabled={disabled} onClick={createStep}>+ Create Step</button>} />);
+  const render = () => root.render(<ProcessMapSavedProcess apiBase={apiBase} companyID={companyID} processID={processID} onBusyChange={(value) => busy.push(value)} renderDetails={(canEdit, refreshVersion, _focusStepID, onStepBodyChange) => { updateStepBody = onStepBodyChange; return <div data-process-details={processID} data-can-edit={canEdit} data-refresh-version={refreshVersion}>Process assignments and SOP</div>; }} renderActions={({ createStep, disabled }) => <button type="button" disabled={disabled} onClick={createStep}>+ Create Step</button>} />);
   const refresh = async () => { await act(async () => dispatchLogicGateWorkUpdated(companyID, "first")); };
   try {
     await act(async () => render());
@@ -82,6 +85,20 @@ test("saved Process map refreshes canonical Steps and permissions, retries denia
     assert.equal(busy.at(-1), false);
     assert.equal(container.querySelector('[data-process-details="first"]')?.getAttribute("data-can-edit"), "true");
     updateRealtimeHealth(realtimeHealthKey(apiBase, companyID), { status: "connected" });
+    const originalBodyCallback = updateStepBody;
+    const previewBody: MangoTiptapDocument = { format: "mango-tiptap-json", schema_version: 1, document: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Check the customer's delivery request." }] }] } };
+    const requestsBeforePreview = [...requests];
+    await act(async () => updateStepBody("first-step", previewBody));
+    assert.equal(container.querySelector('[data-step-map-id="first-step"] .process-step-map__step-preview')?.textContent, "Check the customer's delivery request.");
+    assert.equal(updateStepBody, originalBodyCallback, "preview callbacks remain stable across presentation updates");
+    assert.equal(work.steps[0].body_json, undefined, "the editor callback must not mutate canonical work");
+    assert.equal(getCachedProcessWork(apiBase, companyID, "first")?.contents.steps[0].body_json, undefined, "a pending instruction snapshot must not replace the shared saved cache");
+    await act(async () => { updateStepBody("first-step", previewBody); updateStepBody("missing-step", previewBody); });
+    assert.deepEqual(requests, requestsBeforePreview, "preview updates must not read layout/work or issue a save");
+    assert.equal(busy.at(-1), false, "typing must not block the map behind a layout reload");
+    savedStepX = 160;
+    await refresh();
+    await settle(() => container.querySelector<HTMLElement>('[data-step-map-id="first-step"]')?.style.left === "160px", "a canonical Process event must still reload changed layout with unchanged Step IDs");
     await act(async () => button("+ Create Step")!.click());
     await settle(() => Boolean(container.querySelector('[data-step-map-id="created"]')), "created Step did not refresh into saved map");
     work.permissions.can_edit = false;
@@ -94,6 +111,8 @@ test("saved Process map refreshes canonical Steps and permissions, retries denia
     assert.equal(container.querySelector('[data-step-map-id="first-step"]'), null);
     assert.equal(container.querySelector("[data-process-details]"), null, "denial removes assignments and SOP together with the map");
     assert.equal(getCachedProcessWork(apiBase, companyID, "first"), null);
+    await act(async () => originalBodyCallback("first-step", previewBody));
+    assert.equal(container.querySelector('[data-step-map-id="first-step"]'), null, "a late editor snapshot cannot restore denied contents");
     denied = false;
     work.permissions.can_edit = true;
     await act(async () => button("Retry")!.click());

@@ -72,7 +72,7 @@
 70. Process map views omit Step and connection inspectors.
 71. The green Process outline uses unscaled work-area dimensions and pans and zooms with its Steps and routes.
 72. The Process outline expands to contain authored Step and route geometry without changing that geometry or Board layout.
-73. New Step-map boxes use dimensions of 112 by 56 canvas units.
+73. New Step-map boxes use dimensions of 256 by 80 canvas units.
 74. Existing saved Step boxes retain their dimensions until explicitly resized.
 75. In the focused map, dragging a Step card outside its connection ports, resize handles, and active title input moves that Step.
 76. Hovering or selecting a Step in the focused map reveals six resize handles at its four corners and top and bottom midpoints.
@@ -141,6 +141,9 @@
 138. A Step mention notification opens its owning Process and targets the exact Step UUID and mentioned user.
 139. Autosaving unchanged Step mentions or retrying the same save must not create duplicate notifications.
 140. A saved mention with its default kind omitted counts as a normal mention when creating or comparing notifications.
+141. Step-map cards have a neutral white surface and show the Step name with a short plain-text preview of its existing instruction body.
+142. Step-map previews never change the stored instruction document or authored card geometry.
+143. A saved Process map updates its Step preview from the existing editor's local snapshots and canonical document updates without issuing a save or replacing the shared work cache.
 
 ## Process Story
 

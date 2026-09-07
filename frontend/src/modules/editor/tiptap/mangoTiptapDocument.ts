@@ -27,6 +27,20 @@ export function createEmptyMangoTiptapDocument(): MangoTiptapDocument {
   };
 }
 
+export function readMangoTiptapDocumentText(value: unknown): string {
+  if (!isRecord(value)) return "";
+  const document = isRecord(value.document) ? value.document : value;
+  const read = (node: unknown): string => {
+    if (!isRecord(node)) return "";
+    if (node.type === "text" && typeof node.text === "string") return node.text;
+    if (node.type === "hardBreak") return "\n";
+    if (!Array.isArray(node.content)) return "";
+    const values = node.content.map(read);
+    return node.type === "doc" ? values.join("\n") : values.join("");
+  };
+  return read(document).trim();
+}
+
 /**
  * Checks only Mango's versioned envelope. Tiptap's configured ProseMirror schema
  * is the authority for node, mark, and cosmetic formatting validity.

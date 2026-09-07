@@ -69,7 +69,7 @@ test("new Step geometry avoids saved boxes and resize preserves identity and bou
   const next = completeStepMapLayout(base, steps, []);
   const added = next.steps.find((box) => box.process_step_id === "b")!;
   assert.ok(added.x >= 864 || added.y >= 224, "the new Step must not cover an existing saved Step");
-  assert.deepEqual([added.width, added.height], [112, 56], "new Steps occupy one-quarter the previous 224 by 112 area");
+  assert.deepEqual([added.width, added.height], [256, 80], "new Steps provide a wide rectangle for their title and instruction preview");
   assert.deepEqual(next.steps[0], base.steps[0], "existing authored sizes must not shrink");
   const resized = moveStepMapBox(next.steps[0], { x: -1000, y: -1000 }, "se");
   assert.equal(resized.process_step_id, "a");
@@ -78,6 +78,16 @@ test("new Step geometry avoids saved boxes and resize preserves identity and bou
   const moved = moveStepMapBox(resized, { x: 25, y: 41 });
   assert.deepEqual([moved.x, moved.y], [80, 96]);
   assert.deepEqual([moved.width, moved.height], [112, 56]);
+});
+
+test("wide defaults preserve compact saved boxes and authored route endpoints", () => {
+  const layout: ProcessStepMapLayout = { revision: 5, steps: [{ process_step_id: "a", x: 64, y: 64, width: 112, height: 56 }], routes: [{ resource_operational_relationship_id: "edge", points: [{ x: 256, y: 112 }] }] };
+  const original = structuredClone(layout);
+  const completed = completeStepMapLayout(layout, steps, [edge]);
+  assert.deepEqual(completed.steps[0], layout.steps[0]);
+  assert.deepEqual(completed.routes, layout.routes);
+  assert.match(stepMapPath(completed.steps[0], completed.steps[1], completed.routes[0].points), /^M 176 92 /);
+  assert.deepEqual(layout, original, "rendering a new default cannot rewrite saved geometry");
 });
 
 test("each corner and side resize handle moves only its edges and retains the opposite anchor", () => {

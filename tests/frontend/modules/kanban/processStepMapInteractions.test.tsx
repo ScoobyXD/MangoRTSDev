@@ -7,7 +7,7 @@ import type { ProcessStep, ProcessStepRelationship } from "../../../../frontend/
 import type { ProcessStepMapActions, ProcessStepMapCommands } from "../../../../frontend/src/modules/kanban/ProcessStepMap.js";
 
 const initialSteps: ProcessStep[] = [
-  { process_step_id: "a", logic_gate_id: "process", name: "Receive", position: 1000 },
+  { process_step_id: "a", logic_gate_id: "process", name: "Receive", position: 1000, body_json: { format: "mango-tiptap-json", schema_version: 1, document: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Record the delivery." }] }] } } },
   { process_step_id: "b", logic_gate_id: "process", name: "Check", position: 2000 },
 ];
 const initialEdge: ProcessStepRelationship = { resource_operational_relationship_id: "edge", source: { resource_type: "process_step", resource_id: "a" }, target: { resource_type: "process_step", resource_id: "b" } };
@@ -517,8 +517,8 @@ test("canvas creates and names Steps inline without inspectors or separate zoom 
     assert.ok(h.container.querySelector('[data-step-map-id="new"].is-selected'));
     assert.equal(h.container.querySelector('[aria-label="Selected Step"]'), null);
     const step = h.container.querySelector<HTMLElement>('[data-step-map-id="new"]')!;
-    assert.equal(step.style.width, "112px");
-    assert.equal(step.style.height, "56px");
+    assert.equal(step.style.width, "256px");
+    assert.equal(step.style.height, "80px");
     const input = step.querySelector<HTMLInputElement>('[aria-label="Step name"]')!;
     assert.ok(input, "new Steps must be named directly in their card");
     assert.equal(h.dom.window.document.activeElement, input);
@@ -555,6 +555,33 @@ test("focused canvas context menus create Steps without offering Folder or Proce
     assert.deepEqual(h.localCalls, ["create"]);
     assert.deepEqual(h.createdStepIDs, ["new"]);
     assert.deepEqual(h.requests, []);
+  } finally { await h.dispose(); }
+});
+
+test("Step cards preview their current instruction text without changing documents or saved dimensions", async () => {
+  const h = await harness();
+  try {
+    const originalSteps = structuredClone(h.state.steps);
+    const originalLayout = structuredClone(h.state.layout);
+    await h.mount();
+    const card = h.container.querySelector<HTMLElement>('[data-step-map-id="a"]')!;
+    assert.equal(card.querySelector(".process-step-map__step-title")!.textContent, "Receive");
+    assert.equal(card.querySelector(".process-step-map__step-preview")!.textContent, "Record the delivery.");
+    assert.equal(h.container.querySelector(".process-step-map__step-label"), null);
+    assert.equal(h.container.querySelector('[data-step-map-id="b"] .process-step-map__step-preview'), null, "a blank instruction body needs no filler caption");
+    assert.equal(card.style.width, "224px");
+    assert.equal(card.style.height, "112px");
+    assert.deepEqual(h.state.steps, originalSteps);
+    assert.deepEqual(h.state.layout, originalLayout);
+    h.state.steps = h.state.steps.map((step) => step.process_step_id === "a" ? { ...step, body_json: { format: "mango-tiptap-json", schema_version: 1, document: { type: "doc", content: [
+      { type: "paragraph", content: [{ type: "text", text: "Inspect", marks: [{ type: "bold" }] }, { type: "hardBreak" }, { type: "text", text: "the delivery." }] },
+      { type: "paragraph", content: [{ type: "text", text: "Record <details>." }] },
+    ] } } } : step);
+    await act(async () => h.render()); await flush();
+    assert.equal(card.querySelector(".process-step-map__step-preview")!.textContent, "Inspect the delivery. Record <details>.");
+    assert.equal(card.querySelector("details"), null, "preview text must remain escaped plain text");
+    assert.deepEqual(h.state.layout, originalLayout);
+    assert.equal(h.requests.filter((request) => request.method !== "GET").length, 0, "preview updates must not save a layout or resource");
   } finally { await h.dispose(); }
 });
 
@@ -666,7 +693,7 @@ test("canvas body dragging uses the current zoom and directional handles keep op
     await cameraFixture(h).wheel(-Math.log(1.5) / .002);
     const card = h.container.querySelector<HTMLElement>('[data-step-map-id="a"]')!;
     assert.deepEqual([...card.querySelectorAll<HTMLElement>("[data-resize-handle]")].map((handle) => handle.dataset.resizeHandle).sort(), ["n", "ne", "nw", "s", "se", "sw"]);
-    const body = card.querySelector(".process-step-map__step-label")!;
+    const body = card.querySelector(".process-step-map__step-preview")!;
     await h.pointer(body, "pointerdown", 100, 100);
     await h.pointer(body, "pointermove", 148, 124);
     assert.equal(h.writes().length, 0);

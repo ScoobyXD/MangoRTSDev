@@ -37,6 +37,7 @@ import {
 } from "./EditorFieldControls.js";
 import {
   createEmptyMangoTiptapDocument,
+  readMangoTiptapDocumentText,
   validateMangoTiptapDocument,
   type MangoTiptapDocument,
 } from "./tiptap/mangoTiptapDocument.js";
@@ -440,20 +441,6 @@ function actionItemFieldDraftValue(field: EntityField): string {
   return field.field_type === "date" ? formatCalendarDate(value) : value;
 }
 
-function plainEntityBodyText(value: unknown): string {
-  if (!isRecord(value)) return "";
-  const document = isRecord(value.document) ? value.document : value;
-  const read = (node: unknown): string => {
-    if (!isRecord(node)) return "";
-    if (node.type === "text" && typeof node.text === "string") return node.text;
-    if (node.type === "hardBreak") return "\n";
-    if (!Array.isArray(node.content)) return "";
-    const values = node.content.map(read);
-    return node.type === "doc" ? values.join("\n") : values.join("");
-  };
-  return read(document).trim();
-}
-
 function plainEntityBodyJSON(value: string, currentBody: unknown): Record<string, unknown> {
   const annotations = isRecord(currentBody) && Array.isArray(currentBody.annotations)
     ? currentBody.annotations
@@ -476,7 +463,7 @@ function plainEntityBodyJSON(value: string, currentBody: unknown): Record<string
 function actionItemDraft(entity: Entity): ActionItemDraft {
   return {
     name: entity.name,
-    details: plainEntityBodyText(entity.body_json),
+    details: readMangoTiptapDocumentText(entity.body_json),
     fieldValues: Object.fromEntries(entity.entity_fields.map((field) => [
       field.entity_field_id,
       actionItemFieldDraftValue(field),

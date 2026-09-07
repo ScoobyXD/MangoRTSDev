@@ -280,14 +280,14 @@ test("Process Map authors Steps and connections locally and saves their exact id
     const relationship = definition.relationships[0];
     assert.match(relationship.resource_operational_relationship_id, /^[0-9a-f-]{36}$/);
     assert.deepEqual(relationship, { resource_operational_relationship_id: relationship.resource_operational_relationship_id, source: { resource_type: "process_step", resource_id: sourceID }, target: { resource_type: "process_step", resource_id: targetID } });
-    assert.deepEqual(definition.layout.steps.find((box) => box.process_step_id === sourceID), { process_step_id: sourceID, x: 96, y: 80, width: 128, height: 56 });
+    assert.deepEqual(definition.layout.steps.find((box) => box.process_step_id === sourceID), { process_step_id: sourceID, x: 96, y: 80, width: 272, height: 80 });
     assert.deepEqual(definition.layout.routes, []);
     assert.equal(h.cards().length, 0, "Save returns to the company map");
     assert.deepEqual(h.revealed.map(({ processID, folderPathIDs }) => ({ processID, folderPathIDs })), [{ processID: definition.logic_gate_id, folderPathIDs: [parentFolderID, childFolderID] }]);
     await h.reopenSaved();
     assert.deepEqual(h.cards().map((card) => card.dataset.stepMapId), [sourceID, targetID]);
     assert.equal(h.cards()[0].style.left, "96px");
-    assert.equal(h.cards()[0].style.width, "128px");
+    assert.equal(h.cards()[0].style.width, "272px");
     assert.ok(h.container.querySelector('[aria-label="Connection from Receive order to Ship order"]'), "the same directed connection must survive the saved-map reload");
     assert.equal(h.container.querySelector('[aria-label="New Process map"]'), null);
     assert.deepEqual(h.opened, [], "opening the Process on the map does not open Board / SOP");
@@ -342,8 +342,8 @@ test("Create Step seeds a draft and failed Save keeps UUIDs and edits while pend
     assert.equal(h.dom.window.document.activeElement, initialName);
     assert.equal(initialName.selectionStart, 0);
     assert.equal(initialName.selectionEnd, initialName.value.length);
-    assert.equal(h.cards()[0].style.width, "112px");
-    assert.equal(h.cards()[0].style.height, "56px");
+    assert.equal(h.cards()[0].style.width, "256px");
+    assert.equal(h.cards()[0].style.height, "80px");
     const stepID = h.cards()[0].dataset.stepMapId;
     await h.input('[placeholder="Untitled Process"]', "Payment approval");
     await h.chooseFolder();
@@ -624,6 +624,8 @@ test("the company creation card gives way to the Process editor and each new Ste
     assert.equal(h.button("+ Create Step").disabled, false);
     const tabs = [...h.container.querySelectorAll<HTMLButtonElement>('[aria-label="Process editor sections"] button')];
     assert.equal(tabs.find((tab) => tab.textContent === "Steps")?.getAttribute("aria-pressed"), "true", "creating a Step opens the Steps tab");
+    assert.ok(tabs[0].parentElement!.compareDocumentPosition(h.container.querySelector('[aria-label="Process SOP editor"]')!) & h.dom.window.Node.DOCUMENT_POSITION_FOLLOWING, "the section tabs stay above the editor contents");
+    assert.equal(h.container.querySelector('[role="toolbar"], button[aria-label="Bold"]'), null, "focused Process instructions omit formatting toolbars");
     assert.equal(h.container.querySelectorAll("[data-process-step-id]").length, h.cards().length, "each canonical Step has its existing instruction card");
   };
   try {
@@ -634,6 +636,19 @@ test("the company creation card gives way to the Process editor and each new Ste
     await act(async () => hover.click());
     await h.start(true);
     focusedActions();
+    const focus = h.container.querySelector<HTMLElement>(".process-map-focus")!;
+    const viewport = h.container.querySelector(".process-step-map__viewport");
+    const overview = h.container.querySelector("[data-process-sop-document-id]");
+    const resize = h.container.querySelector<HTMLElement>('[role="separator"][aria-label="Resize Process editor"]')!;
+    assert.ok(resize);
+    focus.querySelector<HTMLElement>(".process-map-workspace")!.getBoundingClientRect = () => new h.dom.window.DOMRect(0, 0, 1200, 800);
+    const originalWidth = Number.parseFloat(focus.style.getPropertyValue("--process-editor-width"));
+    await h.key(resize, "ArrowLeft");
+    const resizedWidth = focus.style.getPropertyValue("--process-editor-width");
+    assert.equal(Number.parseFloat(resizedWidth), originalWidth + 24, "resizing updates the shared pane and floating-control width");
+    assert.equal(h.container.querySelector(".process-step-map__viewport"), viewport, "resizing preserves the full map and its camera instance");
+    assert.equal(h.container.querySelector("[data-process-sop-document-id]"), overview, "resizing preserves the mounted Process document");
+    assert.equal(h.mutations().length, 0, "changing editor width does not change saved Process geometry");
     assert.equal(h.container.querySelector('[placeholder="Untitled Process"]'), null, "a new draft starts with a compact filename, not a large name field");
     assert.equal(h.button("Name Process").firstChild!.textContent, "Untitled Process");
     await h.input('[placeholder="Untitled Process"]', "Shipping");
@@ -653,6 +668,7 @@ test("the company creation card gives way to the Process editor and each new Ste
     assert.equal(actions().checked, true);
     await h.reopenSaved();
     await settle(() => Boolean(h.container.querySelector('[aria-label="Saved Process map"]')) && h.findButton("+ Create Step")?.disabled === false, "saved Step creation did not become available");
+    assert.equal(h.container.querySelector<HTMLElement>(".process-map-focus")!.style.getPropertyValue("--process-editor-width"), resizedWidth, "the saved Process reuses the chosen editor width");
     assert.equal(h.container.querySelector(".process-map-page__actions"), null);
     const processID = h.batches()[0].process_definition.logic_gate_id;
     await h.click("+ Create Step");

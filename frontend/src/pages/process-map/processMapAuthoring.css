@@ -9,11 +9,11 @@
 .process-map-page button:disabled, .process-map-folder-dialog button:disabled { opacity: .5; cursor: default; }
 .process-map-page button.process-map-primary { color: #fff; border-color: #6550b7; background: #6550b7; font-weight: 650; }
 .process-map-workspace, .process-map-saved-process { position: absolute; inset: 0; min-height: 0; background: #fff; overflow: hidden; }
-.process-map-workspace { display: grid; grid-template-columns: minmax(0, 1fr) clamp(320px, 30%, 440px); grid-template-rows: auto minmax(0, 1fr); column-gap: 16px; padding: 8px 16px 16px; }
-.process-map-workspace > .process-step-map, .process-map-workspace .process-map-saved-process > .process-step-map { grid-column: 1; grid-row: 2; }
-.process-map-workspace .process-map-saved-process { display: contents; }
+.process-map-workspace { --process-editor-panel-width: min(var(--process-editor-width, 380px), max(240px, calc(100% - 320px))); }
+.process-map-workspace .process-step-map { position: absolute; inset: 0; }
+.process-map-workspace .process-step-map--authoring .process-step-map__viewport { padding: 64px; outline: none; }
 .process-map-workspace__save { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-left: auto; }
-.process-map-workspace__add-step { position: absolute; right: 40px; bottom: 40px; z-index: 5; display: grid; place-items: center; width: 38px; height: 38px; padding: 0; border: 1px solid #a5edf5; border-radius: 12px; background: #ecfeff; color: #0e7490; box-shadow: 0 3px 12px #0f172a0d; font-size: 26px; cursor: pointer; }
+.process-map-workspace__add-step { position: absolute; right: calc(var(--process-editor-panel-width) + 16px); top: 12px; z-index: 5; display: grid; place-items: center; width: 38px; height: 38px; padding: 0; border: 1px solid #a5edf5; border-radius: 12px; background: #ecfeff; color: #0e7490; box-shadow: 0 3px 12px #0f172a0d; font-size: 26px; cursor: pointer; }
 .process-map-workspace__add-step:hover:not(:disabled) { background: #cffafe; }
 .process-map-focus { position: absolute; inset: 0; }
 .process-map-focus.is-exiting { pointer-events: none; animation: process-map-exit 440ms ease-in both; }
@@ -30,7 +30,8 @@
   .process-map-workspace--new::before, .process-map-workspace--new .process-step-map__extent { animation: none; }
   .process-map-focus.is-exiting, .process-map-focus.is-exiting .process-step-map__extent { animation: none; }
 }
-.process-map-workspace__path { grid-column: 1; grid-row: 1; position: relative; z-index: 25; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; padding: 4px 6px; color: #64748b; font-size: 13px; }
+.process-map-workspace__path { position: absolute; top: 8px; left: 16px; right: calc(var(--process-editor-panel-width) + 68px); z-index: 10; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; padding: 4px 6px; color: #64748b; font-size: 13px; pointer-events: none; }
+.process-map-workspace__path > * { max-width: 100%; pointer-events: auto; }
 .process-map-workspace__path > button { background: transparent; border-color: transparent; padding: 5px 7px; }
 .process-map-workspace__filename, .process-map-workspace__saved-name { max-width: min(280px, 100%); box-sizing: border-box; color: #334155; font: inherit; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 input.process-map-workspace__filename { width: 20ch; border: 0; border-bottom: 1px solid #6550b7; background: transparent; padding: 5px 7px; }
@@ -75,14 +76,4 @@ input.process-map-workspace__filename { width: 20ch; border: 0; border-bottom: 1
   .process-map-workspace__path { font-size: 12px; }
   .process-map-workspace__path button { font-size: 12px; }
   .process-map-authoring-notice { max-width: calc(100% - 24px); box-sizing: border-box; }
-}
-
-@media (max-width: 900px) {
-  .process-map-workspace { grid-template-columns: minmax(0, 1fr) minmax(280px, 38%); column-gap: 8px; padding-inline: 8px; }
-  .process-map-workspace__save { flex-basis: 100%; justify-content: flex-start; margin-left: 0; }
-}
-@media (max-width: 600px) {
-  .process-map-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(220px, 1fr) minmax(260px, 1fr); gap: 8px; overflow-y: auto; }
-  .process-map-workspace .process-map-details { grid-column: 1; grid-row: 3; }
-  .process-map-workspace__add-step { right: 28px; bottom: 28px; }
 }
