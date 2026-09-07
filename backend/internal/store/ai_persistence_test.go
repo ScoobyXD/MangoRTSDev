@@ -35,6 +35,50 @@ func TestPostgresAILifecycleHistory(t *testing.T) {
 	testAILifecycleHistory(t, repo)
 }
 
+func TestPostgresAINoopUpdatesKeepStoredRow(t *testing.T) {
+	db, repo := openPostgresProcessMapIntegration(t)
+	ctx := context.Background()
+	c, u, _ := newAIScope(t, repo)
+	run, err := repo.ReserveAIRun(ctx, AIRun{CompanyID: c, UserID: u, RunID: newUUIDv7String(), PendingInput: "Input"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err = repo.BindAIRun(ctx, c, u, run.RunID, "native-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := AIHistoryEvent{ID: "hook:one", Type: "model.started", CreatedAt: run.CreatedAt, Data: json.RawMessage(`{"call":1}`)}
+	if _, err := repo.AppendAIHistoryEvent(ctx, c, u, run.RunID, event); err != nil {
+		t.Fatal(err)
+	}
+	var originalVersion string
+	if err := db.QueryRow(`select xmin::text from ai_runs where company_id=$1::uuid and user_id=$2::uuid and run_id=$3::uuid`, c, u, run.RunID).Scan(&originalVersion); err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range []struct {
+		name  string
+		apply func() (AIRun, error)
+	}{
+		{"same status", func() (AIRun, error) { return repo.SetAIRunStatus(ctx, c, u, run.RunID, "running") }},
+		{"same native binding", func() (AIRun, error) { return repo.BindAIRun(ctx, c, u, run.RunID, run.HermesRunID) }},
+		{"duplicate event", func() (AIRun, error) { return repo.AppendAIHistoryEvent(ctx, c, u, run.RunID, event) }},
+		{"older status", func() (AIRun, error) { return repo.SetAIRunStatus(ctx, c, u, run.RunID, "pending") }},
+	} {
+		t.Run(check.name, func(t *testing.T) {
+			if _, err := check.apply(); err != nil {
+				t.Fatal(err)
+			}
+			var version string
+			if err := db.QueryRow(`select xmin::text from ai_runs where company_id=$1::uuid and user_id=$2::uuid and run_id=$3::uuid`, c, u, run.RunID).Scan(&version); err != nil {
+				t.Fatal(err)
+			}
+			if version != originalVersion {
+				t.Fatal("unchanged run rewrote its stored row")
+			}
+		})
+	}
+}
+
 func testAILifecycleHistory(t *testing.T, repo Repository) {
 	t.Helper()
 	ctx := context.Background()
@@ -211,6 +255,14 @@ func testAIChatMessages(t *testing.T, repo Repository) {
 	}
 	addition := second
 	addition.MessageID = 40
+	changedAddition := addition
+	changedAddition.Content = "Changed duplicate in one batch"
+	if err := repo.ImportAIMessages(ctx, c, u, []AIMessage{addition, changedAddition}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("new duplicate message collision: %v", err)
+	}
+	if err := repo.ImportAIMessages(ctx, c, u, []AIMessage{first, first}); err != nil {
+		t.Fatalf("identical duplicate message: %v", err)
+	}
 	changed := first
 	changed.Content = "Collision after the new row"
 	if err := repo.ImportAIMessages(ctx, c, u, []AIMessage{addition, changed}); !errors.Is(err, ErrConflict) {
@@ -223,7 +275,7 @@ func testAIChatMessages(t *testing.T, repo Repository) {
 	wrongRun := addition
 	wrongRun.ChatID = "newer-chat"
 	wrongRun.RunID = run.RunID
-	if err := repo.ImportAIMessages(ctx, c, u, []AIMessage{wrongRun}); !errors.Is(err, ErrConflict) {
+	if err := repo.ImportAIMessages(ctx, c, u, []AIMessage{first, wrongRun}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("run from different chat: %v", err)
 	}
 	for _, ids := range [][]int64{{11, 999}, {11, 11}, {0}} {

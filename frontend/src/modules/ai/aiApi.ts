@@ -89,7 +89,7 @@ export async function consumeAIEvents(response: Response, runID: string, onEvent
 
 export function aiErrorMessage(error: unknown): string {
   if (isTerminalAuthFailureError(error)) return error.message;
-  if (aiErrorCode(error) === "ai_response_open_elsewhere") return "This response is open in another tab. Close that view, then resume here.";
+  if (aiErrorDetails(error).code === "ai_response_open_elsewhere") return "This response is open in another tab. Close that view, then resume here.";
   if (error instanceof APIHTTPError) {
     if (error.status === 403) return "AI chat is unavailable for this company or account.";
     if (error.status === 404) return "This saved chat or run is no longer available.";
@@ -100,12 +100,17 @@ export function aiErrorMessage(error: unknown): string {
   return "AI chat could not finish the request. Check your connection and try again.";
 }
 
-export function aiErrorCode(error: unknown): string {
-  if (!(error instanceof APIHTTPError)) return "";
+export function aiErrorDetails(error: unknown): { code: string; activeChatID?: string; activeRunID?: string } {
+  if (!(error instanceof APIHTTPError)) return { code: "" };
   try {
     const body: unknown = JSON.parse(error.bodyText);
-    return body && typeof body === "object" && "error" in body && typeof body.error === "string" ? body.error : "";
-  } catch { return ""; }
+    if (!body || typeof body !== "object") return { code: "" };
+    return {
+      code: "error" in body && typeof body.error === "string" ? body.error : "",
+      activeChatID: "active_chat_id" in body && typeof body.active_chat_id === "string" ? body.active_chat_id : undefined,
+      activeRunID: "active_run_id" in body && typeof body.active_run_id === "string" ? body.active_run_id : undefined,
+    };
+  } catch { return { code: "" }; }
 }
 
 export function isUnsubmittedAIError(error: unknown): boolean {

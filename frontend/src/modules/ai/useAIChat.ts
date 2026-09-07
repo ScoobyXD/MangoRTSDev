@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-  aiErrorCode, aiErrorMessage, cancelAIRun, createAIChat, createAIRun, getAIChat, getAIRun, isUnsubmittedAIError,
+  aiErrorDetails, aiErrorMessage, cancelAIRun, createAIChat, createAIRun, getAIChat, getAIRun, isUnsubmittedAIError,
   listAIChats, watchAIRun,
   type AIChatSummary, type AIMessage, type AIRun, type AISubmission,
 } from "./aiApi.js";
@@ -210,12 +210,12 @@ export function useAIChat(apiBase: string, companyID: string, visible: boolean) 
       return true;
     } catch (cause) {
       if (!controller.signal.aborted) {
-        const code = aiErrorCode(cause);
-        if (["ai_request_expired_check_saved_chat", "ai_run_active_or_request_conflict"].includes(code)) {
+        const { code, activeChatID, activeRunID } = aiErrorDetails(cause);
+        if (code === "ai_request_expired_check_saved_chat" || (code === "ai_run_active_or_request_conflict" && activeChatID && activeRunID)) {
           pendingRef.current = null;
           setPending(null);
           selectedID.current = null;
-          await load();
+          await load(activeChatID);
           setNotice(code === "ai_request_expired_check_saved_chat"
             ? "The old send was closed. Check the saved chat before requesting any action again."
             : "Another request is already active. Its saved chat has been opened.");

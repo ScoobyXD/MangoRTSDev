@@ -154,7 +154,7 @@ def request(port, key, path, body=None, idempotency=None, host="127.0.0.1"):
 def native_gateway(source, home, fixture_port, key, root, *, host="127.0.0.1", callback_url=None, callback_key=None, port=None):
     port = port or free_port()
     env = {name: os.environ[name] for name in ("PATH", "SystemRoot", "WINDIR", "TEMP", "TMP") if name in os.environ}
-    env.update({"PYTHONPATH": os.pathsep.join([str(root / "guard"), str(source)]),
+    env.update({"PYTHONPATH": os.pathsep.join([str(root / "guard"), str(Path(__file__).resolve().parents[1]), str(source)]),
         "HERMES_HOME": str(home), "HOME": str(home), "USERPROFILE": str(home), "LOCALAPPDATA": str(home),
         "HERMES_TEST_ISOLATION": "1", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUNBUFFERED": "1",
         "API_SERVER_ENABLED": "true", "API_SERVER_HOST": host, "API_SERVER_PORT": str(port),

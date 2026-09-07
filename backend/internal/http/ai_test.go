@@ -306,6 +306,49 @@ func TestAIUncertainAdmissionRetainsSubmissionAndRetriesSameIdentity(t *testing.
 	}
 }
 
+type aiAdmissionRaceRepo struct {
+	store.Repository
+	active store.AIRun
+}
+
+func (r *aiAdmissionRaceRepo) ReserveAIRun(ctx context.Context, input store.AIRun) (store.AIRun, error) {
+	if _, err := r.Repository.ReserveAIRun(ctx, r.active); err != nil {
+		return store.AIRun{}, err
+	}
+	return r.Repository.ReserveAIRun(ctx, input)
+}
+
+func TestAIAdmissionConflictIdentifiesExactActiveChat(t *testing.T) {
+	for _, race := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reserve_race=%t", race), func(t *testing.T) {
+			f := newAIFixture(t)
+			ctx := context.Background()
+			for _, chat := range []store.AIChat{
+				{CompanyID: f.route.CompanyID, UserID: f.route.UserID, ChatID: "older-chat", Name: "Older", CreatedAt: time.Now().Add(-time.Hour)},
+				{CompanyID: f.route.CompanyID, UserID: f.route.UserID, ChatID: "newer-chat", Name: "Newer"},
+			} {
+				if _, err := f.repo.UpsertAIChat(ctx, chat); err != nil {
+					t.Fatal(err)
+				}
+			}
+			active := store.AIRun{CompanyID: f.route.CompanyID, UserID: f.route.UserID, RunID: aiTestRunID, ChatID: "older-chat", PendingInput: "Existing work"}
+			if race {
+				f.s.repo = &aiAdmissionRaceRepo{Repository: f.repo, active: active}
+			} else if _, err := f.repo.ReserveAIRun(ctx, active); err != nil {
+				t.Fatal(err)
+			}
+			w := f.request(t, http.MethodPost, "/v1/ai/runs", aiSubmission{CompanyID: f.route.CompanyID, RunID: "10000000-0000-4000-8000-000000000002", ChatID: "newer-chat", Message: "New work"}, f.user)
+			var body map[string]string
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || w.Code != 409 || body["error"] != "ai_run_active_or_request_conflict" || body["active_chat_id"] != "older-chat" || body["active_run_id"] != aiTestRunID {
+				t.Fatalf("active admission conflict: %d %s (%v)", w.Code, w.Body, err)
+			}
+			if f.admissions != 0 {
+				t.Fatalf("conflicting request admitted %d native runs", f.admissions)
+			}
+		})
+	}
+}
+
 func TestAITenantRouteCannotReadAnotherTenantRun(t *testing.T) {
 	f := newAIFixture(t)
 	if w := f.submit(t); w.Code != 202 {

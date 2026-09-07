@@ -136,9 +136,14 @@ func (r *PostgresRepo) updateAIRun(ctx context.Context, companyID, userID, runID
 	if err != nil {
 		return AIRun{}, err
 	}
+	previous := run
 	run, err = update(run)
 	if err != nil {
 		return AIRun{}, err
+	}
+	// These updates only change execution state or append immutable history.
+	if run.HermesRunID == previous.HermesRunID && run.Status == previous.Status && run.PendingInput == previous.PendingInput && len(run.History) == len(previous.History) {
+		return run, tx.Commit()
 	}
 	if err := saveAIRunStateTx(ctx, tx, run); err != nil {
 		return AIRun{}, err

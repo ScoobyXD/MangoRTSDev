@@ -42,9 +42,10 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(self.events[0]["data"], {"model": "fixture-model"})
 
     def test_all_tools_are_observed_without_exporting_arguments_or_results(self):
-        with patch.object(history, "_safe_snapshot"):
+        with patch.object(history, "_safe_snapshot") as capture:
             result = history.observe_tool("memory", {"secret": "private-argument"},
                 lambda args: '{"error":"private-result"}', session_id=SESSION, tool_call_id="call-memory")
+        capture.assert_not_called()
         self.assertIn("private-result", result)
         self.assertEqual([event["type"] for event in self.events], ["tool.started", "tool.completed"])
         self.assertFalse(self.events[1]["data"]["succeeded"])

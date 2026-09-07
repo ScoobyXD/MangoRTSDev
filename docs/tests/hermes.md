@@ -43,6 +43,11 @@
 41. History callbacks with an unknown native execution must wait for exact admission binding and must never bind themselves by chat alone.
 42. Definitively rejected history must remain in the scoped durable queue for inspection, while later runs may proceed and no rejected run may apply a partial snapshot marker.
 43. A completed visible reply must remain displayed while its durable transcript delivery is pending; explicit Resume must refresh it without resubmitting work.
+44. Active-run conflicts must identify and open that run's exact scoped chat.
+45. Full visible transcript snapshots must occur at initial input and run completion.
+46. Tool callbacks must append tool observations without copying the full transcript.
+47. Unchanged run state and acknowledged identical events must not rewrite saved history.
+48. A message import must validate each distinct chat/run reference once and load existing message IDs together.
 
 ## Process story
 

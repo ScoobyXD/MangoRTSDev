@@ -291,7 +291,6 @@ def observe_tool(tool_name, args, next_call, session_id="", tool_call_id="", **k
         return result
     finally:
         _safe_event(context, "tool.completed", tool_call_id, {**data, "succeeded": bool(succeeded)})
-        _safe_snapshot(context, f"tool:{tool_call_id}")
 
 
 def register(ctx):

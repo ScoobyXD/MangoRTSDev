@@ -248,7 +248,7 @@ func (s *Server) acknowledgeHermesHistory(w http.ResponseWriter, r *http.Request
 			writeHermesError(w, err)
 			return
 		}
-		if !aiTerminal(updated.Status) {
+		if !store.AITerminalStatus(updated.Status) {
 			writeError(w, 503, "ai_history_execution_pending")
 			return
 		}

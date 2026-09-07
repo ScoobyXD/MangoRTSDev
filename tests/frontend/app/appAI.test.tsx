@@ -285,11 +285,11 @@ test("definitive invalid sends preserve an editable draft without an uncertain r
   } finally { await h.dispose(); }
 });
 
-test("an existing active run conflict opens saved progress and an interrupted run becomes terminal", async () => {
-  let conflict = false;
+test("an active run conflict opens its older chat instead of the newest chat", async () => {
   const h = await harness((url) => {
-    if (url.includes("/runs?")) { conflict = true; return Response.json({ error: "ai_run_active_or_request_conflict" }, { status: 409 }); }
-    if (url.includes("/chats?")) return Response.json({ chats: conflict ? [{ chat_id: "saved", name: "Prior request" }] : [] });
+    if (url.includes("/runs?")) return Response.json({ error: "ai_run_active_or_request_conflict", active_chat_id: "saved", active_run_id: "run-existing" }, { status: 409 });
+    if (url.includes("/chats?")) return Response.json({ chats: [{ chat_id: "newest", name: "Newer chat" }, { chat_id: "saved", name: "Prior request" }] });
+    if (url.includes("/chats/newest?")) return Response.json({ chat_id: "newest", messages: [] });
     if (url.includes("/chats/saved?")) return Response.json({ chat_id: "saved", messages: [{ message_id: 1, created_timestamp: "2026-09-07T00:00:00Z", role: "ai", content: "Existing outcome" }], active_run_id: "run-existing" });
     return Response.json({ run_id: "run-existing", chat_id: "saved", status: "interrupted" });
   });
@@ -299,6 +299,20 @@ test("an existing active run conflict opens saved progress and an interrupted ru
     assert.doesNotMatch(h.container.textContent!, /Retry saved message|Stop response/);
     assert.equal(h.input().value, "New request");
     assert.equal(h.button("Send").disabled, false);
+    assert.equal(h.container.querySelector("select")!.value, "saved");
+    assert.equal(h.requests.filter(({ url }) => url.includes("/chats/newest?")).length, 1, "recovery must not read the unrelated newest chat again");
+  } finally { await h.dispose(); }
+});
+
+test("a conflict without active run identities preserves the uncertain send", async () => {
+  const h = await harness((url) => url.includes("/runs?")
+    ? Response.json({ error: "ai_run_active_or_request_conflict" }, { status: 409 })
+    : Response.json({ chats: [] }));
+  try {
+    await h.click("Expand AI chat"); await h.setText("New request"); await h.click("Send");
+    assert.match(h.container.textContent!, /Retry saved message/);
+    assert.doesNotMatch(h.container.textContent!, /Its saved chat has been opened/);
+    assert.equal(h.requests.filter(({ url }) => url.includes("/chats?")).length, 1, "an ordinary conflict must not guess a recovery chat");
   } finally { await h.dispose(); }
 });
 

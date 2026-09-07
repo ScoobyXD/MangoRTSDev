@@ -91,29 +91,64 @@ func (r *PostgresRepo) ImportAIMessages(ctx context.Context, companyID, userID s
 	if err := lockAIMemberTx(ctx, tx, companyID, userID); err != nil {
 		return err
 	}
-	for _, input := range messages {
+	if len(messages) == 0 {
+		return tx.Commit()
+	}
+	normalized := make([]AIMessage, len(messages))
+	ids := make([]int64, len(messages))
+	chats := map[string]bool{}
+	runChats := map[string]string{}
+	for i, input := range messages {
 		message, err := normalizeAIMessage(companyID, userID, input)
 		if err != nil {
 			return err
 		}
-		if _, err := aiChatTx(ctx, tx, companyID, userID, message.ChatID); err != nil {
-			return err
+		if !chats[message.ChatID] {
+			if _, err := aiChatTx(ctx, tx, companyID, userID, message.ChatID); err != nil {
+				return err
+			}
+			chats[message.ChatID] = true
 		}
 		if message.RunID != "" {
-			var chatID string
-			err := tx.QueryRowContext(ctx, `select coalesce(chat_id,'') from ai_runs where company_id=$1::uuid and user_id=$2::uuid and run_id=$3::uuid`, companyID, userID, message.RunID).Scan(&chatID)
-			if errors.Is(err, sql.ErrNoRows) {
-				return ErrNotFound
-			}
-			if err != nil {
-				return err
+			chatID, found := runChats[message.RunID]
+			if !found {
+				err := tx.QueryRowContext(ctx, `select coalesce(chat_id,'') from ai_runs where company_id=$1::uuid and user_id=$2::uuid and run_id=$3::uuid`, companyID, userID, message.RunID).Scan(&chatID)
+				if errors.Is(err, sql.ErrNoRows) {
+					return ErrNotFound
+				}
+				if err != nil {
+					return err
+				}
+				runChats[message.RunID] = chatID
 			}
 			if chatID != message.ChatID {
 				return ErrConflict
 			}
 		}
-		saved, err := scanAIMessage(tx.QueryRowContext(ctx, `select `+aiMessageColumns+` from ai_messages m where m.company_id=$1::uuid and m.user_id=$2::uuid and m.message_id=$3 for update`, companyID, userID, message.MessageID))
-		if err == nil {
+		normalized[i], ids[i] = message, message.MessageID
+	}
+	rows, err := tx.QueryContext(ctx, `select `+aiMessageColumns+` from ai_messages m where m.company_id=$1::uuid and m.user_id=$2::uuid and m.message_id=any($3::bigint[]) for update`, companyID, userID, ids)
+	if err != nil {
+		return err
+	}
+	existing := make(map[int64]AIMessage, len(messages))
+	for rows.Next() {
+		message, err := scanAIMessage(rows)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		existing[message.MessageID] = message
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, message := range normalized {
+		if saved, found := existing[message.MessageID]; found {
 			merged, err := mergeAIMessage(saved, message)
 			if err != nil {
 				return err
@@ -123,14 +158,13 @@ func (r *PostgresRepo) ImportAIMessages(ctx context.Context, companyID, userID s
 					return err
 				}
 			}
+			existing[message.MessageID] = merged
 			continue
-		}
-		if !errors.Is(err, ErrNotFound) {
-			return err
 		}
 		if _, err := tx.ExecContext(ctx, `insert into ai_messages(company_id,user_id,message_id,chat_id,run_id,role,content,created_timestamp) values($1::uuid,$2::uuid,$3,$4,nullif($5,'')::uuid,$6,$7,$8)`, companyID, userID, message.MessageID, message.ChatID, message.RunID, message.Role, message.Content, message.CreatedAt); err != nil {
 			return aiStoreError(err)
 		}
+		existing[message.MessageID] = message
 	}
 	return tx.Commit()
 }

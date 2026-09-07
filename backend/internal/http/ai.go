@@ -32,14 +32,6 @@ type hermesRunStatus struct {
 	UpdatedAt float64 `json:"updated_at"`
 }
 
-func aiTerminal(status string) bool {
-	switch status {
-	case "completed", "failed", "cancelled", "interrupted":
-		return true
-	}
-	return false
-}
-
 func (s *Server) aiScope(w http.ResponseWriter, r *http.Request, companyID string) (ActorContext, HermesRoute, bool) {
 	actor, ok := authenticatedActor(r)
 	if !ok || actor.User.UserID == "" {
@@ -114,6 +106,10 @@ func writeAIStoreError(w http.ResponseWriter, err error) {
 	}
 }
 
+func writeAIActiveRunConflict(w http.ResponseWriter, run store.AIRun) {
+	writeJSON(w, 409, map[string]string{"error": "ai_run_active_or_request_conflict", "active_chat_id": run.ChatID, "active_run_id": run.RunID})
+}
+
 func (s *Server) handleAI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/v1/ai/"), "/")
@@ -177,7 +173,7 @@ func aiRunResponse(run store.AIRun) map[string]any {
 	if message := aiRunError(run); message != "" {
 		out["error"] = message
 	}
-	if run.PendingInput != "" && run.HermesRunID == "" && !aiTerminal(run.Status) {
+	if run.PendingInput != "" && run.HermesRunID == "" && !store.AITerminalStatus(run.Status) {
 		out["pending_submission"] = aiSubmission{CompanyID: run.CompanyID, ChatID: run.ChatID, RunID: run.RunID, Message: run.PendingInput}
 	}
 	return out
@@ -255,8 +251,8 @@ func (s *Server) createAIRun(w http.ResponseWriter, r *http.Request) {
 			writeAIStoreError(w, activeErr)
 			return
 		}
-		if activeErr == nil && !aiTerminal(active.Status) {
-			writeAIStoreError(w, store.ErrConflict)
+		if activeErr == nil && !store.AITerminalStatus(active.Status) {
+			writeAIActiveRunConflict(w, active)
 			return
 		}
 		if body.ChatID == "" {
@@ -274,12 +270,24 @@ func (s *Server) createAIRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		run, err = s.repo.ReserveAIRun(r.Context(), store.AIRun{CompanyID: route.CompanyID, UserID: route.UserID, RunID: body.RunID, ChatID: body.ChatID, PendingInput: body.Message})
+		if errors.Is(err, store.ErrConflict) {
+			// Another admission may have won after the initial active-run check.
+			active, activeErr = s.repo.ActiveAIRun(r.Context(), route.CompanyID, route.UserID)
+			if activeErr == nil && active.RunID != body.RunID && !store.AITerminalStatus(active.Status) {
+				writeAIActiveRunConflict(w, active)
+				return
+			}
+			if activeErr != nil && !errors.Is(activeErr, store.ErrNotFound) {
+				writeAIStoreError(w, activeErr)
+				return
+			}
+		}
 	}
 	if err != nil {
 		writeAIStoreError(w, err)
 		return
 	}
-	if aiTerminal(run.Status) {
+	if store.AITerminalStatus(run.Status) {
 		writeJSON(w, 202, aiRunResponse(run))
 		return
 	}
@@ -342,7 +350,7 @@ func (s *Server) admitAIRun(ctx context.Context, route HermesRoute, run store.AI
 var errAINotDurable = errors.New("Hermes durable storage required")
 
 func (s *Server) refreshAIRun(ctx context.Context, route HermesRoute, run store.AIRun) (store.AIRun, error) {
-	if run.HermesRunID == "" || aiTerminal(run.Status) {
+	if run.HermesRunID == "" || store.AITerminalStatus(run.Status) {
 		return run, nil
 	}
 	var native hermesRunStatus
@@ -360,7 +368,7 @@ func (s *Server) refreshAIRun(ctx context.Context, route HermesRoute, run store.
 	if native.Status == "queued" {
 		return run, nil
 	}
-	if aiTerminal(native.Status) {
+	if store.AITerminalStatus(native.Status) {
 		// Keep a final status snapshot before native retention expires. Polling is recovery; hooks record the execution steps.
 		if native.Output != "" {
 			data, _ := json.Marshal(map[string]string{"output": native.Output})
@@ -389,7 +397,7 @@ func (s *Server) refreshAIRun(ctx context.Context, route HermesRoute, run store.
 }
 
 func (s *Server) cancelAIRun(w http.ResponseWriter, r *http.Request, route HermesRoute, run store.AIRun) {
-	if aiTerminal(run.Status) {
+	if store.AITerminalStatus(run.Status) {
 		writeJSON(w, 200, aiRunResponse(run))
 		return
 	}
@@ -398,7 +406,7 @@ func (s *Server) cancelAIRun(w http.ResponseWriter, r *http.Request, route Herme
 		writeAIStoreError(w, err)
 		return
 	}
-	if aiTerminal(run.Status) {
+	if store.AITerminalStatus(run.Status) {
 		writeJSON(w, 200, aiRunResponse(run))
 		return
 	}
@@ -501,7 +509,7 @@ func (s *Server) streamAIRun(w http.ResponseWriter, r *http.Request, route Herme
 		}
 		return controller.Flush() == nil
 	}
-	if aiTerminal(status.Status) {
+	if store.AITerminalStatus(status.Status) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		emit(map[string]any{"event": "run." + status.Status, "run_id": run.RunID, "output": aiRunOutput(status), "error": aiRunError(status)})
 		return
