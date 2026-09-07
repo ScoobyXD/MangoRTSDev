@@ -223,11 +223,11 @@ const INVITE_ROLE_OPTIONS: SettingsSelectOption[] = [
 const COMPANY_SEARCH_LIMIT = 100;
 
 const panelStyle: React.CSSProperties = {
-  width: "100vw",
-  height: "100vh",
-  display: "grid",
-  placeItems: "center",
-  padding: "clamp(18px, 5vh, 42px) 16px",
+  width: "100%",
+  height: "100dvh",
+  display: "flex",
+  flexDirection: "column",
+  padding: 24,
   overflowY: "auto",
   background:
     "linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(242,245,250,0.92) 42%, rgba(232,237,246,0.96) 100%)",
@@ -238,9 +238,11 @@ const panelStyle: React.CSSProperties = {
 const formStyle: React.CSSProperties = {
   width: "100%",
   maxWidth: 456,
+  margin: "auto",
+  flexShrink: 0,
   display: "grid",
   gap: 16,
-  padding: 20,
+  padding: 24,
   border: "1px solid rgba(255, 255, 255, 0.84)",
   background: "linear-gradient(145deg, rgba(255, 255, 255, 0.94) 0%, rgba(246, 247, 251, 0.9) 100%)",
   borderRadius: 8,
@@ -876,7 +878,12 @@ function LoginPage({ onChallenge, onAuthenticated, onNavigate, loadError }: { on
     await onAuthenticated();
   };
   return (
-    <AuthPanel title="MangoRTS" error={error || loadError} wide>
+    <AuthPanel title="MangoRTS" error={error || loadError} wide actions={
+      <>
+        <AuthSecondaryButton type="button" disabled={busy !== null} onClick={() => onNavigate("/accept-invite")}>Accept invite</AuthSecondaryButton>
+        <AuthSecondaryButton type="button" disabled={busy !== null} onClick={() => onNavigate("/forgot-password")}>Forgot password</AuthSecondaryButton>
+      </>
+    }>
       <div className="mango-auth-columns">
       <form aria-label="Sign Up" style={authFormStyle} onSubmit={async (event) => {
         event.preventDefault();
@@ -950,10 +957,6 @@ function LoginPage({ onChallenge, onAuthenticated, onNavigate, loadError }: { on
           setMessage("You can confirm your email and use Sign In with the password you chose.");
         }}>Stop waiting</AuthSecondaryButton>}
       </div>}
-      <div style={authActionRowStyle}>
-        <AuthSecondaryButton type="button" disabled={busy !== null} onClick={() => onNavigate("/accept-invite")}>Accept invite</AuthSecondaryButton>
-        <AuthSecondaryButton type="button" disabled={busy !== null} onClick={() => onNavigate("/forgot-password")}>Forgot password</AuthSecondaryButton>
-      </div>
     </AuthPanel>
   );
 }
@@ -1608,12 +1611,15 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
   );
 }
 
-function AuthPanel({ error, children, wide = false }: { title: string; error?: string; children: React.ReactNode; wide?: boolean }) {
+function AuthPanel({ error, children, wide = false, actions }: { title: string; error?: string; children: React.ReactNode; wide?: boolean; actions?: React.ReactNode }) {
   return (
     <div style={panelStyle}>
       <div style={wide ? { ...formStyle, maxWidth: 800 } : formStyle}>
         <div style={authHeaderStyle}>
-          <MangoWordmark size={28} weight={680} />
+          <div className="mango-auth-header-row">
+            <MangoWordmark size={28} weight={680} />
+            {actions && <div className="mango-auth-header-actions">{actions}</div>}
+          </div>
           <div style={authAccentRailStyle} />
         </div>
         {error && <div role="alert" style={authErrorStyle}>{error}</div>}
