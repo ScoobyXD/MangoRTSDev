@@ -476,7 +476,7 @@ test("New chat saves an empty named chat without sending a message", async () =>
 });
 
 
-test("queued history callbacks cannot erase the completed reply before an explicit sync", async () => {
+for (const historyMarker of ["run.finished", "history.recovered"]) test(`queued history preserves the completed reply until explicit sync observes ${historyMarker}`, async () => {
   const stream = eventStream();
   let accepted = false;
   let completed = false;
@@ -490,7 +490,7 @@ test("queued history callbacks cannot erase the completed reply before an explic
     ] : [] });
     if (url.includes("/runs?")) { accepted = true; assert.equal(JSON.parse(String(init.body)).run_id, runID); }
     if (url.includes("/events?")) return stream.response;
-    return Response.json({ run_id: runID, chat_id: "saved", status: completed ? "completed" : "running", output: completed ? "Exact completed reply" : undefined, history: historyReady ? [{ event: "run.finished" }] : [] });
+    return Response.json({ run_id: runID, chat_id: "saved", status: completed ? "completed" : "running", output: completed ? "Exact completed reply" : undefined, history: historyReady ? [{ event: historyMarker }] : [{ event: "messages.saved" }] });
   });
   try {
     await h.click("Expand AI chat"); await h.setText("Keep this reply"); await h.click("Send");

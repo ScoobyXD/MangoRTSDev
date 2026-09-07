@@ -113,6 +113,10 @@ func (r *MemoryRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMo
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.moveLogicGateNodeAssignmentLocked(input)
+}
+
+func (r *MemoryRepo) moveLogicGateNodeAssignmentLocked(input LogicGateNodeAssignmentMoveInput) (LogicGateNodeAssignmentResult, error) {
 	snapshot := r.snapshotWorkItemAssignmentEventStateLocked()
 	previous, ok := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, "")
 	if !ok {

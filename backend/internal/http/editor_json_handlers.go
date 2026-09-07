@@ -324,15 +324,7 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 			writeEditorJSONStoreError(w, err)
 			return
 		}
-		if ref.ResourceType == store.EntityTypeNode || ref.ResourceType == store.EntityTypeProject || ref.ResourceType == store.EntityTypeLogicGate || ref.ResourceType == store.EntityTypeProcessStep {
-			addedMentions := mangoTiptapAddedMentionNotificationHTML(beforeCommit.JSONDocument, commit.JSONDocument)
-			if addedMentions != "" {
-				s.recordMentionNotificationsWithIdempotencyScope(
-					r, ref.CompanyID, ref.ResourceType, ref.ResourceID, ref.DocumentID, "Text box", addedMentions, "editor-json:"+commit.OperationID,
-				)
-			}
-		}
-		s.wakeRealtimeSpine()
+		s.afterEditorJSONCommit(r, ref, beforeCommit.JSONDocument, commit)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"operation_id": commit.OperationID,
 			"revision":     commit.Revision,
@@ -400,6 +392,16 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}
+}
+
+func (s *Server) afterEditorJSONCommit(r *http.Request, ref store.EditorJSONDocumentRef, before json.RawMessage, commit store.EditorJSONCommit) {
+	if ref.ResourceType == store.EntityTypeNode || ref.ResourceType == store.EntityTypeProject || ref.ResourceType == store.EntityTypeLogicGate || ref.ResourceType == store.EntityTypeProcessStep {
+		addedMentions := mangoTiptapAddedMentionNotificationHTML(before, commit.JSONDocument)
+		if addedMentions != "" {
+			s.recordMentionNotificationsWithIdempotencyScope(r, ref.CompanyID, ref.ResourceType, ref.ResourceID, ref.DocumentID, "Text box", addedMentions, "editor-json:"+commit.OperationID)
+		}
+	}
+	s.wakeRealtimeSpine()
 }
 
 func (s *Server) handleEditorJSONCollaborationTicket(w http.ResponseWriter, r *http.Request, actor ActorContext, ref store.EditorJSONDocumentRef) {

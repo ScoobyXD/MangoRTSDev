@@ -48,6 +48,13 @@ func newAIFixture(t *testing.T) *aiFixture {
 	}
 	f.stepID = step.Step.ProcessStepID
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		profilePrefix := "/p/" + strings.ReplaceAll(transcriptionTestCompany+f.user.UserID, "-", "")
+		if !strings.HasPrefix(r.URL.Path, profilePrefix+"/") {
+			t.Errorf("request escaped exact native profile: %s", r.URL.Path)
+			w.WriteHeader(404)
+			return
+		}
+		r.URL.Path = strings.TrimPrefix(r.URL.Path, profilePrefix)
 		if r.Header.Get("Authorization") != "Bearer "+strings.Repeat("a", 32) {
 			t.Error("missing private Hermes credential")
 			w.WriteHeader(401)

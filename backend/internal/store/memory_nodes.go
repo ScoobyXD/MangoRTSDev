@@ -99,6 +99,10 @@ func (r *MemoryRepo) UpdateNode(input UpdateNodeInput) (domain.Node, error) {
 func (r *MemoryRepo) UpdateNodeAndWorkspaceEvent(input UpdateNodeInput) (domain.Node, domain.DomainEvent, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.updateNodeAndWorkspaceEventLocked(input)
+}
+
+func (r *MemoryRepo) updateNodeAndWorkspaceEventLocked(input UpdateNodeInput) (domain.Node, domain.DomainEvent, error) {
 	snapshot := r.snapshotNodeGraphEventStateLocked()
 	before, hasBefore := r.nodes[key(input.CompanyID, input.NodeID)]
 	item, err := r.updateNodeLocked(input)

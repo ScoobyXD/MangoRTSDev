@@ -253,7 +253,17 @@ func (r *PostgresRepo) UpdateNodeAndWorkspaceEvent(input UpdateNodeInput) (domai
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
 	defer tx.Rollback()
+	item, event, err := r.updateNodeAndWorkspaceEventTx(ctx, tx, input)
+	if err != nil {
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Node{}, domain.DomainEvent{}, err
+	}
+	return item, event, nil
+}
 
+func (r *PostgresRepo) updateNodeAndWorkspaceEventTx(ctx context.Context, tx *sql.Tx, input UpdateNodeInput) (domain.Node, domain.DomainEvent, error) {
 	before, err := scanNode(tx.QueryRowContext(ctx, `
 select `+nodeSelectColumns+`
 from nodes n
@@ -278,9 +288,6 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 	}
 	event, err := r.appendDomainEventTx(ctx, tx, nodeUpdatedWorkspaceEventInputForUpdate(input, before, item))
 	if err != nil {
-		return domain.Node{}, domain.DomainEvent{}, err
-	}
-	if err := tx.Commit(); err != nil {
 		return domain.Node{}, domain.DomainEvent{}, err
 	}
 	return item, event, nil

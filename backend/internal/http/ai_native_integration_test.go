@@ -66,6 +66,8 @@ func TestAINativeRuntimeIntegration(t *testing.T) {
 	}
 	const accessToken = "isolated-native-test-auth-token"
 	route := HermesRoute{CompanyID: companyID, UserID: user.UserID, URL: nativeURL, APIKey: apiKey, CallbackKey: callbackKey}
+	route.APIKey = hermesProfileKey(apiKey, "api", route.profileName())
+	route.CallbackKey = hermesProfileKey(callbackKey, "callback", route.profileName())
 	server := NewServerWithOptions(repo, ServerOptions{
 		AuthValidator: &tokenClaimsValidator{claims: map[string]auth.Claims{accessToken: {Subject: user.CognitoSubject, Email: user.Email, Name: user.DisplayName}}},
 		HermesRoutes:  []HermesRoute{route}, DisableRealtimeSpine: true, DisableNotificationCleanup: true, DisableAttachmentUploadCleanup: true,
@@ -120,8 +122,8 @@ func TestAINativeRuntimeIntegration(t *testing.T) {
 	lastProbe := "no response"
 	for !ready {
 		probeContext, cancelProbe := context.WithTimeout(startup, time.Second)
-		request, _ := http.NewRequestWithContext(probeContext, http.MethodGet, nativeURL+"/v1/capabilities", nil)
-		request.Header.Set("Authorization", "Bearer "+apiKey)
+		request, _ := http.NewRequestWithContext(probeContext, http.MethodGet, nativeURL+"/p/"+route.profileName()+"/v1/capabilities", nil)
+		request.Header.Set("Authorization", "Bearer "+route.APIKey)
 		response, err := client.Do(request)
 		if err == nil {
 			ready = response.StatusCode == http.StatusOK
@@ -233,8 +235,8 @@ func TestAINativeRuntimeIntegration(t *testing.T) {
 	if err != nil || len(nodes) != 1 || nodes[0].Title != "Fixture Node" {
 		t.Fatalf("native action committed %d Nodes, err=%v", len(nodes), err)
 	}
-	if actionCallbacks.Load() != 2 {
-		t.Fatalf("expected two native callbacks deduplicated into one Node, got %d", actionCallbacks.Load())
+	if actionCallbacks.Load() != 3 {
+		t.Fatalf("expected Process listing and two creation callbacks deduplicated into one Node, got %d", actionCallbacks.Load())
 	}
 	work, err := repo.GetLogicGateWork(companyID, process.LogicGateID, user.UserID)
 	if err != nil || len(work.Nodes) != 1 {

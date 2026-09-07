@@ -144,11 +144,19 @@ func (r *PostgresRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignment
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	defer tx.Rollback()
+	result, err := r.moveLogicGateNodeAssignmentTx(ctx, tx, input)
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	return result, tx.Commit()
+}
+
+func (r *PostgresRepo) moveLogicGateNodeAssignmentTx(ctx context.Context, tx *sql.Tx, input LogicGateNodeAssignmentMoveInput) (LogicGateNodeAssignmentResult, error) {
 	if err := lockProcessStepsTx(ctx, tx, input.CompanyID, input.LogicGateID); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	var nodeID string
-	if err = tx.QueryRowContext(ctx, `select node_id::text from nodes where company_id=$1::uuid and node_id=$2::uuid for update`, input.CompanyID, input.NodeID).Scan(&nodeID); errors.Is(err, sql.ErrNoRows) {
+	if err := tx.QueryRowContext(ctx, `select node_id::text from nodes where company_id=$1::uuid and node_id=$2::uuid for update`, input.CompanyID, input.NodeID).Scan(&nodeID); errors.Is(err, sql.ErrNoRows) {
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	} else if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
@@ -163,9 +171,6 @@ func (r *PostgresRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignment
 	}
 	result, err := r.assignNodeToLogicGateStatusTx(ctx, tx, LogicGateNodeAssignmentInput{CompanyID: input.CompanyID, LogicGateID: input.LogicGateID, NodeID: input.NodeID, Status: input.Status, ProcessStepID: input.ProcessStepID, ProcessStepIDSet: input.ProcessStepIDSet, Position: position, Priority: input.Priority, PrioritySet: input.PrioritySet, ActorUserID: input.ActorUserID, IdempotencyKey: input.IdempotencyKey})
 	if err != nil {
-		return LogicGateNodeAssignmentResult{}, err
-	}
-	if err = tx.Commit(); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
 	return result, nil

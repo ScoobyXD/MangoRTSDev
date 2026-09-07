@@ -2,7 +2,7 @@
 
 1. Mango must follow Hermes's native storage conventions where applicable, storing plain text as text and structured data as JSON while preserving native identities.
 2. Mango must connect to the pinned self-hosted Hermes HTTP Runs API through its existing authenticated Go backend and shared frontend transport.
-3. Each provisioned company/user pair must have one private Hermes process, distinct service and callback credentials, and its own persistent home.
+3. Exactly one Hermes container and native gateway must serve all configured company/user profiles through one private origin and native /p/<profile> routes.
 4. A Hermes home must reject another company/user binding and retain native memory, learned skills, session SQLite databases and response data across restarts.
 5. Every `ai_chats`, `ai_messages`, `ai_runs` and `ai_actions` row must contain the exact existing `company_id` and `user_id`.
 6. Every AI relationship must include its company/user scope and must grant no business-resource access.
@@ -22,7 +22,7 @@
 20. Run history and visible messages must exclude raw provider reasoning, credentials, hidden instructions and raw tool payloads.
 21. A session-end callback must confirm native terminal status before acknowledgement, using durable delivery retries when execution is still finishing.
 22. Each browser request and private callback must recheck current company membership; model arguments must never choose actor, company, credentials or endpoints.
-23. Mango must reject unconfigured scopes and native services without durable admission deduplication.
+23. Mango must reject unconfigured scopes, multiple gateway origins and native services without durable admission deduplication.
 24. Only explicit Send may submit a draft; Enter and dictation must never invoke Hermes.
 25. Account or company changes must clear visible drafts and history, cancel dictation and reject late results from the previous scope.
 26. Saved chats must read Mango's durable visible messages, while interrupted streams must recover using the same saved local run without resubmitting work.
@@ -35,8 +35,8 @@
 33. Replaying an action must never recreate a subsequently deleted business resource.
 34. Stop must close Mango action admission before native cancellation and preserve already committed actions.
 35. Membership removal must deny access while retaining historical retry protection; permanent company or user deletion must cascade through Mango AI records.
-36. Provider credentials must remain in server runtime memory and must never enter browser responses, tools, logs or plaintext local configuration.
-37. Native memory and skill learning must remain enabled, while general shell, filesystem, network, delegation and scheduled execution tools remain unavailable.
+36. Runtime provider credentials must remain in server memory, OAuth authorization must use native profile storage, and no credential may enter browser responses, tools, logs or plaintext configuration.
+37. Native memory, skills and web tools must remain enabled, while general shell, filesystem, delegation and scheduled execution tools remain unavailable; private integrations require their own profile authorization and exact discovered tool selection.
 38. Missing Hermes configuration must preserve ordinary Mango behavior, typed drafts and independent Deepgram dictation.
 39. The application runtime must require PostgreSQL AI storage before enabling Hermes; in-memory AI storage must remain a test fixture.
 40. Scheduled jobs and scheduled runs must remain outside this implementation.
@@ -44,27 +44,43 @@
 42. Definitively rejected history must remain in the scoped durable queue for inspection, while later runs may proceed and no rejected run may apply a partial snapshot marker.
 43. A completed visible reply must remain displayed while its durable transcript delivery is pending; explicit Resume must refresh it without resubmitting work.
 44. Active-run conflicts must identify and open that run's exact scoped chat.
-45. Full visible transcript snapshots must occur at initial input and run completion.
+45. Full visible transcript snapshots must occur at initial input and run completion, and `run.finished` must be queued only after the final complete snapshot is durably queued.
 46. Tool callbacks must append tool observations without copying the full transcript.
 47. Unchanged run state and acknowledged identical events must not rewrite saved history.
 48. A message import must validate each distinct chat/run reference once and load existing message IDs together.
-49. Configured local startup must start the pinned Hermes container and supply its exact scoped route before starting the existing Go API.
-50. Local Hermes must receive only its provider, service and callback credentials through private stdin, with no AWS credentials, database credentials or host credential directories.
-51. Local Hermes must publish only on loopback and retain its scoped data volume when the launcher stops or restarts it.
+49. Configured local startup must start one pinned shared Hermes container and supply exact profile routes for current memberships before starting the existing Go API.
+50. Local Hermes must receive runtime provider, service, callback and optional exact-profile integration credentials through private stdin, with no AWS credentials, database credentials or host credential directories.
+51. Local Hermes must publish only on loopback and retain the shared volume and every original private volume when the launcher stops or restarts it.
 52. Local startup must check Docker prerequisites before retrieving application credentials or stopping the backend, and must never install Docker or apply database changes.
-53. The Hermes image must start as user 10001 with both Mango plugin modules and an accessible Python interpreter installed.
+53. The Hermes image must start as user 10001 with all Mango plugin modules, the pinned MCP dependency and an accessible Python interpreter installed.
 54. Local startup must resolve an account email to one existing Mango user and company through a read-only membership lookup without guessing or creating identities.
 55. Duplicate users for one email must stop local startup, and multiple companies must require an explicit selection.
 56. Local startup must remember only the selected company UUID and must recheck the user's membership on every launch.
 57. Local startup must find Docker Desktop in its standard install folders when the current PowerShell PATH is stale and make its credential helpers available in that process.
+58. A native profile name must encode its exact company UUID and user UUID without hyphens, and its home must retain the immutable exact UUID binding.
+59. API and callback keys must be derived separately for each exact profile from stable injected gateway secrets; a sibling key must never authorize another profile.
+60. Local service secrets must persist encrypted with Windows CurrentUser DPAPI, and an existing shared volume must never silently receive replacement secrets.
+61. Native history databases, outboxes and transient hook state must be selected by the active profile; delivery workers must capture that profile's callback credentials before crossing threads.
+62. Original owned volumes must mount at their exact native profile directories without copying or reassigning data, and a persisted volume binding must reject later remapping.
+63. The first cutover to the shared gateway must refuse while Mango has nonterminal runs; completed chats and native data must remain intact.
+64. Integration discovery must distinguish installed instructions, configured connections, authorized callable tools and actually successful execution.
+65. A private integration connection name and OAuth state must belong to one exact profile, and shared native MCP connection caches must never reuse another profile's connection.
+66. Native compression must keep the admitted session identity in place.
+67. Only explicit operator repair may select admitted terminal runs missing both `run.finished` and `history.recovered`, using a read-only lookup of their exact company, user, native run and session IDs.
+68. Startup repair must keep the shared home unchanged, select each exact bound native profile and queue its complete native display snapshot before gateway execution, without executing a model or contacting a provider.
+69. Repair must read native history without modifying it, preserve literal session and integer message IDs, include compacted display history and exclude rewound, hidden, tool and reasoning content.
+70. Each repair capture must use fresh event identities and queue `history.recovered` only after its complete snapshot succeeds; missing sessions and previously rejected runs must not claim repaired history or replay rejected events.
+71. Mango must accept a recovery marker only for the exact admitted terminal run, and explicit Resume must reload its saved messages without synthesizing original execution events or submitting another run.
+72. Every saved private integration must specify a boolean `enabled`; a missing flag must never inherit native default-on behavior or bypass exact tool selection.
+73. Integration setup must use native `oauth.redirect_port` so the native callback listener matches the configured redirect URI.
 
 ## Process story
 
-The user creates an empty chat or sends a message. Mango reserves a local run and sends its original input to that pair's private Hermes service with a durable idempotency key. Hermes assigns its own run ID and executes its native agent. Supported hooks persist observations and visible transcript snapshots in a local SQLite delivery queue, then send them to the authenticated Mango callback. Mango saves visible messages and appends run history. The final callback confirms native completion before acknowledgement, so the same durable delivery worker settles run status without a browser. Reopening the panel reads those saved records without depending on a still-retained native stream.
+The user creates an empty chat or sends a message. Mango reserves a local run and sends its original input to that pair's named profile in the shared Hermes gateway with a durable idempotency key. Hermes assigns its own run ID and executes its native agent. Supported hooks persist observations and visible transcript snapshots in a local SQLite delivery queue, then send them to the authenticated Mango callback. Mango saves visible messages and appends run history. The final callback confirms native completion before acknowledgement, so the same durable delivery worker settles run status without a browser. Reopening the panel reads those saved records without depending on a still-retained native stream.
 
 When Hermes requests a business change, Go checks native execution state, local admission and current permissions. The existing business command commits its change together with the shared action result and history event. Stop closes local action admission before asking Hermes to cancel. Neither closing a panel nor retrying delivery creates another run or action.
 
-Native memory, learned skills, full transcripts and provider execution remain in the exact scoped Hermes home. Provisioning is explicit; there is no automatic container scheduler or profile multiplexing. Operations must retire permanently deleted identity volumes under their retention policy and must never reassign a home. The legacy AI inspection archive and its resource relationships remain removed.
+Native memory, learned skills, full transcripts and provider execution remain in the exact scoped Hermes home. One native gateway multiplexes the configured profiles; there is no container scheduler or dedicated user container. Operations must retire permanently deleted identity volumes under their retention policy and must never reassign a home. The legacy AI inspection archive and its resource relationships remain removed.
 
 ## Verification and operation
 
