@@ -13,10 +13,9 @@ From the checkout containing the launcher changes:
 ```powershell
 cd C:\Users\Jonat\MangoRTSDev
 docker info
-docker build -t mangorts-hermes:693641aa hermes
 ```
 
-Wait for the build to finish successfully. The image uses the pinned upstream Hermes revision and this checkout's Mango plugin. Rebuild it with the same command after changing files under `hermes/`; startup does not rebuild it automatically.
+The launcher builds `mangorts-hermes:693641aa` from its own checkout on every start, using Docker's normal cache. This keeps the Mango plugin and entrypoint current even when that image tag already exists. The build must succeed before the launcher retrieves application credentials or stops the backend.
 
 ## 2. Check the development database once
 
@@ -93,7 +92,7 @@ Do not delete any of these named volumes to fix a startup error: they contain na
 | Failure | Next step |
 | --- | --- |
 | Docker is missing or its engine is unavailable | Install/start Docker Desktop with Linux containers, then rerun the launcher. |
-| `mangorts-hermes:693641aa` is missing | Run the image build in step 1. |
+| Hermes image build fails | Resolve the Docker build error shown in the terminal, then rerun the launcher. Application credentials have not been loaded and the backend has not been stopped. |
 | Mango account is missing or ambiguous | Check the sign-in email and selected development database. An administrator must resolve duplicate user identities; the launcher never picks one arbitrarily. |
 | SSO session expired or Secrets Manager access denied | Sign into `mangorts-dev` again; if access is still denied, have the dev account administrator check the reported permission. Do not paste credentials into chat or files. |
 | `ai_not_configured_for_account` | Confirm the signed-in Mango user has the selected company membership, then restart the launcher to load any newly added memberships. |

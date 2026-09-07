@@ -166,13 +166,15 @@ function Get-LocalHermesDocker {
     throw "Start Docker Desktop with Linux containers, then run this command again."
   }
   $image = 'mangorts-hermes:693641aa'
-  $imageExists = & {
+  $buildContext = Join-Path (Split-Path -Parent $PSScriptRoot) 'hermes'
+  Write-Host 'Preparing the Hermes image from this checkout (using the Docker build cache).'
+  $imageBuilt = & {
     $ErrorActionPreference = 'Continue'
-    & $docker.Source image inspect --format '{{.Id}}' $image *> $null
+    & $docker.Source build --tag $image $buildContext | Out-Host
     $LASTEXITCODE -eq 0
   }
-  if (-not $imageExists) {
-    throw "Build Hermes once from the repo root: docker build -t $image hermes"
+  if (-not $imageBuilt) {
+    throw 'The Hermes image build failed. Resolve the Docker build error above and rerun the launcher.'
   }
   return $docker.Source
 }

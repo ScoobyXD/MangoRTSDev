@@ -14,6 +14,45 @@ function Assert-Rejected {
   Assert-True $rejected "Expected rejection containing: $Message"
 }
 
+# An existing image tag may contain older Mango code. Always build this checkout
+# before returning Docker to the launcher, and keep build output off its pipeline.
+$script:fixtureImageBuildExit = 0
+$script:fixtureImageBuildCalls = 0
+function Get-Command {
+  param([string[]]$Name, [string]$CommandType, [string]$ErrorAction)
+  Assert-True ($Name[0] -eq 'docker.exe' -and $CommandType -eq 'Application') 'Unexpected Docker lookup executable.'
+  [pscustomobject]@{ Source = 'Invoke-FixtureBuildDocker' }
+}
+function Invoke-FixtureBuildDocker {
+  if (($args -join ' ') -eq 'info --format {{.OSType}}') {
+    $global:LASTEXITCODE = 0
+    return 'linux'
+  }
+  if (($args -join ' ') -eq 'image inspect --format {{.Id}} mangorts-hermes:693641aa') {
+    $global:LASTEXITCODE = 0
+    return 'sha256:existing-stale-image'
+  }
+  Assert-True ($args.Count -eq 4 -and ($args[0..2] -join ' ') -eq 'build --tag mangorts-hermes:693641aa') 'Unexpected image build operation.'
+  Assert-True ($args[3] -eq (Join-Path (Split-Path -Parent $PSScriptRoot) 'hermes')) 'Build must use the launcher checkout, independent of the working directory.'
+  $script:fixtureImageBuildCalls++
+  'Fixture Docker build output'
+  $global:LASTEXITCODE = $script:fixtureImageBuildExit
+}
+$savedDockerHost = $env:DOCKER_HOST
+$savedDockerPath = $env:Path
+try {
+  $env:DOCKER_HOST = 'npipe://fixture'
+  $resolvedDocker = @(Get-LocalHermesDocker)
+  Assert-True ($script:fixtureImageBuildCalls -eq 1) 'An existing stale image must be rebuilt from current source.'
+  Assert-True ($resolvedDocker.Count -eq 1 -and $resolvedDocker[0] -eq 'Invoke-FixtureBuildDocker') 'Build output must not replace the returned Docker executable.'
+  $script:fixtureImageBuildExit = 1
+  Assert-Rejected { Get-LocalHermesDocker } 'Hermes image build failed'
+  Assert-True ($script:fixtureImageBuildCalls -eq 2) 'A failed build must abort prerequisite checks.'
+} finally {
+  $env:DOCKER_HOST = $savedDockerHost
+  $env:Path = $savedDockerPath
+}
+
 $companyA = '11111111-1111-4111-8111-111111111111'
 $companyB = '33333333-3333-4333-8333-333333333333'
 $userA = '22222222-2222-4222-8222-222222222222'

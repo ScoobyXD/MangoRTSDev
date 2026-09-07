@@ -6,16 +6,15 @@ Reviewed upstream: `693641aa8b4359c602283bdbbc14041e03bc47bc`. The image install
 
 ## Start locally
 
-Follow [local startup](../docs/setup/hermes-local.md). After reviewing and integrating this worktree, a human operator builds the image and runs the existing launcher:
+Follow [local startup](../docs/setup/hermes-local.md). A human operator runs the existing launcher:
 
 ```powershell
-docker build -t mangorts-hermes:693641aa hermes
 .\scripts\start_local_cognito_backend.ps1 -AwsProfile mangorts-dev -StopExisting
 ```
 
 Do not rerun `20260907_hermes_action_receipts.sql`: Jonat reports it already applied. This change adds no database migration. Agents must not run the full launcher because it retrieves application runtime secrets.
 
-The launcher keeps the working Docker discovery and authenticated account lookup. It reads existing company memberships, starts fixed container `mangorts-hermes`, and gives Go the exact profile routes. Finish or Stop existing runs before the first transition. The launcher refuses unsafe cutover while nonterminal Mango runs exist.
+The launcher keeps the working Docker discovery and authenticated account lookup. Before loading application credentials or stopping the backend, it builds `mangorts-hermes:693641aa` from its own checkout with Docker's normal cache, so an existing tag cannot silently run older Mango code. It reads existing company memberships, starts fixed container `mangorts-hermes`, and gives Go the exact profile routes. Finish or Stop existing runs before the first transition. The launcher refuses unsafe cutover while nonterminal Mango runs exist.
 
 Existing volumes named `mangorts-hermes-<company UUID>-<user UUID>` mount directly at `/data/profiles/<profile>` in the shared container. Other new profiles live inside the shared `/data` volume. No private state is copied, deleted or reassigned. The persistent `mango-gateway.json` records each source volume and the gateway API credential fingerprint, rejecting later volume remapping or a different API credential. Retain both shared and original volumes in backups.
 
