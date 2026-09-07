@@ -141,9 +141,13 @@
 138. A Step mention notification opens its owning Process and targets the exact Step UUID and mentioned user.
 139. Autosaving unchanged Step mentions or retrying the same save must not create duplicate notifications.
 140. A saved mention with its default kind omitted counts as a normal mention when creating or comparing notifications.
-141. Step-map cards have a neutral white surface and show the Step name with a short plain-text preview of its existing instruction body.
+141. Step-map cards have a neutral white surface and show the Step name with a plain-text preview of its existing instruction body.
 142. Step-map previews never change the stored instruction document or authored card geometry.
 143. A saved Process map updates its Step preview from the existing editor's local snapshots and canonical document updates without issuing a save or replacing the shared work cache.
+144. A selected Step highlights its own card border without an offset outer frame.
+145. Step-card content uses compact top and bottom padding.
+146. A Step preview wraps to the card's current available width.
+147. A Step preview shows as much text as the card's remaining height permits.
 
 ## Process Story
 
