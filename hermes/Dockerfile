@@ -12,7 +12,7 @@ RUN git init . \
     && test "$(git rev-parse HEAD)" = "693641aa8b4359c602283bdbbc14041e03bc47bc" \
     && uv sync --frozen --no-dev --extra messaging --extra bedrock
 
-COPY pyproject.toml mango_plugin.py /opt/mango-plugin/
+COPY pyproject.toml mango_plugin.py mango_history.py /opt/mango-plugin/
 RUN uv pip install --python /opt/hermes/.venv/bin/python --no-deps /opt/mango-plugin \
     && useradd --create-home --uid 10001 hermes \
     && mkdir -p /data && chown hermes:hermes /data

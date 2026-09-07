@@ -28,6 +28,9 @@ REVISION = "693641aa8b4359c602283bdbbc14041e03bc47bc"
 UUID_A = "11111111-1111-4111-8111-111111111111"
 UUID_B = "22222222-2222-4222-8222-222222222222"
 CALLBACKS = []
+HISTORY = []
+HISTORY_CHANGED = threading.Condition()
+HISTORY_RETRIES_REMAINING = 2
 PROVIDER_REQUESTS = []
 PROVIDER_PATHS = []
 STOP_STARTED = threading.Event()
@@ -41,16 +44,25 @@ class FixtureServer(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_json({"object": "list", "data": []})
 
-    def send_json(self, payload):
+    def send_json(self, payload, status=200):
         encoded = json.dumps(payload).encode()
-        self.send_response(200)
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(encoded)))
         self.end_headers()
         self.wfile.write(encoded)
 
     def do_POST(self):
+        global HISTORY_RETRIES_REMAINING
         payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if self.path == "/internal/hermes/history":
+            with HISTORY_CHANGED:
+                if HISTORY_RETRIES_REMAINING:
+                    HISTORY_RETRIES_REMAINING -= 1
+                    return self.send_json({"error": "fixture_admission_not_bound_yet"}, status=503)
+                HISTORY.append(payload)
+                HISTORY_CHANGED.notify_all()
+            return self.send_json({"saved": True})
         if self.path == "/internal/hermes/actions":
             CALLBACKS.append(payload)
             return self.send_json({"node_id": UUID_A, "created": True})
@@ -114,6 +126,14 @@ def free_port():
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
+
+
+def wait_history(run_id, event_type):
+    with HISTORY_CHANGED:
+        ready = HISTORY_CHANGED.wait_for(lambda: any(
+            event.get("run_id") == run_id and event.get("type") == event_type for event in HISTORY), timeout=20)
+        assert ready, f"No durable {event_type} callback arrived for {run_id}"
+        return [event for event in HISTORY if event.get("run_id") == run_id]
 
 
 def request(port, key, path, body=None, idempotency=None, host="127.0.0.1"):
@@ -206,7 +226,7 @@ def main():
                 f"MANGO_NATIVE_SCOPE_FILE={scope_file}"]
             backend = Path(__file__).resolve().parents[2] / "backend"
             go_args = ["/usr/local/go/bin/go", "test", "./internal/http", "-run",
-                       "^TestAssistantNativeHTTPIntegration$", "-count=1", "-timeout=180s", "-v"]
+                       "^TestAINativeRuntimeIntegration$", "-count=1", "-timeout=180s", "-v"]
             command = ["env"] + assignments + go_args
             process = subprocess.Popen(command, cwd=backend, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -228,7 +248,7 @@ def main():
                         {"keys": list(payload), "stream": payload.get("stream"),
                          "input_types": [item.get("type") for item in payload.get("input", []) if isinstance(item, dict)]}
                         for payload in PROVIDER_REQUESTS])
-                    assert "--- PASS: TestAssistantNativeHTTPIntegration" in output, output
+                    assert "--- PASS: TestAINativeRuntimeIntegration" in output, output
                     print(output)
             finally:
                 if process.poll() is None:
@@ -257,6 +277,15 @@ def main():
             assert CALLBACKS[0]["session_id"] == body["session_id"]
             assert CALLBACKS[0]["tool_call_id"] == "call_mango_fixture"
             assert "company_id" not in CALLBACKS[0]["arguments"]
+            history = wait_history(run_id, "run.finished")
+            assert {event["data"].get("tool_name") for event in history if event["type"] == "tool.completed"} >= {"mango_create_node", "memory", "skill_manage"}, history
+            assert history[-1]["data"].get("output") == "Fixture reply complete.", history
+            snapshots = [event for event in history if event.get("messages_complete")]
+            assert snapshots and snapshots[-1]["message_ids"], history
+            assert snapshots[-1]["chat_created_at"], snapshots[-1]
+            native_messages = [message for event in history for message in event.get("messages", [])]
+            assert all(isinstance(message["message_id"], int) for message in native_messages)
+            assert any(message["role"] == "assistant" and message["content"] == "Fixture reply complete." for message in native_messages), native_messages
             assert request(port, key, "/v1/runs", body, "mango-smoke-request")["run_id"] == run_id
             messages = request(port, key, "/api/sessions/mango-smoke-session/messages")
             assert any(message["role"] == "assistant" for message in messages["data"]), messages
@@ -264,6 +293,11 @@ def main():
             assert "Tenant A prefers green" in memory.read_text(encoding="utf-8")
             skill = root / "tenant-a" / "skills" / "fixture-learning" / "SKILL.md"
             assert "current tenant home" in skill.read_text(encoding="utf-8")
+            detached = request(port, key, "/v1/runs", {"input": "fixture history without browser",
+                "session_id": "mango-detached-session", "provider": "openai-api"}, "mango-detached-request")
+            detached_history = wait_history(detached["run_id"], "run.finished")
+            assert detached_history[-1]["data"].get("output") == "Fixture reply complete."
+            assert any(event.get("messages_complete") and event["message_ids"] for event in detached_history)
             stopped = request(port, key, "/v1/runs", {"input": "fixture stop",
                 "session_id": "mango-stop-session", "provider": "openai-api"}, "mango-stop-request")
             assert STOP_STARTED.wait(timeout=15), "Fake provider never saw the stop-test run."
@@ -300,7 +334,7 @@ def main():
         assert actual <= expected, actual
     fixture.shutdown()
     fixture.server_close()
-    print("Pinned native HTTP smoke passed: streamed reply, trusted action callback, memory/skills, transcript, cancellation, restart replay, separate homes.")
+    print("Pinned native HTTP smoke passed: streamed reply, trusted action callback, durable history without a browser, native message IDs, memory/skills, transcript, cancellation, restart replay, separate homes.")
 
 
 if __name__ == "__main__":

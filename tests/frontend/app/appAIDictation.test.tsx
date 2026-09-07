@@ -87,13 +87,13 @@ async function harness() {
       assert.equal(JSON.parse(String(init.body)).AuthFlow, "REFRESH_TOKEN_AUTH");
       return Response.json({ AuthenticationResult: { AccessToken: "refreshed-test-token", ExpiresIn: 3600 } });
     }
-    if (url.includes("/v1/assistant/conversations?")) return Response.json({ conversations: [] });
+    if (url.includes("/v1/ai/chats?")) return Response.json({ chats: [] });
     assert.match(url, /\/v1\/transcriptions\?/);
     assert.match(new Headers(init.headers).get("Authorization") ?? "", /^Bearer /);
     const response = deferred<Response>(); requests.push({ url, init, response }); return response.promise;
   });
-  const [{ createRoot }, { AppAssistant }, { setActiveCompanyID }, { resetTerminalAuthFailure, markTerminalAuthFailure }] = await Promise.all([
-    import("react-dom/client"), import("../../../frontend/src/app/AppAssistant.tsx"), import("../../../frontend/src/auth/currentCompany.ts"), import("../../../frontend/src/auth/cognitoAuth.ts"),
+  const [{ createRoot }, { AppAI }, { setActiveCompanyID }, { resetTerminalAuthFailure, markTerminalAuthFailure }] = await Promise.all([
+    import("react-dom/client"), import("../../../frontend/src/app/AppAI.tsx"), import("../../../frontend/src/auth/currentCompany.ts"), import("../../../frontend/src/auth/cognitoAuth.ts"),
   ]);
   resetTerminalAuthFailure();
   const tokenKey = "mangorts:cognito-token-v2";
@@ -102,8 +102,8 @@ async function harness() {
   const container = dom.window.document.getElementById("root")!;
   const root = createRoot(container);
   let mounted = true;
-  const render = (userID = "user-a") => root.render(<AppAssistant apiBase="http://localhost:8080" userID={userID} bottomInset={10} />);
-  const input = () => container.querySelector<HTMLTextAreaElement>('[aria-label="Message Mango"]')!;
+  const render = (userID = "user-a") => root.render(<AppAI apiBase="http://localhost:8080" userID={userID} bottomInset={10} />);
+  const input = () => container.querySelector<HTMLTextAreaElement>('[aria-label="Message AI"]')!;
   const button = (label: string) => {
     const found = container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)
       ?? Array.from(container.querySelectorAll("button")).find((item) => item.textContent === label);
@@ -128,7 +128,7 @@ async function harness() {
   }); };
   const unmount = async () => { if (mounted) { await act(async () => { root.unmount(); }); mounted = false; } };
   await act(async () => { render(); });
-  await click("Expand Mango chat");
+  await click("Expand AI chat");
   return {
     dom, container, replace, input, button, click, setText, grant, record, complete, respond, unmount, permissions, recorders, requests, sample, audioContexts, activityTimers,
     refresh: async () => {
@@ -216,7 +216,7 @@ test("voice waves follow microphone audio and continuous speech has no duration 
   const h = await harness();
   try {
     const track = await h.record();
-    const waves = () => h.container.querySelector<HTMLElement>(".mango-assistant-sound-waves")!;
+    const waves = () => h.container.querySelector<HTMLElement>(".mango-ai-sound-waves")!;
     assert.equal(h.button("Stop recording").getAttribute("aria-pressed"), "true");
     assert.equal(waves().dataset.active, "false");
     await h.sample(0.03, 150_000);
@@ -244,16 +244,16 @@ test("canceling permission or closing chat releases late grants and keeps the dr
     await h.click("Cancel microphone request");
     assert.equal((await h.grant()).stopped, true);
     const track = await h.record();
-    await h.click("Collapse Mango chat");
+    await h.click("Collapse AI chat");
     assert.equal(track.stopped, true);
     await act(async () => { h.recorders[0].chunk("late"); h.recorders[0].finish(); });
     assert.equal(h.requests.length, 0);
-    await h.click("Expand Mango chat");
+    await h.click("Expand AI chat");
     assert.equal(h.input().value, "Keep this draft");
     assert.equal(h.input().readOnly, false);
     const newChatTrack = await h.record();
     await h.click("New chat");
-    assert.equal(newChatTrack.stopped, true, "changing conversation cancels recording before clearing its draft");
+    assert.equal(newChatTrack.stopped, true, "changing chat cancels recording before clearing its draft");
     assert.equal(h.input().value, "");
   } finally { await h.dispose(); }
 });
@@ -280,7 +280,7 @@ for (const action of ["collapse", "company", "account", "logout", "unmount"] as 
     try {
       await h.setText("Keep this draft");
       const track = await h.record(); await h.complete();
-      if (action === "collapse") await h.click("Collapse Mango chat"); else await h[action]();
+      if (action === "collapse") await h.click("Collapse AI chat"); else await h[action]();
       assert.equal(track.stopped, true);
       assert.equal(h.requests[0].init.signal!.aborted, true);
       await h.respond("Stale transcript");

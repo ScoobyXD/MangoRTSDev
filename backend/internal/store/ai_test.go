@@ -6,23 +6,24 @@ import (
 	"miraeopus/backend/internal/domain"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 )
 
-func TestMemoryAssistantRunAndActionContract(t *testing.T) {
-	testAssistantContract(t, NewMemoryRepo(), nil)
+func TestMemoryAIRunAndActionContract(t *testing.T) {
+	testAIContract(t, NewMemoryRepo(), nil)
 }
 
-func TestPostgresAssistantRunAndActionContract(t *testing.T) {
+func TestPostgresAIRunAndActionContract(t *testing.T) {
 	db, repo := openPostgresProcessMapIntegration(t)
-	testAssistantContract(t, repo, func() Repository { return NewPostgresRepo(db) })
+	testAIContract(t, repo, func() Repository { return NewPostgresRepo(db) })
 }
 
-func testAssistantContract(t *testing.T, repo Repository, restart func() Repository) {
+func testAIContract(t *testing.T, repo Repository, restart func() Repository) {
 	t.Helper()
 	ctx := context.Background()
-	company, err := repo.CreateCompany("Assistant isolation")
+	company, err := repo.CreateCompany("AI isolation")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,11 +31,11 @@ func testAssistantContract(t *testing.T, repo Repository, restart func() Reposit
 	if err != nil {
 		t.Fatal(err)
 	}
-	user, err := repo.UpsertAuthUser("assistant-owner", "assistant-owner@example.test", "Owner")
+	user, err := repo.UpsertAuthUser("ai-owner", "ai-owner@example.test", "Owner")
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherUser, err := repo.UpsertAuthUser("assistant-other", "assistant-other@example.test", "Other")
+	otherUser, err := repo.UpsertAuthUser("ai-other", "ai-other@example.test", "Other")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,57 +52,60 @@ func testAssistantContract(t *testing.T, repo Repository, restart func() Reposit
 	if err != nil {
 		t.Fatal(err)
 	}
-	submission := AssistantRun{CompanyID: company.CompanyID, UserID: user.UserID, RequestID: "request-1", ConversationID: "session-1", Message: "Create a customer check"}
+	submission := AIRun{CompanyID: company.CompanyID, UserID: user.UserID, RunID: newUUIDv7String(), PendingInput: "Create a customer check"}
 	var wait sync.WaitGroup
 	for range 6 {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			if _, err := repo.ReserveAssistantRun(ctx, submission); err != nil {
+			if _, err := repo.ReserveAIRun(ctx, submission); err != nil {
 				t.Errorf("concurrent reservation: %v", err)
 			}
 		}()
 	}
 	wait.Wait()
 	changed := submission
-	changed.Message = "Different request"
-	if _, err := repo.ReserveAssistantRun(ctx, changed); !errors.Is(err, ErrConflict) {
-		t.Fatalf("changed payload: %v", err)
+	changed.PendingInput = "Different request"
+	if saved, err := repo.ReserveAIRun(ctx, changed); err != nil || saved.PendingInput != submission.PendingInput {
+		t.Fatalf("first submission must retain its input: %+v %v", saved, err)
 	}
 	changed = submission
-	changed.RequestID = "request-2"
-	if _, err := repo.ReserveAssistantRun(ctx, changed); !errors.Is(err, ErrConflict) {
+	changed.RunID = newUUIDv7String()
+	if _, err := repo.ReserveAIRun(ctx, changed); !errors.Is(err, ErrConflict) {
 		t.Fatalf("second active run: %v", err)
 	}
-	if _, err := repo.GetAssistantRun(ctx, company.CompanyID, otherUser.UserID, submission.RequestID); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.GetAIRun(ctx, company.CompanyID, otherUser.UserID, submission.RunID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("cross-user read: %v", err)
 	}
-	if _, err := repo.GetAssistantRun(ctx, otherCompany.CompanyID, user.UserID, submission.RequestID); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.GetAIRun(ctx, otherCompany.CompanyID, user.UserID, submission.RunID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("cross-company read: %v", err)
 	}
-	run, err := repo.BindAssistantRun(ctx, company.CompanyID, user.UserID, submission.RequestID, "native-run-1")
-	if err != nil || run.Message != "" {
+	run, err := repo.BindAIRun(ctx, company.CompanyID, user.UserID, submission.RunID, "native-run-1")
+	if err != nil || run.PendingInput != "" || run.HermesRunID != "native-run-1" || run.Status != "running" {
 		t.Fatalf("bind must clear pending message: %v", err)
 	}
-	if _, err := repo.BindAssistantRun(ctx, company.CompanyID, user.UserID, submission.RequestID, "replacement-run"); !errors.Is(err, ErrConflict) {
+	if _, err := repo.BindAIRun(ctx, company.CompanyID, user.UserID, submission.RunID, "replacement-run"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("native ID replacement: %v", err)
 	}
 	if restart != nil {
 		repo = restart()
 	}
-	replayed, err := repo.ReserveAssistantRun(ctx, submission)
-	if err != nil || replayed.RunID != run.RunID || replayed.Message != "" {
+	replayed, err := repo.ReserveAIRun(ctx, submission)
+	if err != nil || replayed.RunID != run.RunID || replayed.PendingInput != "" {
 		t.Fatalf("durable same request replay: %v", err)
 	}
 	input := LogicGateNodeAssignmentInput{CompanyID: otherCompany.CompanyID, ActorUserID: otherUser.UserID, LogicGateID: process.LogicGateID, NodeID: newUUIDv7String(), CreateNodeTitle: "Verify customer", Status: "pending", ProcessStepID: &step.Step.ProcessStepID, ProcessStepIDSet: true}
 	invalid := input
 	badStep := newUUIDv7String()
 	invalid.ProcessStepID = &badStep
-	if _, err := repo.AssistantCreateNode(ctx, run, "invalid-step", invalid); err == nil {
+	if _, err := repo.AICreateNode(ctx, run, "invalid-step", invalid); err == nil {
 		t.Fatal("unknown step must fail")
 	}
 	if _, err := repo.GetNode(company.CompanyID, input.NodeID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("failed command must leave no Node: %v", err)
+	}
+	if saved, err := repo.GetAIRun(ctx, run.CompanyID, run.UserID, run.RunID); err != nil || len(saved.History) != 2 {
+		t.Fatalf("failed command changed run history: %+v %v", saved.History, err)
 	}
 	results := make(chan LogicGateNodeAssignmentResult, 6)
 	for range 6 {
@@ -110,7 +114,7 @@ func testAssistantContract(t *testing.T, repo Repository, restart func() Reposit
 			defer wait.Done()
 			retry := input
 			retry.NodeID = newUUIDv7String()
-			result, err := repo.AssistantCreateNode(ctx, run, "create-customer-check", retry)
+			result, err := repo.AICreateNode(ctx, run, "create-customer-check", retry)
 			if err != nil {
 				t.Errorf("concurrent action: %v", err)
 				return
@@ -137,63 +141,66 @@ func testAssistantContract(t *testing.T, repo Repository, restart func() Reposit
 	if created.Node.NodeID == "" || eventResponses != 1 {
 		t.Fatal("exactly one command must commit events")
 	}
+	if saved, err := repo.GetAIRun(ctx, run.CompanyID, run.UserID, run.RunID); err != nil || len(saved.History) != 3 || saved.History[2].ID != "action:mango_create_node:create-customer-check" || saved.History[2].Type != "action_committed" {
+		t.Fatalf("action history must commit exactly once with its command: %+v %v", saved.History, err)
+	}
 	if err := repo.DeleteNode(run.CompanyID, created.Node.NodeID); err != nil {
 		t.Fatal(err)
 	}
 	if restart != nil {
 		repo = restart()
 	}
-	deletedReplay, err := repo.AssistantCreateNode(ctx, run, "create-customer-check", input)
+	deletedReplay, err := repo.AICreateNode(ctx, run, "create-customer-check", input)
 	if err != nil || deletedReplay.Node.NodeID != created.Node.NodeID {
 		t.Fatalf("deleted Node receipt: %v", err)
 	}
 	if _, err := repo.GetNode(run.CompanyID, created.Node.NodeID); !errors.Is(err, ErrNotFound) {
 		t.Fatal("action retry must never resurrect a deleted Node")
 	}
-	if err := repo.CancelAssistantRun(ctx, run.CompanyID, run.UserID, run.RequestID); err != nil {
+	if _, err := repo.SetAIRunStatus(ctx, run.CompanyID, run.UserID, run.RunID, "stopping"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.AssistantCreateNode(ctx, run, "new-after-stop", input); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.AICreateNode(ctx, run, "new-after-stop", input); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("cancelled action: %v", err)
 	}
-	if _, err := repo.ReserveAssistantRun(ctx, changed); !errors.Is(err, ErrConflict) {
+	if _, err := repo.ReserveAIRun(ctx, changed); !errors.Is(err, ErrConflict) {
 		t.Fatal("cancel must not settle before native completion")
 	}
-	if err := repo.SettleAssistantRun(ctx, run.CompanyID, run.UserID, run.RequestID); err != nil {
+	if _, err := repo.SetAIRunStatus(ctx, run.CompanyID, run.UserID, run.RunID, "cancelled"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.ActiveAssistantRun(ctx, run.CompanyID, run.UserID); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.ActiveAIRun(ctx, run.CompanyID, run.UserID); !errors.Is(err, ErrNotFound) {
 		t.Fatal("settled run remains active")
 	}
-	if _, err := repo.ReserveAssistantRun(ctx, changed); err != nil {
+	if _, err := repo.ReserveAIRun(ctx, changed); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.DeleteCompanyUser(run.CompanyID, run.UserID, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.GetAssistantRun(ctx, run.CompanyID, run.UserID, run.RequestID); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.GetAIRun(ctx, run.CompanyID, run.UserID, run.RunID); !errors.Is(err, ErrNotFound) {
 		t.Fatal("removed membership must not read dormant receipts")
 	}
 	if _, err := repo.AddCompanyMembership(user.CognitoSubject, run.CompanyID, domain.RoleCompanyAdmin); err != nil {
 		t.Fatal(err)
 	}
-	if receipt, err := repo.ReserveAssistantRun(ctx, submission); err != nil || receipt.RunID != run.RunID || !receipt.Settled {
+	if receipt, err := repo.ReserveAIRun(ctx, submission); err != nil || receipt.HermesRunID != run.HermesRunID || receipt.Status != "cancelled" {
 		t.Fatal("restored membership must retain the original receipt without reissuing the submission")
 	}
 }
 
-func TestMemoryAssistantUsesCurrentProcessPermission(t *testing.T) {
-	testAssistantProcessPermission(t, NewMemoryRepo())
+func TestMemoryAIUsesCurrentProcessPermission(t *testing.T) {
+	testAIProcessPermission(t, NewMemoryRepo())
 }
 
-func TestPostgresAssistantUsesCurrentProcessPermission(t *testing.T) {
+func TestPostgresAIUsesCurrentProcessPermission(t *testing.T) {
 	_, repo := openPostgresProcessMapIntegration(t)
-	testAssistantProcessPermission(t, repo)
+	testAIProcessPermission(t, repo)
 }
 
-func testAssistantProcessPermission(t *testing.T, repo Repository) {
+func testAIProcessPermission(t *testing.T, repo Repository) {
 	t.Helper()
-	company, err := repo.CreateCompany("Assistant current permission")
+	company, err := repo.CreateCompany("AI current permission")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,11 +221,11 @@ func testAssistantProcessPermission(t *testing.T, repo Repository) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	run, err := repo.ReserveAssistantRun(ctx, AssistantRun{CompanyID: companyID, UserID: user.UserID, RequestID: "permission-run", ConversationID: "session", Message: "Create work"})
+	run, err := repo.ReserveAIRun(ctx, AIRun{CompanyID: companyID, UserID: user.UserID, RunID: newUUIDv7String(), PendingInput: "Create work"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err = repo.BindAssistantRun(ctx, companyID, user.UserID, run.RequestID, "native-run")
+	run, err = repo.BindAIRun(ctx, companyID, user.UserID, run.RunID, "native-run")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +234,7 @@ func testAssistantProcessPermission(t *testing.T, repo Repository) {
 		t.Fatal(err)
 	}
 	input := LogicGateNodeAssignmentInput{LogicGateID: process.LogicGateID, NodeID: newUUIDv7String(), CreateNodeTitle: "Forbidden"}
-	if _, err := repo.AssistantCreateNode(ctx, run, "create", input); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.AICreateNode(ctx, run, "create", input); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("revoked process edit: %v", err)
 	}
 	if _, err := repo.GetNode(companyID, input.NodeID); !errors.Is(err, ErrNotFound) {
@@ -235,7 +242,7 @@ func testAssistantProcessPermission(t *testing.T, repo Repository) {
 	}
 }
 
-func TestPostgresAssistantMigration(t *testing.T) {
+func TestPostgresAIMigration(t *testing.T) {
 	db := openPostgresProcessMapTestDatabase(t)
 	if _, err := db.Exec(`create table companies(company_id uuid primary key); create table users(user_id uuid primary key)`); err != nil {
 		t.Fatal(err)
@@ -248,7 +255,38 @@ func TestPostgresAssistantMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	if err := db.QueryRow(`select count(*) from information_schema.tables where table_schema='public' and table_name in ('ai_runs','ai_actions')`).Scan(&count); err != nil || count != 2 {
-		t.Fatalf("assistant receipt schema: %d %v", count, err)
+	if err := db.QueryRow(`select count(*) from information_schema.tables where table_schema='public' and table_name in ('ai_chats','ai_runs','ai_messages','ai_actions')`).Scan(&count); err != nil || count != 4 {
+		t.Fatalf("ai receipt schema: %d %v", count, err)
+	}
+	for table, columns := range map[string][]string{
+		"ai_chats":    {"company_id", "user_id", "chat_id", "name", "created_timestamp"},
+		"ai_runs":     {"company_id", "user_id", "run_id", "hermes_run_id", "chat_id", "status", "pending_input", "history", "created_timestamp"},
+		"ai_messages": {"company_id", "user_id", "message_id", "chat_id", "run_id", "role", "content", "created_timestamp"},
+		"ai_actions":  {"company_id", "user_id", "run_id", "action_name", "action_key", "result"},
+	} {
+		rows, err := db.Query(`select column_name from information_schema.columns where table_schema='public' and table_name=$1`, table)
+		if err != nil {
+			t.Fatal(err)
+		}
+		actual, expected, count := map[string]bool{}, map[string]bool{}, 0
+		for rows.Next() {
+			var column string
+			if err := rows.Scan(&column); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			actual[column], count = true, count+1
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		rows.Close()
+		for _, column := range columns {
+			expected[column] = true
+		}
+		if count != len(columns) || !reflect.DeepEqual(actual, expected) {
+			t.Fatalf("%s column contract: count=%d columns=%v", table, count, actual)
+		}
 	}
 }

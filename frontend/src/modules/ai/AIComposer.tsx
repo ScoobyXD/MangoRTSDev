@@ -13,7 +13,7 @@ type Props = {
   onSend: (message: string) => Promise<boolean>;
 };
 
-export function AssistantComposer({ apiBase, companyID, visible, sending, submitting, onDictationBusyChange, draft, setDraft, onSend }: Props) {
+export function AIComposer({ apiBase, companyID, visible, sending, submitting, onDictationBusyChange, draft, setDraft, onSend }: Props) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const insertionPoint = useRef(0);
   const pendingCaret = useRef<number | null>(null);
@@ -40,12 +40,12 @@ export function AssistantComposer({ apiBase, companyID, visible, sending, submit
     pendingCaret.current = null;
   }, [draft, dictation.busy]);
 
-  return <><div className="mango-assistant-composer">
-    <div className="mango-assistant-editor">
-      <textarea ref={inputRef} className="mango-assistant-input" aria-label="Message Mango" placeholder="Message Mango" rows={1}
+  return <><div className="mango-ai-composer">
+    <div className="mango-ai-editor">
+      <textarea ref={inputRef} className="mango-ai-input" aria-label="Message AI" placeholder="Message AI" rows={1}
         value={draft} readOnly={dictation.busy || submitting} onChange={(event) => setDraft(event.currentTarget.value)} />
     </div>
-    <button type="button" className="mango-assistant-microphone"
+    <button type="button" className="mango-ai-microphone"
       aria-label={dictation.phase === "recording" ? "Stop recording" : dictation.phase === "permission" ? "Cancel microphone request" : dictation.phase === "transcribing" ? "Transcribing speech" : "Start dictation"}
       title={dictation.phase === "recording" ? "Stop recording" : "Dictate in English"}
       aria-pressed={dictation.phase === "recording"} disabled={dictation.phase === "transcribing" || submitting}
@@ -55,7 +55,7 @@ export function AssistantComposer({ apiBase, companyID, visible, sending, submit
         if (!dictation.busy) insertionPoint.current = inputRef.current?.selectionEnd ?? draft.length;
         void dictation.toggle();
       }}>
-      {dictation.phase === "recording" && <span className="mango-assistant-sound-waves" data-active={dictation.audioLevel > 0}
+      {dictation.phase === "recording" && <span className="mango-ai-sound-waves" data-active={dictation.audioLevel > 0}
         style={{ "--voice-level": dictation.audioLevel } as CSSProperties} aria-hidden="true">
         <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" focusable="false">
           <path d="M13 13Q8 20 13 27M27 13Q32 20 27 27" />
@@ -69,7 +69,7 @@ export function AssistantComposer({ apiBase, companyID, visible, sending, submit
         </>}
       </svg>
     </button>
-    <button type="button" className="mango-assistant-send mango-assistant-send-icon" aria-label="Send" title="Send"
+    <button type="button" className="mango-ai-send mango-ai-send-icon" aria-label="Send" title="Send"
       disabled={!visible || !draft.trim() || dictation.busy || sending || submitting}
       onClick={async () => {
         if (submission.current || dictation.busy || sending || !draft.trim()) return;
@@ -85,6 +85,6 @@ export function AssistantComposer({ apiBase, companyID, visible, sending, submit
       </svg>
     </button>
   </div>
-    <p className="mango-assistant-availability" role="status">{dictation.message || "Type or dictate, then click Send. Enter adds a new line."}</p>
+    <p className="mango-ai-availability" role="status">{dictation.message || "Type or dictate, then click Send. Enter adds a new line."}</p>
   </>;
 }

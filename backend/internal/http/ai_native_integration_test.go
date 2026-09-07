@@ -25,7 +25,7 @@ import (
 // fixture owns an unmodified pinned Hermes gateway and a fake model provider
 // on the same Linux loopback interface;
 // this test owns the authenticated Go API and the ordinary Mango Node command.
-func TestAssistantNativeHTTPIntegration(t *testing.T) {
+func TestAINativeRuntimeIntegration(t *testing.T) {
 	nativeURL := os.Getenv("HERMES_NATIVE_URL")
 	if nativeURL == "" {
 		t.Skip("run hermes/tests/native_smoke.py --go-integration with the pinned native environment")
@@ -76,10 +76,14 @@ func TestAssistantNativeHTTPIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	var actionCallbacks atomic.Int32
+	var historyCallbacks atomic.Int32
 	routes := server.Routes()
 	api := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/internal/hermes/actions" {
 			actionCallbacks.Add(1)
+		}
+		if r.URL.Path == "/internal/hermes/history" {
+			historyCallbacks.Add(1)
 		}
 		routes.ServeHTTP(w, r)
 	}), ReadHeaderTimeout: 5 * time.Second}
@@ -166,25 +170,64 @@ func TestAssistantNativeHTTPIntegration(t *testing.T) {
 		return response.StatusCode, data
 	}
 	query := "?company_id=" + companyID
-	if status, _ := request(http.MethodGet, "/v1/assistant/conversations"+query, nil, false); status != 401 {
+	if status, _ := request(http.MethodGet, "/v1/ai/chats"+query, nil, false); status != 401 {
 		t.Fatalf("anonymous native admission status=%d", status)
 	}
-	submission := assistantSubmission{CompanyID: companyID, RequestID: store.NewUUIDv7String(), Message: fmt.Sprintf("fixture action MANGO_PROCESS_ID=%s MANGO_STEP_ID=%s", process.LogicGateID, step.Step.ProcessStepID)}
-	status, data := request(http.MethodPost, "/v1/assistant/runs", submission, true)
+	submission := aiSubmission{CompanyID: companyID, RunID: store.NewUUIDv7String(), Message: fmt.Sprintf("fixture action MANGO_PROCESS_ID=%s MANGO_STEP_ID=%s", process.LogicGateID, step.Step.ProcessStepID)}
+	status, data := request(http.MethodPost, "/v1/ai/runs", submission, true)
 	if status != 202 {
 		t.Fatalf("native admission status=%d body=%s", status, data)
 	}
-	var accepted assistantRunStatus
-	if err := json.Unmarshal(data, &accepted); err != nil || accepted.RunID == "" {
-		t.Fatal("native admission did not return its run identity")
+	var accepted store.AIRun
+	if err := json.Unmarshal(data, &accepted); err != nil || accepted.RunID != submission.RunID || accepted.ChatID != submission.RunID || accepted.HermesRunID != "" {
+		t.Fatal("AI admission did not return the local run and chat identities")
 	}
-	status, data = request(http.MethodPost, "/v1/assistant/runs", submission, true)
+	status, data = request(http.MethodPost, "/v1/ai/runs", submission, true)
 	if status != 202 || !strings.Contains(string(data), accepted.RunID) {
 		t.Fatalf("submission replay status=%d body=%s", status, data)
 	}
-	status, data = request(http.MethodGet, "/v1/assistant/runs/"+accepted.RunID+"/events"+query, nil, true)
+	// Prove recording is independent of the browser before opening any stream.
+	// The native hooks reach this API asynchronously through their durable outbox.
+	deadline := time.Now().Add(30 * time.Second)
+	historyTick := time.NewTicker(100 * time.Millisecond)
+	defer historyTick.Stop()
+	for {
+		run, runErr := repo.GetAIRun(context.Background(), companyID, user.UserID, submission.RunID)
+		messages, messagesErr := repo.ListAIMessages(context.Background(), companyID, user.UserID, accepted.ChatID, 500, 0)
+		if runErr != nil || messagesErr != nil {
+			t.Fatalf("callback persistence read: run=%v messages=%v", runErr, messagesErr)
+		}
+		finished, reply := false, false
+		for _, event := range run.History {
+			if event.Type == "run.finished" {
+				finished = true
+			}
+		}
+		for _, message := range messages {
+			if message.MessageID <= 0 || (message.Role != "user" && message.Role != "ai") {
+				t.Fatalf("invalid saved native message: %+v", message)
+			}
+			if message.Role == "ai" && strings.Contains(message.Content, "Fixture reply complete.") {
+				reply = true
+			}
+		}
+		if finished && reply && run.Status == "completed" && aiRunOutput(run) == "Fixture reply complete." {
+			if historyCallbacks.Load() == 0 {
+				t.Fatal("history was saved without receiving a callback")
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("history callbacks did not persist the native reply without SSE: callbacks=%d finished=%v messages=%d output=%q", historyCallbacks.Load(), finished, len(messages), aiRunOutput(run))
+		}
+		<-historyTick.C
+	}
+	status, data = request(http.MethodGet, "/v1/ai/runs/"+accepted.RunID+"/events"+query, nil, true)
 	if status != 200 || !strings.Contains(string(data), "run.completed") || !strings.Contains(string(data), "Fixture reply complete.") {
 		t.Fatalf("native reply stream status=%d body=%s", status, data)
+	}
+	if !strings.Contains(string(data), accepted.RunID) {
+		t.Fatal("public SSE did not use the local run ID")
 	}
 	nodes, err := repo.ListNodes(companyID)
 	if err != nil || len(nodes) != 1 || nodes[0].Title != "Fixture Node" {
@@ -201,31 +244,31 @@ func TestAssistantNativeHTTPIntegration(t *testing.T) {
 	if assignment.ProcessStepID == nil || *assignment.ProcessStepID != step.Step.ProcessStepID || assignment.PlacedByUserID != user.UserID {
 		t.Fatal("native action did not preserve exact Step and trusted actor")
 	}
-	status, data = request(http.MethodGet, "/v1/assistant/conversations/"+submission.RequestID+query, nil, true)
+	status, data = request(http.MethodGet, "/v1/ai/chats/"+submission.RunID+query, nil, true)
 	if status != 200 || !strings.Contains(string(data), "Fixture reply complete.") {
-		t.Fatalf("native saved conversation status=%d body=%s", status, data)
+		t.Fatalf("native saved chat status=%d body=%s", status, data)
 	}
 
-	stopSubmission := assistantSubmission{CompanyID: companyID, RequestID: store.NewUUIDv7String(), Message: "fixture stop"}
-	status, data = request(http.MethodPost, "/v1/assistant/runs", stopSubmission, true)
+	stopSubmission := aiSubmission{CompanyID: companyID, RunID: store.NewUUIDv7String(), Message: "fixture stop"}
+	status, data = request(http.MethodPost, "/v1/ai/runs", stopSubmission, true)
 	if status != 202 {
 		t.Fatalf("native stop admission status=%d body=%s", status, data)
 	}
-	var stopping assistantRunStatus
+	var stopping store.AIRun
 	if err := json.Unmarshal(data, &stopping); err != nil {
 		t.Fatal(err)
 	}
-	status, data = request(http.MethodPost, "/v1/assistant/runs/"+stopping.RunID+"/cancel", map[string]string{"company_id": companyID}, true)
+	status, data = request(http.MethodPost, "/v1/ai/runs/"+stopping.RunID+"/cancel", map[string]string{"company_id": companyID}, true)
 	if status != 200 {
 		t.Fatalf("native cancellation status=%d body=%s", status, data)
 	}
-	status, data = request(http.MethodGet, "/v1/assistant/runs/"+stopping.RunID+"/events"+query, nil, true)
+	status, data = request(http.MethodGet, "/v1/ai/runs/"+stopping.RunID+"/events"+query, nil, true)
 	if status != 200 || !strings.Contains(string(data), "run.cancelled") {
 		t.Fatalf("native cancelled stream status=%d body=%s", status, data)
 	}
-	gate, err := repo.GetAssistantRun(context.Background(), companyID, user.UserID, stopSubmission.RequestID)
-	if err != nil || !gate.Cancelled {
+	gate, err := repo.GetAIRun(context.Background(), companyID, user.UserID, stopSubmission.RunID)
+	if err != nil || (gate.Status != "stopping" && gate.Status != "cancelled") {
 		t.Fatalf("native Stop did not retain the Mango action gate: %v", err)
 	}
-	t.Log("Real pinned Hermes HTTP → authenticated Go API → native plugin → existing Process/Step/Node command passed; duplicate submission, streamed reply, saved conversation and Stop verified.")
+	t.Log("Real pinned Hermes HTTP → authenticated Go API → native plugin → existing Process/Step/Node command passed; duplicate submission, history without SSE, saved messages, local-ID stream and Stop verified.")
 }

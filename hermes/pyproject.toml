@@ -12,4 +12,4 @@ requires-python = ">=3.11,<3.14"
 mango = "mango_plugin"
 
 [tool.setuptools]
-py-modules = ["mango_plugin"]
+py-modules = ["mango_plugin", "mango_history"]

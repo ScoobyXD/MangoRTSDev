@@ -110,22 +110,26 @@ func (s *Server) hermesJSON(ctx context.Context, route HermesRoute, method, path
 }
 
 func writeHermesError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errAINotDurable) {
+		writeError(w, 503, "ai_durable_storage_required")
+		return
+	}
 	var upstream hermesHTTPError
 	if errors.As(err, &upstream) {
 		switch upstream.status {
 		case 404:
-			writeError(w, http.StatusNotFound, "assistant_run_or_conversation_unavailable")
+			writeError(w, http.StatusNotFound, "ai_run_or_chat_unavailable")
 			return
 		case 409:
-			writeError(w, http.StatusConflict, "assistant_request_conflict")
+			writeError(w, http.StatusConflict, "ai_request_conflict")
 			return
 		case 401, 403:
-			writeError(w, http.StatusServiceUnavailable, "assistant_service_authentication_failed")
+			writeError(w, http.StatusServiceUnavailable, "ai_service_authentication_failed")
 			return
 		case 429:
-			writeError(w, http.StatusTooManyRequests, "assistant_busy")
+			writeError(w, http.StatusTooManyRequests, "ai_busy")
 			return
 		}
 	}
-	writeError(w, http.StatusBadGateway, "assistant_service_unavailable")
+	writeError(w, http.StatusBadGateway, "ai_service_unavailable")
 }

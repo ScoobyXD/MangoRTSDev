@@ -1,10 +1,10 @@
 import React, { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { addAuthTerminalFailureListener, isTerminalAuthFailureActive } from "../auth/cognitoAuth.js";
 import { ACTIVE_COMPANY_CHANGED_EVENT, getActiveCompanyID } from "../auth/currentCompany.js";
-import { AssistantComposer } from "../modules/assistant/AssistantComposer.js";
-import { useAssistantConversation } from "../modules/assistant/useAssistantConversation.js";
+import { AIComposer } from "../modules/ai/AIComposer.js";
+import { useAIChat } from "../modules/ai/useAIChat.js";
 
-function AssistantToggleIcon({ direction }: { direction: "up" | "down" }) {
+function AIToggleIcon({ direction }: { direction: "up" | "down" }) {
   const path = direction === "up" ? "M5 15l7-7 7 7" : "M5 9l7 7 7-7";
   return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
     <path d={path} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
@@ -18,18 +18,18 @@ function subscribeCompany(listener: () => void) {
   return () => window.removeEventListener(ACTIVE_COMPANY_CHANGED_EVENT, listener);
 }
 
-export function AppAssistant(props: Props) {
+export function AppAI(props: Props) {
   const companyID = useSyncExternalStore(subscribeCompany, getActiveCompanyID);
   const authFailed = useSyncExternalStore(addAuthTerminalFailureListener, isTerminalAuthFailureActive);
-  return <AssistantSession key={`${props.apiBase}:${props.userID}:${companyID}:${authFailed}`} {...props} companyID={companyID} />;
+  return <AISession key={`${props.apiBase}:${props.userID}:${companyID}:${authFailed}`} {...props} companyID={companyID} />;
 }
 
-function AssistantSession({ apiBase, companyID, bottomInset }: Props & { companyID: string }) {
+function AISession({ apiBase, companyID, bottomInset }: Props & { companyID: string }) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [composerVersion, setComposerVersion] = useState(0);
   const [dictationBusy, setDictationBusy] = useState(false);
-  const chat = useAssistantConversation(apiBase, companyID, panelOpen);
+  const chat = useAIChat(apiBase, companyID, panelOpen);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const lastVisibleMessage = useRef<string | number | undefined>();
   const focusToggleAfterChange = useRef(false);
@@ -45,7 +45,7 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
 
   useLayoutEffect(() => {
     const transcript = transcriptRef.current;
-    const lastID = chat.messages[chat.messages.length - 1]?.id;
+    const lastID = chat.messages[chat.messages.length - 1]?.message_id;
     if (transcript) transcript.scrollTop = chat.reply || lastID !== lastVisibleMessage.current ? transcript.scrollHeight : 0;
     lastVisibleMessage.current = lastID;
   }, [chat.messages, chat.reply]);
@@ -66,58 +66,58 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
     setPanelOpen(open);
   };
 
-  return <aside className="mango-assistant" aria-label="Mango chat" style={{ bottom: bottomInset }}>
+  return <aside className="mango-ai" aria-label="AI chat" style={{ bottom: bottomInset }}>
     <button
       ref={expandButtonRef}
       type="button"
-      className="mango-assistant-expand"
-      aria-label="Expand Mango chat"
+      className="mango-ai-expand"
+      aria-label="Expand AI chat"
       aria-expanded={false}
       aria-controls={panelID}
       hidden={panelOpen}
       onClick={() => setPanelVisibility(true)}
-    ><AssistantToggleIcon direction="up" /></button>
-    <div className="mango-assistant-expanded" hidden={!panelOpen}>
+    ><AIToggleIcon direction="up" /></button>
+    <div className="mango-ai-expanded" hidden={!panelOpen}>
       <button
         ref={collapseButtonRef}
         type="button"
-        className="mango-assistant-collapse"
-        aria-label="Collapse Mango chat"
+        className="mango-ai-collapse"
+        aria-label="Collapse AI chat"
         aria-expanded={true}
         aria-controls={panelID}
         onClick={() => setPanelVisibility(false)}
-      ><AssistantToggleIcon direction="down" /></button>
-      <div className="mango-assistant-panel" id={panelID}>
-        <header className="mango-assistant-header">
-          <strong>Mango chat</strong>
-          <select aria-label="Saved conversations" value={chat.conversationID} disabled={chat.busy || !!chat.runID || !!chat.pending}
-            onChange={(event) => { resetDraft(); if (event.currentTarget.value) void chat.load(event.currentTarget.value); else chat.newConversation(); }}>
-            <option value="">New conversation</option>
-            {chat.conversations.map((conversation) => <option key={conversation.id} value={conversation.id}>{conversation.title || "Untitled conversation"}</option>)}
+      ><AIToggleIcon direction="down" /></button>
+      <div className="mango-ai-panel" id={panelID}>
+        <header className="mango-ai-header">
+          <strong>AI chat</strong>
+          <select aria-label="Saved chats" value={chat.chatID} disabled={chat.busy || !!chat.runID || !!chat.pending}
+            onChange={(event) => { resetDraft(); if (event.currentTarget.value) void chat.load(event.currentTarget.value); else void chat.newChat(); }}>
+            <option value="">New chat</option>
+            {chat.chats.map((saved) => <option key={saved.chat_id} value={saved.chat_id}>{saved.name || "Unnamed chat"}</option>)}
           </select>
-          <button type="button" disabled={chat.busy || !!chat.runID || !!chat.pending} onClick={() => { chat.newConversation(); resetDraft(); }}>New chat</button>
+          <button type="button" disabled={chat.busy || !!chat.runID || !!chat.pending} onClick={() => { void chat.newChat(); resetDraft(); }}>New chat</button>
           {chat.nextOffset !== null && <button type="button" disabled={chat.busy || !!chat.runID || !!chat.pending} onClick={() => { void chat.loadOlder(); }}>Load older chats</button>}
         </header>
-        <div className="mango-assistant-transcript" ref={transcriptRef} role="log" aria-label="Conversation" aria-live="polite" aria-relevant="additions text">
+        <div className="mango-ai-transcript" ref={transcriptRef} role="log" aria-label="Chat" aria-live="polite" aria-relevant="additions text">
           {chat.nextMessageOffset !== null && <button type="button" disabled={chat.busy || !!chat.runID || !!chat.pending} onClick={() => { void chat.loadEarlierMessages(); }}>Load earlier messages</button>}
-          {!chat.messages.length && !chat.busy && !chat.runID && <p className="mango-assistant-empty">Ask Mango a question or request an action in your workspace.</p>}
-          {chat.messages.filter((message) => (message.role === "user" || message.role === "assistant") && typeof message.content === "string" && message.content.trim())
-            .map((message) => <article key={message.id} className="mango-assistant-message" data-role={message.role}>
-              <strong>{message.role === "user" ? "You" : "Mango"}</strong><p>{message.content}</p>
+          {!chat.messages.length && !chat.busy && !chat.runID && <p className="mango-ai-empty">Ask AI a question or request an action in your workspace.</p>}
+          {chat.messages.filter((message) => (message.role === "user" || message.role === "ai") && typeof message.content === "string" && message.content.trim())
+            .map((message) => <article key={message.message_id} className="mango-ai-message" data-role={message.role}>
+              <strong>{message.role === "user" ? "You" : "AI"}</strong><p>{message.content}</p>
             </article>)}
-          {!!chat.runID && <article className="mango-assistant-message" data-role="assistant"><strong>Mango</strong><p>{chat.reply || (chat.connected ? "Working…" : "Response paused. Resume to check its progress.")}</p></article>}
+          {!!chat.runID && <article className="mango-ai-message" data-role="ai"><strong>AI</strong><p>{chat.reply || (chat.connected ? "Working…" : "Response paused. Resume to check its progress.")}</p></article>}
         </div>
-        <div className="mango-assistant-run-status">
+        <div className="mango-ai-run-status">
           {chat.busy && <p role="status">Loading…</p>}
           {chat.notice && <p role="status">{chat.notice}</p>}
           {chat.error && <p role="alert">{chat.error}</p>}
-          {chat.pending && <div className="mango-assistant-pending"><p>A send needs to be checked: “{chat.pending.message}”</p>
-            <button type="button" disabled={chat.busy || dictationBusy} onClick={() => { void send(chat.pending!.message); }}>Retry saved message</button>
+          {chat.pending && <div className="mango-ai-pending"><p>A send needs to be checked: “{chat.pending.message}”</p>
+            <button type="button" disabled={chat.busy || chat.stopping || dictationBusy} onClick={() => { void send(chat.pending!.message); }}>Retry saved message</button>
           </div>}
-          {!!chat.runID && <button type="button" disabled={chat.stopping} onClick={() => { void chat.stop(); }}>{chat.stopping ? "Stopping…" : "Stop response"}</button>}
-          {!chat.connected && !chat.busy && !chat.pending && (chat.runID || chat.error) && <button type="button" onClick={chat.resume}>Resume</button>}
+          {(chat.runID || chat.pending) && <button type="button" disabled={chat.busy || chat.stopping} onClick={() => { void chat.stop(); }}>{chat.stopping ? "Stopping…" : "Stop response"}</button>}
+          {!chat.connected && !chat.busy && !chat.pending && (chat.runID || chat.error || chat.historyPending) && <button type="button" onClick={chat.resume}>Resume</button>}
         </div>
-        <AssistantComposer key={composerVersion} apiBase={apiBase} companyID={companyID} visible={panelOpen}
+        <AIComposer key={composerVersion} apiBase={apiBase} companyID={companyID} visible={panelOpen}
           sending={chat.busy || !!chat.runID || !!chat.pending} submitting={chat.busy && !!chat.pending} onDictationBusyChange={setDictationBusy}
           draft={draft} setDraft={setDraft} onSend={send} />
       </div>

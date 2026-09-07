@@ -3,11 +3,9 @@ package httpapi
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"strings"
@@ -21,20 +19,8 @@ func (s *Server) handleHermesAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 405, "method_not_allowed")
 		return
 	}
-	if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
-		writeError(w, 401, "unauthorized")
-		return
-	}
-	key := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	var route HermesRoute
-	for _, candidate := range s.hermesRoutes {
-		if candidate.CallbackKey != "" && subtle.ConstantTimeCompare([]byte(key), []byte(candidate.CallbackKey)) == 1 {
-			route = candidate
-			break
-		}
-	}
-	if route.UserID == "" {
-		writeError(w, 401, "unauthorized")
+	route, actor, ok := s.hermesCallbackScope(w, r)
+	if !ok {
 		return
 	}
 	var body struct {
@@ -44,51 +30,40 @@ func (s *Server) handleHermesAction(w http.ResponseWriter, r *http.Request) {
 		Action     string          `json:"action"`
 		Arguments  json.RawMessage `json:"arguments"`
 	}
-	if !assistantDecode(w, r, &body) {
+	if !aiDecode(w, r, &body) {
 		return
 	}
 	if !validHermesID(body.RunID) || !validHermesID(body.SessionID) || !validHermesID(body.ToolCallID) {
-		writeError(w, 400, "invalid_assistant_action")
-		return
-	}
-	memberships, err := s.freshUserMemberships(r.Context(), route.UserID)
-	if err != nil {
-		writeError(w, 503, "company_access_unavailable")
-		return
-	}
-	actor := ActorContext{User: domain.User{UserID: route.UserID}, Memberships: normalizeMembershipRoles(memberships), CompanyID: route.CompanyID}
-	actor.CompanyRole = actorRoleForCompany(actor, route.CompanyID)
-	if actor.CompanyRole == "" {
-		writeError(w, 403, "company_access_denied")
+		writeError(w, 400, "invalid_ai_action")
 		return
 	}
 	r = r.WithContext(context.WithValue(r.Context(), actorContextKey{}, actor))
-	var native assistantRunStatus
-	if err = s.hermesJSON(r.Context(), route, http.MethodGet, "/v1/runs/"+body.RunID, "", nil, &native); err != nil {
+	var native hermesRunStatus
+	if err := s.hermesJSON(r.Context(), route, http.MethodGet, "/v1/runs/"+body.RunID, "", nil, &native); err != nil {
 		writeHermesError(w, err)
 		return
 	}
 	if native.RunID != body.RunID || native.SessionID != body.SessionID || native.Status != "running" {
-		writeError(w, 409, "assistant_run_not_accepting_actions")
+		writeError(w, 409, "ai_run_not_accepting_actions")
 		return
 	}
-	run, err := s.repo.FindAssistantRun(r.Context(), route.CompanyID, route.UserID, body.RunID)
+	run, err := s.repo.FindAIRun(r.Context(), route.CompanyID, route.UserID, body.RunID)
 	if errors.Is(err, store.ErrNotFound) {
-		// A native tool can start before POST /runs has returned its run ID. Bind
-		// only the sole admitted scope/session, after verifying native ownership.
-		run, err = s.repo.ActiveAssistantRun(r.Context(), route.CompanyID, route.UserID)
-		if err == nil && run.RunID == "" && run.ConversationID == body.SessionID && !run.Cancelled {
-			run, err = s.repo.BindAssistantRun(r.Context(), route.CompanyID, route.UserID, run.RequestID, body.RunID)
+		// A native tool can start before POST /runs returns. Resolve the saved
+		// submission's exact idempotency key; matching a chat alone is not proof.
+		run, err = s.repo.ActiveAIRun(r.Context(), route.CompanyID, route.UserID)
+		if err == nil && run.HermesRunID == "" && run.ChatID == body.SessionID && run.Status == "pending" {
+			run, err = s.admitAIRun(r.Context(), route, run)
 		} else {
 			err = store.ErrNotFound
 		}
 	}
 	if err != nil {
-		writeAssistantStoreError(w, err)
+		writeAIStoreError(w, err)
 		return
 	}
-	if run.ConversationID != body.SessionID || run.Cancelled || run.Settled {
-		writeError(w, 409, "assistant_run_not_accepting_actions")
+	if run.HermesRunID != body.RunID || run.ChatID != body.SessionID || run.Status != "running" {
+		writeError(w, 409, "ai_run_not_accepting_actions")
 		return
 	}
 	switch body.Action {
@@ -123,7 +98,7 @@ func (s *Server) handleHermesAction(w http.ResponseWriter, r *http.Request) {
 		}
 		work, err := s.repo.GetLogicGateWork(route.CompanyID, args.LogicGateID, actorID)
 		if err != nil {
-			writeAssistantStoreError(w, err)
+			writeAIStoreError(w, err)
 			return
 		}
 		work.Permissions.CanEdit = flags.CanEdit
@@ -151,19 +126,19 @@ func (s *Server) handleHermesAction(w http.ResponseWriter, r *http.Request) {
 		encoded, _ := json.Marshal(args)
 		sum := sha256.Sum256(encoded)
 		actionKey := hex.EncodeToString(sum[:])
-		result, err := s.repo.AssistantCreateNode(r.Context(), run, actionKey, store.LogicGateNodeAssignmentInput{
+		result, err := s.repo.AICreateNode(r.Context(), run, actionKey, store.LogicGateNodeAssignmentInput{
 			CompanyID: route.CompanyID, ActorUserID: route.UserID, LogicGateID: args.LogicGateID, ProcessStepID: &args.ProcessStepID, ProcessStepIDSet: true,
 			NodeID: store.NewUUIDv7String(), CreateNodeTitle: args.Title,
 		})
 		if err != nil {
-			writeAssistantStoreError(w, err)
+			writeAIStoreError(w, err)
 			return
 		}
 		s.publishCommittedWorkspaceEvents(result.Events)
 		s.projectCommittedNotificationEvents(result.Events)
 		writeJSON(w, 200, map[string]any{"node_id": result.Node.NodeID, "title": result.Node.Title, "logic_gate_id": result.Assignment.LogicGateID, "process_step_id": result.Assignment.ProcessStepID})
 	default:
-		writeError(w, 400, "unsupported_assistant_action")
+		writeError(w, 400, "unsupported_ai_action")
 	}
 }
 

@@ -1,94 +1,102 @@
-# Proposed AI data structure
+# AI data structure
 
-**Draft for review. This describes the proposed design; the application and database schema have not been changed to match it.**
+Implemented in source. The repository SQL must be applied by a human operator before enabling the integration.
 
-A **chat** is the entire saved exchange between a user and the agent. A **run** is the agent working on one request. An **action** is one completed operation that changed app data.
+A **chat** is the whole saved exchange. A **message** is one user or AI message in that chat. A **run** is one execution, which can answer, perform actions, or both. An **action** records one committed change to Mango data. An empty saved chat has no run; an ordinary reply has a run but no action.
 
-A chat starts runs. Each run can produce replies, perform actions, or do both. A schedule can also start a run without a user-facing chat.
+Follow Hermes's existing storage conventions where they fit Mango: plain strings in text columns, structured events and command results in JSON. Preserve its exact session and message IDs. PostgreSQL uses `JSONB` where Hermes's SQLite stores serialized JSON in `TEXT`.
 
-## Three tables
+## Tables and columns
 
-| Table | One row represents | Can exist without |
+Every table has `company_id UUID` and `user_id UUID`, using the existing company and user identities. Every link includes both scope columns.
+
+### ai_chats
+
+| Column | Type | Value |
 | --- | --- | --- |
-| `ai_chats` | One whole saved chat | Runs or actions, such as an empty chat |
-| `ai_runs` | One execution of the agent | A chat or any actions |
-| `ai_actions` | One successfully committed app operation | A chat, when its run has no chat; a run is always required |
+| `company_id` | UUID | Owning company |
+| `user_id` | UUID | Owning user |
+| `chat_id` | TEXT | Exact Hermes session ID; Mango supplies it when starting a new chat |
+| `name` | TEXT | Display name, such as `Invoice review` |
+| `created_timestamp` | TIMESTAMPTZ | When the chat was created |
 
-```mermaid
-erDiagram
-    ai_chats |o--o{ ai_runs : "may contain"
-    ai_runs ||--o{ ai_actions : "may perform"
+Primary key: `(company_id, user_id, chat_id)`. Creating an empty chat saves this row without invoking Hermes.
+
+### ai_messages
+
+| Column | Type | Value |
+| --- | --- | --- |
+| `company_id` | UUID | Same company as the chat |
+| `user_id` | UUID | Same user as the chat |
+| `message_id` | BIGINT | Hermes's exact native integer message ID, such as `147` |
+| `chat_id` | TEXT | Required link to the whole chat |
+| `run_id` | UUID, nullable | Local run only when the source proves that association |
+| `role` | TEXT | `user` or `ai` |
+| `content` | TEXT | Literal visible message text |
+| `created_timestamp` | TIMESTAMPTZ | Hermes's original message timestamp |
+
+Primary key: `(company_id, user_id, message_id)`. There is no separate order or position column. Native message IDs preserve insertion order when timestamps tie or the clock moves backward. The UI displays the latest page in that order and can load older messages.
+
+Hermes calls the AI role `assistant`; the adapter translates it at the boundary. Native tool messages, reasoning and hidden compaction instructions do not become visible chat messages. Text parts are decoded using Hermes's display projection. Full native multimodal data remains in Hermes.
+
+The pinned native transcript does not store a run ID on each message. The import leaves `run_id` null rather than matching by text or time. Repeated equal text can be two real messages. A full native snapshot removes obsolete copied representations after compaction; native message IDs are never translated or replaced with Mango IDs.
+
+### ai_runs
+
+| Column | Type | Value |
+| --- | --- | --- |
+| `company_id` | UUID | Execution's company |
+| `user_id` | UUID | User whose authority applies |
+| `run_id` | UUID | Mango's stable ID, allocated before sending |
+| `hermes_run_id` | TEXT, nullable | Native execution ID, such as `run_` followed by 32 hexadecimal characters |
+| `chat_id` | TEXT, nullable | Exact chat in the same scope |
+| `status` | TEXT | `pending`, `running`, `stopping`, `completed`, `failed`, `cancelled`, or `interrupted` |
+| `pending_input` | TEXT, nullable | Original text while native acceptance is uncertain; cleared on binding or terminal status |
+| `history` | JSONB | Ordered array of recorded lifecycle, model, tool, reply and committed-action events |
+| `created_timestamp` | TIMESTAMPTZ | When Mango reserved the execution |
+
+Primary key: `(company_id, user_id, run_id)`. One company/user pair can have only one nonterminal run. A run may have no chat in the schema; the current chat UI always starts runs from chats.
+
+The two run IDs are necessary because Mango needs retry protection before Hermes assigns its ID. The first submission under a local run ID wins. A retry sends that saved chat and text, even if replacement input arrives under the same ID. A different request needs a new ID. There is no request ID, payload hash, source-message link, cancelled flag or settled flag on the run.
+
+Example history entry:
+
+```json
+{
+  "id": "run_abc:call_123:tool.completed",
+  "event": "tool.completed",
+  "created_timestamp": "2026-09-07T01:20:00Z",
+  "data": {
+    "tool_name": "mango_create_node",
+    "tool_call_id": "call_123",
+    "succeeded": true
+  }
+}
 ```
 
-The app can load these related records together and display one chat timeline. Separate storage does not require separate screens.
+History array order is successful append order. Stable event IDs make retries harmless. Supported Hermes hooks write a durable delivery queue in its scoped home before sending observations to Mango, so recording does not require an open browser. Raw provider reasoning, credentials and tool payloads are excluded. A session-end observation confirms the native executor status before its delivery is acknowledged; queued retries finish that check without requiring a browser. Unknown executions never gain a local run association merely by sharing a chat. Definitively rejected callbacks stay in the scoped queue for inspection without blocking later runs.
 
-## ai_chats — the whole chat
+### ai_actions
 
-| Column | What it stores |
-| --- | --- |
-| `chat_id` | The exact chat/session ID used by Hermes; no second chat ID or mapping table |
-| `company_id` | Company that owns the chat |
-| `user_id` | User who owns the chat |
-| `title` | The chat's display title |
-| `created_timestamp` | When the chat was created |
+| Column | Type | Value |
+| --- | --- | --- |
+| `company_id` | UUID | Same company as the run |
+| `user_id` | UUID | Same user as the run |
+| `run_id` | UUID | Required local run link |
+| `action_name` | TEXT | Command, initially `mango_create_node` |
+| `action_key` | TEXT | SHA-256 hex digest of normalized command arguments |
+| `result` | JSONB | Saved result of the committed business command |
 
-The proposed key is `(company_id, user_id, chat_id)`.
+Primary key: `(company_id, user_id, run_id, action_name, action_key)`. All mutations use this one table. Reads and failed attempts appear in run history but do not create committed-action receipts.
 
-**Messages and replies remain in Hermes's existing transcript storage.** This Mango row describes the chat; it does not contain a growing JSON copy of all messages. Searchable history imports and backups remain separate later work.
+For Node creation, `action_key` hashes the exact Process ID, Step ID and trimmed title, with UUIDs normalized to lowercase. It is a 64-character value, for example `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` (illustrative digest only). Repeating those arguments during the same run returns the original `result`, regardless of tool-call ID. The business change, result and committed-action history event share one transaction.
 
-## ai_runs — one execution
+An action's chat is reached through its run. Receipts grant no access and do not replace live Process/Step/Node relationships. Replaying a receipt never recreates a subsequently deleted Node.
 
-| Column | What it stores |
-| --- | --- |
-| `run_id` | Mango's stable execution ID, created before sending; replaces the current `request_id` |
-| `company_id` | Company the execution belongs to |
-| `user_id` | User whose authority applies to the execution |
-| `chat_id` | Optional link to a chat in that same company and user scope |
-| `hermes_run_id` | Hermes's execution ID, absent until known; replaces the current `run_id` |
-| `status` | `active`, `stopping`, or `finished` |
-| `message` | Original input retained while sending is uncertain; cleared once the Hermes execution is linked or the run is closed |
-| `created_timestamp` | When Mango first records the run, before submitting it to Hermes; used to limit uncertain retries |
+## Ownership and scope
 
-The proposed key is `(company_id, user_id, run_id)`. The optional chat link uses `(company_id, user_id, chat_id)`.
+Chats, messages, runs and actions use exact scoped foreign keys. Membership removal denies access while retaining historical retry protection; permanent company or user deletion cascades through the Mango records. There is no individual chat-deletion API in this layer.
 
-**One status replaces both flags:** `active` covers pending acceptance and execution; `stopping` blocks further changes while execution stops; `finished` closes the run. Detailed completion, failure and cancellation outcomes continue to come from Hermes. A late response must never reopen a stopped or finished run.
+Scheduled jobs and scheduled runs are not implemented. Native memory, learned skills, full session SQLite storage, response continuity and provider execution remain owned by Hermes.
 
-**No `payload_hash`:** a run ID always refers to its original submission. An uncertain retry sends the saved original message and chat, never replacement input. An existing accepted ID returns its original run. A different request must receive a new run ID. This changes the current behavior, which rejects changed input under an existing ID.
-
-Mango and Hermes IDs have different purposes: Mango needs an ID before making the network request, while the pinned Hermes version assigns its own execution ID. Both are needed to recover when acceptance succeeds but the response is lost.
-
-## ai_actions — completed app changes
-
-| Column | What it stores |
-| --- | --- |
-| `company_id` | Company scope, matching the run |
-| `user_id` | User scope, matching the run |
-| `run_id` | Required link to the Mango run that performed the action |
-| `action_name` | Operation name, such as `mango_create_node` |
-| `action_key` | Key that recognizes repeated arguments for that operation within the same run |
-| `outcome` | Saved JSON result returned by the committed operation |
-
-The proposed key is `(company_id, user_id, run_id, action_name, action_key)`. The run link uses `(company_id, user_id, run_id)`.
-
-Every operation uses this shared table. Reads and failed attempts create no action receipt. The result and app change commit together, so a retry returns the original outcome without performing the change again.
-
-An action's chat is found through its run. There is no additional `chat_id` on the action. Receipts remain historical evidence after an affected business resource is deleted; replaying one must never recreate that resource.
-
-## Examples
-
-| Example | Chat | Run | Actions |
-| --- | --- | --- | --- |
-| Create an empty saved chat | Yes | None yet | None |
-| Say hello and receive a reply | Yes | One | None |
-| Ask the agent to create a task | Yes | One | One or more, depending on the requested work |
-| Ask another question in that chat | Same chat | Another run | Optional |
-| Scheduled analysis | Optional | One per execution | Optional |
-| Scheduled task creation | Optional | One per execution | Yes, if creation succeeds |
-
-## Schedules and remaining implementation decisions
-
-A schedule defines what to run and when. Each occurrence creates an ordinary `ai_runs` row. A separate table just for scheduled executions is unnecessary. Scheduled execution is not implemented in the current integration; schedule definitions and their authorization will be addressed when that capability is built.
-
-Before implementation, define chat-title ownership and chat deletion behavior. Deleting a chat must not casually erase retry protection for committed operations. Company and user access checks, permanent deletion cleanup, and run/action links must follow the existing [relationship laws](tests/relationships.md).
-
-The current implementation remains documented in [Hermes integration laws](tests/hermes.md). This proposal does not replace those laws until implementation updates them.
+See [Hermes business laws](tests/hermes.md), [relationship laws](tests/relationships.md) and [runtime setup](../hermes/README.md).

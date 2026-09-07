@@ -119,7 +119,7 @@ func TestPostgresAIActionReceiptRollback(t *testing.T) {
 	}
 }
 
-func newAIActionReceiptRun(t *testing.T, repo Repository) AssistantRun {
+func newAIActionReceiptRun(t *testing.T, repo Repository) AIRun {
 	t.Helper()
 	company, err := repo.CreateCompany("Shared AI action receipts")
 	if err != nil {
@@ -132,7 +132,7 @@ func newAIActionReceiptRun(t *testing.T, repo Repository) AssistantRun {
 	if _, err := repo.AddCompanyMembership(user.CognitoSubject, company.CompanyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
-	run, err := repo.ReserveAssistantRun(context.Background(), AssistantRun{CompanyID: company.CompanyID, UserID: user.UserID, RequestID: "shared-receipt-run", Message: "Fixture action request"})
+	run, err := repo.ReserveAIRun(context.Background(), AIRun{CompanyID: company.CompanyID, UserID: user.UserID, RunID: newUUIDv7String(), PendingInput: "Fixture action request"})
 	if err != nil {
 		t.Fatal(err)
 	}

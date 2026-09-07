@@ -109,7 +109,7 @@ def _call(action, args, session_id=""):
             return _error("Mango returned an invalid action result.")
         return json.dumps(result, ensure_ascii=False)
     except (httpx.HTTPError, ValueError):
-        return _error("Mango did not confirm the action. Check the saved outcome before trying again.")
+        return _error("Mango did not confirm the action. Check the saved result before trying again.")
 
 
 def list_processes(args, session_id="", **kwargs):
@@ -125,6 +125,8 @@ def create_node(args, session_id="", **kwargs):
 
 
 def register(ctx):
+    import mango_history
+    mango_history.register(ctx)
     ctx.register_middleware("tool_execution", bind_tool_context)
     process_id = {"type": "string", "description": "Exact existing Mango Process (logic_gate_id) UUID."}
     ctx.register_tool(name="mango_list_processes", toolset="mango", handler=list_processes, schema={
@@ -137,7 +139,7 @@ def register(ctx):
                        "required": ["logic_gate_id"], "additionalProperties": False},
     })
     ctx.register_tool(name="mango_create_node", toolset="mango", handler=create_node, schema={
-        "description": "Create a Node in an existing Process Step when the user requests it. Mango checks current permissions and saves the outcome. Report success only from a successful tool result. Identical creation in one run reuses its saved Node.",
+        "description": "Create a Node in an existing Process Step when the user requests it. Mango checks current permissions and saves the result. Report success only from a successful tool result. Identical creation in one run reuses its saved Node.",
         "parameters": {"type": "object", "properties": {
             "logic_gate_id": process_id,
             "process_step_id": {"type": "string", "description": "Exact existing Step UUID from that Process."},
