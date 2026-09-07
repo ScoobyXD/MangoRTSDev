@@ -163,14 +163,35 @@ button, input, textarea, select {
   font-style: normal;
 }
 
+.mango-auth-header-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.mango-auth-header-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
 .mango-auth-columns {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 28px;
+  gap: 48px;
 }
 .mango-auth-columns > form + form {
-  border-left: 1px solid rgba(100, 116, 139, 0.18);
-  padding-left: 28px;
+  position: relative;
+}
+.mango-auth-columns > form + form::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -24.5px;
+  width: 1px;
+  background: rgba(100, 116, 139, 0.18);
 }
 .mango-auth-section-title {
   margin: 0 0 6px;
@@ -179,10 +200,13 @@ button, input, textarea, select {
 }
 @media (max-width: 580px) {
   .mango-auth-columns { grid-template-columns: minmax(0, 1fr); }
-  .mango-auth-columns > form + form {
-    border-left: 0;
-    border-top: 1px solid rgba(100, 116, 139, 0.18);
-    padding: 24px 0 0;
+  .mango-auth-columns > form + form::before {
+    top: -24.5px;
+    right: 0;
+    bottom: auto;
+    left: 0;
+    width: auto;
+    height: 1px;
   }
 }
 
