@@ -26,7 +26,7 @@
 24. A mailbox-disabled actor must be denied personal and shared mailbox HTTP and realtime access without contacting the provider; ordinary product authentication must remain available.
 25. Cognito must verify a replacement email before changing the user's current email attribute.
 
-26. The scenic login page must show compact, equal Sign Up and Sign In forms at the bottom left on desktop and keep all controls reachable on small or short screens.
+26. The scenic login page must show compact, equal Sign Up and Sign In forms directly over the scenery at the bottom left, without a shared background rectangle.
 27. Landing navigation must select Sign In / Login by default and show only a minimal What We Offer placeholder when requested.
 28. Switching landing sections or wallpapers must preserve mounted auth forms, entered values, and pending confirmation work.
 29. Sign-up, sign-in, invitations, password recovery, account challenges, and deep-link return behavior must keep using the existing auth flows.
@@ -35,6 +35,10 @@
 32. Wallpaper rotation must decode the next scene before showing it and retain the current scene if the next image fails.
 33. Wallpaper rotation must wait about one minute between scenes, run only with multiple scenes, pause while the page is hidden, and stop for reduced motion.
 34. Wallpaper loading must request only the current scene and the next scene when needed, and remove timers and listeners when unmounted.
+
+35. Accept Invite and Forgot Password must remain separate compact buttons at the top right of the landing page.
+36. Auth controls must remain reachable on small or short screens without overlapping the landing navigation.
+37. Sign Up and Sign In fields must use opaque light backgrounds with dark text, and their exposed headings and labels must stay legible over varied scenery.
 
 ## Wallpaper setup
 

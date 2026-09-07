@@ -233,13 +233,6 @@ const authFieldStyle: React.CSSProperties = {
   minWidth: 0,
 };
 
-const authFieldLabelStyle: React.CSSProperties = {
-  color: "#334155",
-  fontSize: 11,
-  fontWeight: 760,
-  letterSpacing: 0,
-};
-
 const authActionRowStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
@@ -760,7 +753,7 @@ function AuthTextField({ label, id, ...inputProps }: AuthTextFieldProps) {
   const inputID = id ?? generatedID;
   return (
     <label style={authFieldStyle} htmlFor={inputID}>
-      <span style={authFieldLabelStyle}>{label}</span>
+      <span className="mango-auth-field-label">{label}</span>
       <input id={inputID} className="mango-auth-input" {...inputProps} />
     </label>
   );
@@ -1543,19 +1536,21 @@ function AuthPanel({ title, error, children, wide = false, actions, onNavigate }
     <div className="mango-auth-landing">
       <AuthWallpaper />
       <div className="mango-auth-scroll">
-        <nav className="mango-auth-nav" aria-label="Landing navigation">
-          <button type="button" aria-pressed={!showOffer} onClick={() => {
-            setShowOffer(false);
-            if (!wide) onNavigate("/login");
-          }}>Sign In / Login</button>
-          <button type="button" aria-pressed={showOffer} onClick={() => setShowOffer(true)}>What We Offer</button>
-        </nav>
+        <header className="mango-auth-topbar">
+          <nav className="mango-auth-nav" aria-label="Landing navigation">
+            <button type="button" aria-pressed={!showOffer} onClick={() => {
+              setShowOffer(false);
+              if (!wide) onNavigate("/login");
+            }}>Sign In / Login</button>
+            <button type="button" aria-pressed={showOffer} onClick={() => setShowOffer(true)}>What We Offer</button>
+          </nav>
+          {actions && <div className="mango-auth-actions">{actions}</div>}
+        </header>
         <main className="mango-auth-content">
           <section className={`mango-auth-panel${wide ? " mango-auth-panel-wide" : ""}`} aria-label={title} hidden={showOffer}>
             {!wide && <h1 className="mango-auth-section-title">{title}</h1>}
             {error && <div role="alert" style={authErrorStyle}>{error}</div>}
             {children}
-            {actions && <div className="mango-auth-actions">{actions}</div>}
           </section>
           <section className="mango-auth-panel mango-auth-offer" aria-labelledby="mango-auth-offer-title" hidden={!showOffer}>
             <h1 className="mango-auth-section-title" id="mango-auth-offer-title">What We Offer</h1>
