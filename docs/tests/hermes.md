@@ -56,6 +56,7 @@
 54. Local startup must resolve an account email to one existing Mango user and company through a read-only membership lookup without guessing or creating identities.
 55. Duplicate users for one email must stop local startup, and multiple companies must require an explicit selection.
 56. Local startup must remember only the selected company UUID and must recheck the user's membership on every launch.
+57. Local startup must find Docker Desktop in its standard install folders when the current PowerShell PATH is stale and make its credential helpers available in that process.
 
 ## Process story
 

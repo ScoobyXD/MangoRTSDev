@@ -97,9 +97,20 @@ ROLLBACK;
 }
 
 function Get-LocalHermesDocker {
-  $docker = Get-Command docker -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+  $candidates = @('docker.exe')
+  if ($env:LOCALAPPDATA) {
+    $candidates += Join-Path $env:LOCALAPPDATA 'Programs\DockerDesktop\resources\bin\docker.exe'
+  }
+  if ($env:ProgramFiles) {
+    $candidates += Join-Path $env:ProgramFiles 'Docker\Docker\resources\bin\docker.exe'
+  }
+  $docker = Get-Command -Name $candidates -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
   if (-not $docker) {
-    throw "Hermes needs Docker Desktop running with Linux containers. See docs/setup/hermes-local.md."
+    throw "Docker Desktop's docker.exe was not found on PATH or in its standard install folders. See docs/setup/hermes-local.md."
+  }
+  $dockerBin = Split-Path -Parent $docker.Source
+  if (($env:Path -split [IO.Path]::PathSeparator) -notcontains $dockerBin) {
+    $env:Path = $dockerBin + [IO.Path]::PathSeparator + $env:Path
   }
   $endpoint = $env:DOCKER_HOST
   if ([string]::IsNullOrWhiteSpace($endpoint)) {
