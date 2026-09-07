@@ -16,6 +16,8 @@ Do not rerun `20260907_hermes_action_receipts.sql`: Jonat reports it already app
 
 The launcher keeps the working Docker discovery and authenticated account lookup. Before loading application credentials or stopping the backend, it builds `mangorts-hermes:693641aa` from its own checkout with Docker's normal cache, so an existing tag cannot silently run older Mango code. It reads existing company memberships, starts fixed container `mangorts-hermes`, and gives Go the exact profile routes. Finish or Stop existing runs before the first transition. The launcher refuses unsafe cutover while nonterminal Mango runs exist.
 
+After successful startup, Ctrl+C stops Go while Hermes remains running. In the same PowerShell terminal, change to `backend` and use `go run ./cmd/miraeopus-api` for subsequent backend restarts. The terminal retains its existing connection environment; a new terminal needs the launcher again. Stop Hermes explicitly with `docker stop mangorts-hermes`, preserving its volumes.
+
 Existing volumes named `mangorts-hermes-<company UUID>-<user UUID>` mount directly at `/data/profiles/<profile>` in the shared container. Other new profiles live inside the shared `/data` volume. No private state is copied, deleted or reassigned. The persistent `mango-gateway.json` records each source volume and the gateway API credential fingerprint, rejecting later volume remapping or a different API credential. Retain both shared and original volumes in backups.
 
 ## Identity and credentials

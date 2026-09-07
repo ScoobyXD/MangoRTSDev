@@ -382,7 +382,7 @@ function Start-LocalHermes {
   # Arguments contain only fixed settings and validated UUIDs, never credentials.
   $launchID = [guid]::NewGuid().ToString('N')
   $dockerArgs = @(
-    'run', '--interactive', '--name', $Settings.Name,
+    'run', '--interactive', '--sig-proxy=false', '--name', $Settings.Name,
     '--label', 'mangorts.local-hermes=true', '--label', 'mangorts.hermes-gateway=shared',
     '--label', "mangorts.hermes-launch=$launchID",
     '--publish', '127.0.0.1:8642:8642', '--read-only', '--cap-drop', 'ALL',
@@ -409,7 +409,7 @@ function Start-LocalHermes {
   $start.EnvironmentVariables['MANGO_HERMES_PROFILE_VOLUMES'] = ConvertTo-Json -Compress -InputObject $Settings.ProfileVolumes
   $process = New-Object Diagnostics.Process
   $process.StartInfo = $start
-  $runtime = [pscustomobject]@{ Settings = $Settings; Process = $process; LaunchID = $launchID }
+  $runtime = [pscustomobject]@{ Settings = $Settings; LaunchID = $launchID }
   try {
     # Private stdin avoids env files, CLI secret values, and Docker Config.Env secrets.
     # Send UTF-8 independently of the PowerShell console's text encoding.
@@ -459,6 +459,12 @@ function Start-LocalHermes {
     } finally { $client.Dispose(); $handler.Dispose() }
     if (-not $ready) { throw "Hermes did not report durable run storage within 60 seconds. Check its startup output." }
 
+    # Private stdin was only the bootstrap transport. Detach that Docker client,
+    # not the healthy container, so a later Ctrl+C reaches Go alone.
+    if ($process.HasExited) { throw "Hermes exited before startup detached (Docker exit code $($process.ExitCode))." }
+    $process.Kill()
+    if (-not $process.WaitForExit(5000)) { throw 'Unable to detach the Docker startup client within 5 seconds.' }
+
     $env:MANGORTS_LOCAL_HERMES_API_KEY = $apiKey
     $env:MANGORTS_LOCAL_HERMES_CALLBACK_KEY = $callbackKey
     $env:MANGORTS_HERMES_ROUTES = ConvertTo-Json -Compress -InputObject @(
@@ -474,38 +480,36 @@ function Start-LocalHermes {
   } catch {
     Stop-LocalHermes -Runtime $runtime -ShowStartupOutput
     throw
-  }
+  } finally { $process.Dispose() }
 }
 
 function Stop-LocalHermes {
   param([object]$Runtime, [switch]$ShowStartupOutput)
   if ($null -eq $Runtime) { return }
-  try {
-    # A failed concurrent launch or an older launcher's finally block must not
-    # stop a replacement container that happens to have the same shared name.
-    if ([string]::IsNullOrWhiteSpace($Runtime.LaunchID)) { return }
-    $inspection = & {
+  # A failed concurrent launch or an older launcher must not stop a replacement
+  # container that happens to have the same shared name.
+  if ([string]::IsNullOrWhiteSpace($Runtime.LaunchID)) { return }
+  $inspection = & {
+    $ErrorActionPreference = 'Continue'
+    $value = & $Runtime.Settings.Docker container inspect --format '{{.Id}} {{json .Config.Labels}}' $Runtime.Settings.Name 2>$null
+    if ($LASTEXITCODE -eq 0) { $value }
+  }
+  if ($null -eq $inspection) { return }
+  $identity = $inspection -split ' ', 2
+  if ($identity.Count -ne 2 -or $identity[0] -notmatch '^[0-9a-f]{64}$') { return }
+  $labels = $identity[1] | ConvertFrom-Json
+  if ($labels.'mangorts.hermes-launch' -cne $Runtime.LaunchID) { return }
+  if ($ShowStartupOutput) {
+    Write-Host 'Hermes startup output (last 30 lines):'
+    & {
       $ErrorActionPreference = 'Continue'
-      $value = & $Runtime.Settings.Docker container inspect --format '{{.Id}} {{json .Config.Labels}}' $Runtime.Settings.Name 2>$null
-      if ($LASTEXITCODE -eq 0) { $value }
+      & $Runtime.Settings.Docker logs --tail 30 $identity[0] 2>&1 | ForEach-Object { Write-Host $_ }
     }
-    if ($null -eq $inspection) { return }
-    $identity = $inspection -split ' ', 2
-    if ($identity.Count -ne 2 -or $identity[0] -notmatch '^[0-9a-f]{64}$') { return }
-    $labels = $identity[1] | ConvertFrom-Json
-    if ($labels.'mangorts.hermes-launch' -cne $Runtime.LaunchID) { return }
-    if ($ShowStartupOutput) {
-      Write-Host 'Hermes startup output (last 30 lines):'
-      & {
-        $ErrorActionPreference = 'Continue'
-        & $Runtime.Settings.Docker logs --tail 30 $identity[0] 2>&1 | ForEach-Object { Write-Host $_ }
-      }
-    }
-    try {
-      Remove-StoppedLocalHermesContainer -Docker $Runtime.Settings.Docker -ContainerID $identity[0]
-    } catch {
-      Write-Warning "Docker could not clean up local Hermes. Stop and remove container $($Runtime.Settings.Name) in Docker Desktop while retaining its volumes."
-    }
-  } finally { $Runtime.Process.Dispose() }
+  }
+  try {
+    Remove-StoppedLocalHermesContainer -Docker $Runtime.Settings.Docker -ContainerID $identity[0]
+  } catch {
+    Write-Warning "Docker could not clean up local Hermes. Stop and remove container $($Runtime.Settings.Name) in Docker Desktop while retaining its volumes."
+  }
   # The named /data volume is deliberately retained across backend restarts.
 }

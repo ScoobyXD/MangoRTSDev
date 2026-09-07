@@ -111,7 +111,6 @@ $script:fixtureStoppedIDs = @()
 $script:fixtureRemovedIDs = @()
 $script:fixtureCleanupCommands = @()
 $script:fixtureStartupLogRequests = 0
-$script:fixtureDisposed = 0
 function Invoke-FixtureCleanupDocker {
   if (($args -join ' ') -eq 'container inspect --format {{.Id}} {{json .Config.Labels}} mangorts-hermes') {
     $global:LASTEXITCODE = if ($script:fixtureContainerFound) { 0 } else { 1 }
@@ -135,11 +134,8 @@ function Invoke-FixtureCleanupDocker {
   Assert-True (($args[0..1] -join ' ') -eq 'container rm') 'Unexpected cleanup Docker operation.'
   $script:fixtureRemovedIDs += $args[2]
 }
-$fixtureProcess = [pscustomobject]@{ HasExited = $false }
-$fixtureProcess | Add-Member -MemberType ScriptMethod -Name Dispose -Value { $script:fixtureDisposed++ }
 $fixtureRuntime = [pscustomobject]@{
   Settings = [pscustomobject]@{ Docker = 'Invoke-FixtureCleanupDocker'; Name = 'mangorts-hermes' }
-  Process = $fixtureProcess
   LaunchID = 'a' * 32
 }
 Stop-LocalHermes -Runtime $fixtureRuntime
@@ -156,7 +152,7 @@ Stop-LocalHermes -Runtime $fixtureRuntime -ShowStartupOutput
 Assert-True ($script:fixtureStoppedIDs.Count -eq 0 -and $script:fixtureRemovedIDs.Count -eq 0 -and $script:fixtureStartupLogRequests -eq 1) 'A failed or older launcher must not read logs, stop or remove the replacement container.'
 $script:fixtureContainerFound = $false
 Stop-LocalHermes -Runtime $fixtureRuntime -ShowStartupOutput
-Assert-True ($script:fixtureStoppedIDs.Count -eq 0 -and $script:fixtureStartupLogRequests -eq 1 -and $script:fixtureDisposed -eq 4) 'Absent containers must be ignored while every process handle is disposed.'
+Assert-True ($script:fixtureStoppedIDs.Count -eq 0 -and $script:fixtureStartupLogRequests -eq 1) 'Absent containers must be ignored without reading logs or stopping a replacement.'
 $script:fixtureRestartCommands = @()
 function Invoke-FixtureRestartDocker {
   Assert-True ($args[-1] -eq $script:fixtureContainerID) 'Explicit restart must target only the previously inspected immutable container ID.'
@@ -271,5 +267,57 @@ $parseErrors = $null
   (Join-Path $PSScriptRoot 'start_local_cognito_backend.ps1'), [ref]$tokens, [ref]$parseErrors
 ) | Out-Null
 Assert-True ($parseErrors.Count -eq 0) 'Backend launcher must parse without executing credential setup.'
+
+# Run the actual launcher tail with synthetic startup and Go functions. No cloud
+# setup executes, and inherited service credentials are replaced before any read.
+$launcherSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'start_local_cognito_backend.ps1'))
+$tailMarker = '$hermesRuntime = $null'
+$tailIndex = $launcherSource.IndexOf($tailMarker, [StringComparison]::Ordinal)
+Assert-True ($tailIndex -ge 0 -and $tailIndex -eq $launcherSource.LastIndexOf($tailMarker, [StringComparison]::Ordinal)) 'Launcher lifecycle marker must be unique.'
+$launcherTail = [scriptblock]::Create($launcherSource.Substring($tailIndex))
+$fixtureEnvironmentNames = @('MANGORTS_HERMES_ROUTES', 'MANGORTS_LOCAL_HERMES_API_KEY', 'MANGORTS_LOCAL_HERMES_CALLBACK_KEY')
+foreach ($name in $fixtureEnvironmentNames) { [Environment]::SetEnvironmentVariable($name, 'fixture-previous', 'Process') }
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$hermesSettings = [pscustomobject]@{ Name = 'fixture-hermes' }
+$hermesServiceCredentials = $syntheticCredentials
+$StopExisting = $true
+$script:fixtureStartFails = $false
+$script:fixtureGoFails = $false
+$script:fixtureGoCalls = 0
+function Get-SecretStringValue { 'fixture-provider' }
+function Start-LocalHermes {
+  param([object]$Settings, [object]$ServiceCredentials, [string]$OpenAIKey, [switch]$StopExisting)
+  Assert-True ($Settings.Name -eq 'fixture-hermes' -and $OpenAIKey -eq 'fixture-provider' -and $StopExisting) 'Launcher must pass its existing startup settings.'
+  foreach ($name in $fixtureEnvironmentNames) { [Environment]::SetEnvironmentVariable($name, 'fixture-running', 'Process') }
+  if ($script:fixtureStartFails) { throw 'Fixture startup failed' }
+  [pscustomobject]@{ Settings = $Settings; LaunchID = 'a' * 32 }
+}
+function Stop-LocalHermes { throw 'Successful launcher must not stop Hermes when Go exits.' }
+function go {
+  Assert-True (($args -join ' ') -eq 'run ./cmd/miraeopus-api') 'Launcher must retain the normal Go command.'
+  foreach ($name in $fixtureEnvironmentNames) {
+    Assert-True ([Environment]::GetEnvironmentVariable($name, 'Process') -eq 'fixture-running') 'Go must receive the running Hermes environment.'
+  }
+  $script:fixtureGoCalls++
+  if ($script:fixtureGoFails) { throw 'Fixture Go interrupted' }
+}
+& $launcherTail
+Assert-True ($script:fixtureGoCalls -eq 1) 'Successful startup must run Go once.'
+foreach ($name in $fixtureEnvironmentNames) {
+  Assert-True ([Environment]::GetEnvironmentVariable($name, 'Process') -eq 'fixture-running') 'Normal Go exit must retain Hermes settings in this PowerShell.'
+}
+$script:fixtureGoFails = $true
+Assert-Rejected { & $launcherTail } 'Fixture Go interrupted'
+foreach ($name in $fixtureEnvironmentNames) {
+  Assert-True ([Environment]::GetEnvironmentVariable($name, 'Process') -eq 'fixture-running') 'Unwinding Go must retain Hermes settings in this PowerShell.'
+  [Environment]::SetEnvironmentVariable($name, 'fixture-previous', 'Process')
+}
+$script:fixtureStartFails = $true
+Assert-Rejected { & $launcherTail } 'Fixture startup failed'
+Assert-True ($script:fixtureGoCalls -eq 2) 'Failed Hermes startup must not run Go.'
+foreach ($name in $fixtureEnvironmentNames) {
+  Assert-True ([Environment]::GetEnvironmentVariable($name, 'Process') -eq 'fixture-previous') 'Failed Hermes startup must restore the previous environment.'
+  [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+}
 
 Write-Output 'LOCAL_HERMES_FIXTURES_OK'

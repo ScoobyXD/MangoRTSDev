@@ -58,7 +58,7 @@ aws sso login --profile mangorts-dev
 .\scripts\start_local_cognito_backend.ps1 -AwsProfile mangorts-dev -StopExisting
 ```
 
-Keep this terminal open. The launcher starts the single `mangorts-hermes` container, supplies all membership routes to Go, and runs the API on port 8080. Hermes listens only on host loopback port 8642. The native route is `/p/<profile>/v1/runs`; each profile name concatenates the exact company UUID and user UUID without hyphens. Container callbacks reach the API through `host.docker.internal:8080`.
+Keep this PowerShell terminal for your development session. The launcher starts the single `mangorts-hermes` container, supplies all membership routes to Go, and runs the API on port 8080. Hermes stays running independently after startup. It listens only on host loopback port 8642. The native route is `/p/<profile>/v1/runs`; each profile name concatenates the exact company UUID and user UUID without hyphens. Container callbacks reach the API through `host.docker.internal:8080`.
 
 The application process retrieves only the authorized development OpenAI secret for Hermes through your SSO profile. It sends the provider key and two stable service seeds to the container through standard input. Go and Hermes derive distinct API and callback credentials for each profile from those seeds. Secret values are not command-line arguments, Docker configuration environment values, or an environment file. You do not need to copy an OpenAI key into a local config file. Existing backend AWS and database configuration still applies. Agents must not run this full launcher because it loads the application's database and cloud credentials; use the isolated fixture checks below for agent verification.
 
@@ -77,11 +77,22 @@ Open `http://localhost:5173`, sign into Mango, select a company, and open the AI
 
 ## Stopping and starting again
 
-Use Ctrl+C in the backend terminal. The launcher stops the shared container and retains the `mangorts-hermes` volume. New profiles keep native chats, memory, configuration, skills, session SQLite databases and pending history under `/data/profiles/<profile>`. The listener keeps its native run-acceptance registry at `/data/runs_idempotency.db`, with separate ownership for each profile. Mango's AI records remain in PostgreSQL. A stopped run is not automatically executed again.
+After the initial launcher reaches readiness, Ctrl+C stops Go while Hermes stays running. The same PowerShell process keeps the database, AWS and Hermes connection settings. From the repository root, restart only Go with:
+
+```powershell
+cd .\backend
+go run ./cmd/miraeopus-api
+```
+
+For later restarts in that same terminal, Ctrl+C and repeat `go run ./cmd/miraeopus-api`. The startup launcher is unnecessary for each Go restart. A new PowerShell terminal needs the launcher again because it does not inherit the previous terminal's environment. Rerun the launcher with `-StopExisting` after Docker/Hermes stops, when changing profile membership or Hermes code, or when the development credentials need refreshing.
+
+To stop Hermes itself, use `docker stop mangorts-hermes` or Docker Desktop. Use `docker logs --tail 30 mangorts-hermes` to inspect its output. Stopping it retains the `mangorts-hermes` volume and all original profile volumes. New profiles keep native chats, memory, configuration, skills, session SQLite databases and pending history under `/data/profiles/<profile>`. The listener keeps its native run-acceptance registry at `/data/runs_idempotency.db`, with separate ownership for each profile. Mango's AI records remain in PostgreSQL. A stopped run is not automatically executed again.
+
+Hermes can continue an active run while Go is down. Saved-history delivery retries when Go returns, but a Mango tool call attempted during the outage can fail. Restarting Go does not cancel or automatically resubmit the AI run.
 
 Each launcher records its own container launch ID. Cleanup verifies that label and stops the exact inspected Docker container ID, so an older or failed launcher cannot stop a newer replacement with the same shared name. Explicit `-StopExisting` also stops only the inspected owned container ID.
 
-The launcher removes its stopped container explicitly while retaining every named volume. If startup fails, it first prints the last 30 log lines from that same verified container. An early exit also reports Docker's exit code; container output remains available until this cleanup finishes.
+If startup fails, the launcher prints the last 30 log lines from that same verified container before stopping and removing it. An early exit also reports Docker's exit code; container output remains available until this cleanup finishes. Successful startup leaves the container running, including after Go exits.
 
 Existing per-account volumes named `mangorts-hermes-<company_id>-<user_id>` are retained and mounted directly at their matching `/data/profiles/<profile>` path inside this same container. Their files are not copied, moved, reset or assigned to another identity. The old `mango-scope.json` must match the exact pair. The shared root also records each profile's volume source and refuses a later source change, which prevents an older volume from hiding newer private state.
 

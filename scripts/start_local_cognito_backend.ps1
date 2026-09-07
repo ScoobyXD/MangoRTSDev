@@ -595,6 +595,8 @@ try {
       $hermesRuntime = Start-LocalHermes -Settings $hermesSettings -ServiceCredentials $hermesServiceCredentials `
         -OpenAIKey $hermesOpenAIKey -StopExisting:$StopExisting
     } finally { $hermesOpenAIKey = $null; $hermesServiceCredentials = $null }
+    Write-Host 'Ctrl+C stops Go; Hermes stays running.'
+    Write-Host ('To restart Go in this PowerShell: cd "{0}"; go run ./cmd/miraeopus-api' -f (Join-Path $repoRoot 'backend'))
   } elseif ([string]::IsNullOrWhiteSpace($env:MANGORTS_HERMES_ROUTES)) {
     Write-Host 'Hermes is not configured. One-time setup: docs/setup/hermes-local.md'
   }
@@ -603,9 +605,7 @@ try {
     go run ./cmd/miraeopus-api
   } finally { Pop-Location }
 } finally {
-  try {
-    if ($null -ne $hermesRuntime) { Stop-LocalHermes -Runtime $hermesRuntime }
-  } finally {
+  if ($null -eq $hermesRuntime) {
     foreach ($name in $hermesPreviousEnvironment.Keys) {
       [Environment]::SetEnvironmentVariable($name, $hermesPreviousEnvironment[$name], 'Process')
     }
