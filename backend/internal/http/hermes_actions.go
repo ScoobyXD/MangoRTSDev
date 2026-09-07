@@ -40,6 +40,12 @@ func (s *Server) handleHermesAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_ai_action")
 		return
 	}
+	user, err := s.repo.GetAuthUserByIDContext(r.Context(), route.UserID)
+	if err != nil {
+		writeAIStoreError(w, err)
+		return
+	}
+	actor.User = user
 	r = r.WithContext(context.WithValue(r.Context(), actorContextKey{}, actor))
 	var native hermesRunStatus
 	if err := s.hermesJSON(r.Context(), route, http.MethodGet, "/v1/runs/"+body.RunID, "", nil, &native); err != nil {

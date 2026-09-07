@@ -17,6 +17,7 @@ import subprocess
 import tempfile
 import threading
 from uuid import UUID
+from urllib.parse import urlsplit
 
 
 class Fixture(BaseHTTPRequestHandler):
@@ -81,7 +82,7 @@ def main():
     from tools.mcp_tool_discovery import discover_mcp_tools, get_mcp_status
     from tools.mcp_tool_lifecycle import shutdown_mcp_servers
     from tools.mcp_tool_schema import mcp_prefixed_tool_name
-    from tools.mcp_oauth import HermesTokenStorage, _sdk_class
+    from tools.mcp_oauth import HermesTokenStorage, _sdk_class, _configure_callback_port, _resolve_redirect_uri
     from tools.registry import registry
 
     @contextmanager
@@ -145,7 +146,13 @@ assert _resolve_mcp_server_config(server)['oauth']['client_secret'] == 'fixture-
                 if not args.installed:
                     configured = mango_integrations.configure(home, "linear")
                     assert configured["server_name"] == name
-                assert not mango_integrations._read_config(home)["mcp_servers"][name]["enabled"]
+                saved_server = mango_integrations._read_config(home)["mcp_servers"][name]
+                assert not saved_server["enabled"]
+                oauth_config = dict(saved_server["oauth"])
+                callback_port = _configure_callback_port(oauth_config)
+                assert callback_port == 8765
+                assert urlsplit(_resolve_redirect_uri(oauth_config, callback_port)).port == callback_port
+                assert "callback_port" not in oauth_config
                 storage = HermesTokenStorage(name)
                 asyncio.run(storage.set_tokens(_sdk_class("OAuthToken")(access_token="fixture-only", token_type="Bearer", expires_in=3600)))
                 assert HermesTokenStorage(name, hermes_home=home).has_cached_tokens()

@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import secrets
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -316,7 +317,27 @@ def main():
             finally:
                 STOP_RELEASE.set()
             assert any(event["event"] == "run.cancelled" for event in scoped(port, 0, f"/v1/runs/{stopped['run_id']}/events"))
+        # Persist undelivered fixture observations while the gateway is stopped.
+        # Both idle profile queues must resume before either receives a new run.
+        replay_ids = []
+        for index, name in enumerate(names):
+            payload = dict(next(event for event in HISTORY
+                                if event["run_id"] == runs[index] and event["type"] == "message.completed"))
+            payload.pop("credential")
+            payload["event_id"] += ":restart_fixture"
+            replay_ids.append(payload["event_id"])
+            with sqlite3.connect(home / "profiles" / name / "mango_history_outbox.db") as queue:
+                queue.execute("INSERT INTO events(event_id,run_id,payload) VALUES(?,?,?)",
+                              (payload["event_id"], payload["run_id"], json.dumps(payload)))
+        provider_count = len(PROVIDER_REQUESTS)
         with native_gateway(source, home, fixture.server_port, key, root, pairs=pairs, callback_key=callback_key) as port:
+            with HISTORY_CHANGED:
+                assert HISTORY_CHANGED.wait_for(lambda: set(replay_ids).issubset(
+                    {event["event_id"] for event in HISTORY}), timeout=20), "Idle profile queues did not resume at startup."
+            for index, event_id in enumerate(replay_ids):
+                replay = [event for event in HISTORY if event["event_id"] == event_id]
+                assert replay and all(event["credential"] == "Bearer " + callback_keys[index] for event in replay)
+            assert len(PROVIDER_REQUESTS) == provider_count, "Queue restart generated a model request."
             assert scoped(port, 0, "/v1/runs", body, "same-admission")["run_id"] == runs[0]
             assert scoped(port, 0, "/api/sessions/mango-shared-session/messages")["data"]
             assert len(CALLBACKS) == 2

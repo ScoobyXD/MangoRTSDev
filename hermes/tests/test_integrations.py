@@ -53,6 +53,16 @@ class IntegrationTests(unittest.TestCase):
         result = integrations.apply_profile_integrations({}, saved, PROFILE)
         self.assertEqual(result["platform_toolsets"]["api_server"], ["web"])
 
+    def test_native_default_enabled_cannot_bypass_explicit_tool_selection(self):
+        config = {"mcp_servers": server()}
+        selected = next(iter(config["mcp_servers"].values()))
+        selected.pop("enabled")
+        selected.pop("tools")
+        with self.assertRaisesRegex(ValueError, "explicit enabled state"):
+            integrations.apply_profile_integrations({}, config, PROFILE)
+        with self.assertRaisesRegex(ValueError, "explicit enabled state"):
+            integrations.validate_profile_integrations({PROFILE: config})
+
     def test_foreign_name_arbitrary_url_plaintext_credentials_or_unselected_tools_fail_closed(self):
         for change in ({"url": "http://127.0.0.1/admin"}, {"command": "sh"},
                        {"headers": {"Authorization": "Bearer secret"}},
@@ -87,6 +97,9 @@ class IntegrationTests(unittest.TestCase):
             result = integrations.configure(Path("/profile"), "docs", client_id="fixture-client", client_secret_env=reference)
             configured = save.call_args.args[1]["mcp_servers"][result["server_name"]]
             self.assertEqual(configured["oauth"]["client_secret"], "${" + reference + "}")
+            self.assertEqual(configured["oauth"]["redirect_port"], 8765)
+            self.assertEqual(configured["oauth"]["redirect_uri"], "http://localhost:8765/callback")
+            self.assertNotIn("callback_port", configured["oauth"])
             self.assertFalse(configured["enabled"])
 
     def test_scope_binding_requires_exact_existing_profile(self):

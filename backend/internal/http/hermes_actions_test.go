@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 )
 
@@ -22,6 +23,82 @@ func mangoToolRequest(t *testing.T, f *aiFixture, action string, args any) *http
 	w := httptest.NewRecorder()
 	f.s.Routes().ServeHTTP(w, r)
 	return w
+}
+
+func TestMangoToolsUseCurrentActorMailboxAccess(t *testing.T) {
+	f := newAIFixture(t)
+	if w := f.submit(t); w.Code != 202 {
+		t.Fatalf("submit: %d %s", w.Code, w.Body)
+	}
+	node, err := f.repo.CreateNode(f.route.CompanyID, "Work with attached email")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.repo.AddNodeInformation(f.route.CompanyID, node.NodeID, "Text box", "Keep work", store.NewUUIDv7String()); err != nil {
+		t.Fatal(err)
+	}
+	thread, err := f.repo.UpsertCommunicationsEmailThread(store.CommunicationsEmailThreadUpsertInput{
+		CompanyID: f.route.CompanyID, PersonalUserID: f.user.UserID, PersonalAccountEmail: f.user.Email,
+		AccountEmail: f.user.Email, Provider: "google", ProviderThreadID: "actor-thread", SelectedMessageID: "actor-message",
+		Messages: []domain.EmailMessageSnapshot{{ID: "actor-message", ThreadID: "actor-thread", Subject: "Permitted email"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(map[string]string{"email_message_id": thread.Messages[0].EmailMessageID, "link_scope": "message"})
+	if _, err := f.repo.AddNodeInformationWithActor(store.NodeInformationInput{
+		CompanyID: f.route.CompanyID, NodeID: node.NodeID, Type: "Attached email", Information: string(payload),
+		InformationID: store.NewUUIDv7String(), ActorUserID: f.user.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, enabled := range []bool{true, false} {
+		f.s.repo = f.repo
+		if enabled {
+			f.s.repo = legacyMailboxTestRepository{Repository: f.repo}
+		}
+		w := mangoToolRequest(t, f, "mango_get_node", map[string]any{"node_id": node.NodeID})
+		var details domain.NodeDetails
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &details) != nil {
+			t.Fatalf("mailbox enabled=%t: %d %s", enabled, w.Code, w.Body)
+		}
+		if strings.Contains(w.Body.String(), "Attached email") != enabled || !strings.Contains(w.Body.String(), "Keep work") {
+			t.Errorf("mailbox enabled=%t returned incorrect information: %s", enabled, w.Body)
+		}
+	}
+}
+
+func TestMangoToolsUseCurrentActorDisplayName(t *testing.T) {
+	f := newAIFixture(t)
+	if w := f.submit(t); w.Code != 202 {
+		t.Fatalf("submit: %d %s", w.Code, w.Body)
+	}
+	node, err := f.repo.CreateNode(f.route.CompanyID, "Original")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const currentName = "Updated actor name"
+	if _, err := f.repo.UpsertAuthUser(f.user.CognitoSubject, f.user.Email, currentName); err != nil {
+		t.Fatal(err)
+	}
+	w := mangoToolRequest(t, f, "mango_update_node", map[string]any{"node_id": node.NodeID, "name": "Renamed"})
+	if w.Code != 200 {
+		t.Fatalf("rename: %d %s", w.Code, w.Body)
+	}
+	events, err := f.repo.ListDomainEventsAfter(store.DomainEventReplayQuery{CompanyID: f.route.CompanyID, StreamType: "workspace", StreamID: f.route.CompanyID, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Type != "node_updated" || event.Payload["node_id"] != node.NodeID {
+			continue
+		}
+		if event.ActorUserID == nil || *event.ActorUserID != f.user.UserID || event.Payload["actor_display_name"] != currentName {
+			t.Fatalf("Node event lost current actor: %+v", event)
+		}
+		return
+	}
+	t.Fatal("Node update event missing")
 }
 
 func TestMangoToolsExecuteCanonicalWorkAndEditorCommands(t *testing.T) {

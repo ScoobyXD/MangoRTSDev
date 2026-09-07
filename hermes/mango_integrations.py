@@ -63,7 +63,7 @@ def _validate_server(name, server, profile_name):
         UUID(server["url"].split("/tenants/", 1)[1].split("/", 1)[0])
     elif server.get("url") != endpoint:
         raise IntegrationSetupError("Integration endpoint is not the provider's supported MCP server.")
-    if server.get("auth") != "oauth" or not isinstance(server.get("enabled", False), bool):
+    if server.get("auth") != "oauth" or not isinstance(server.get("enabled"), bool):
         raise IntegrationSetupError("Integration requires native OAuth and an explicit enabled state.")
     oauth = server.get("oauth", {})
     if not isinstance(oauth, dict):
@@ -146,7 +146,7 @@ def configure(home, provider, *, client_id=None, client_secret_env=None, tenant=
         endpoint = endpoint.format(tenant=str(UUID(tenant)))
     if provider in {"gmail", "docs", "sheets", "drive"} and (not client_id or not client_secret_env):
         raise IntegrationSetupError("Google requires an OAuth client ID and profile runtime client-secret reference.")
-    oauth = {"callback_port": 8765, "redirect_uri": "http://localhost:8765/callback"}
+    oauth = {"redirect_port": 8765, "redirect_uri": "http://localhost:8765/callback"}
     if client_id:
         oauth["client_id"] = client_id
     if client_secret_env:

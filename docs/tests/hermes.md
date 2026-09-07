@@ -71,6 +71,8 @@
 69. Repair must read native history without modifying it, preserve literal session and integer message IDs, include compacted display history and exclude rewound, hidden, tool and reasoning content.
 70. Each repair capture must use fresh event identities and queue `history.recovered` only after its complete snapshot succeeds; missing sessions and previously rejected runs must not claim repaired history or replay rejected events.
 71. Mango must accept a recovery marker only for the exact admitted terminal run, and explicit Resume must reload its saved messages without synthesizing original execution events or submitting another run.
+72. Every saved private integration must specify a boolean `enabled`; a missing flag must never inherit native default-on behavior or bypass exact tool selection.
+73. Integration setup must use native `oauth.redirect_port` so the native callback listener matches the configured redirect URI.
 
 ## Process story
 

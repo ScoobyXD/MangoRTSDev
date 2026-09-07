@@ -329,9 +329,12 @@ def register(ctx):
                            ("post_api_request", on_model_end), ("api_request_error", on_model_error),
                            ("post_llm_call", on_reply), ("on_session_end", on_run_end)):
         ctx.register_hook(name, callback)
+    from hermes_constants import get_hermes_home
     from mango_scope import profiles
-    # Restart every served profile's durable queue, including profiles without
-    # a new request. The lock deduplicates native per-profile plugin loading.
+    # Native gateway startup discovers root plugins before named profiles.
+    # Restart idle queues once there; named registrations only install hooks.
+    if Path(get_hermes_home()).resolve() != Path(os.environ["HERMES_HOME"]).resolve():
+        return
     for name in profiles():
         home = Path(os.environ["HERMES_HOME"]) / "profiles" / name
         if callback_configuration(home) is not None:

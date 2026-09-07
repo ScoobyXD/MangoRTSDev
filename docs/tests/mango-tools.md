@@ -18,6 +18,7 @@
 16. Creating a Node or Project editor textbox must allocate its exact new UUID on the server and atomically save its canonical document and AI receipt.
 17. Retrying identical textbox creation in one run must return the original document ID and create no second textbox.
 18. UUID letter casing must not create another native profile or credential for the same company and user pair.
+19. Every action must load its current user record so canonical mailbox filtering and committed change metadata use that user's saved access and display name.
 
 The tool transport reuses Mango's existing Process work, Node and editor commands. It creates no resource registry, new relationship authority, ownership link or permission grant. `mango_get_process` supplies Step IDs; `mango_get_node` supplies the existing Node details. A Process overview uses `logic-gate-overview`; a Step uses its exact ID; other textboxes keep their canonical document IDs.
 

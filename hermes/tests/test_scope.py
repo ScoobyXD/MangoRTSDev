@@ -173,6 +173,24 @@ class ScopeTests(unittest.TestCase):
         actual = {call.kwargs["headers"]["Authorization"]: json.loads(call.kwargs["content"])["data"]["output"] for call in send.call_args_list}
         self.assertEqual(actual, {"Bearer " + boxes[0].configuration[1]: "first", "Bearer " + boxes[1].configuration[1]: "second"})
 
+    def test_root_registration_resumes_all_queues_without_named_profile_rescans(self):
+        self.configure()
+        constants = types.ModuleType("hermes_constants")
+        constants.get_hermes_home = MagicMock(return_value=self.home)
+        with patch.dict(sys.modules, {"hermes_constants": constants}), patch.object(history, "profile_outbox") as resume:
+            history.register(MagicMock())
+            self.assertEqual([call.args[0] for call in resume.call_args_list],
+                             [self.home / "profiles" / name for name in self.names])
+            resume.reset_mock()
+            with patch.object(scope, "profiles", side_effect=AssertionError("Named registration rescanned profiles")):
+                for name in self.names:
+                    constants.get_hermes_home.return_value = self.home / "profiles" / name
+                    ctx = MagicMock()
+                    history.register(ctx)
+                    ctx.register_middleware.assert_called_once_with("tool_execution", history.observe_tool)
+                    self.assertEqual(ctx.register_hook.call_count, 6)
+            resume.assert_not_called()
+
     def test_stdin_is_bounded_and_never_reads_aws_or_saves_credentials(self):
         credentials = {name: self.environment[name] for name in ("OPENAI_API_KEY", "API_SERVER_KEY", "MANGO_CALLBACK_KEY")}
         stream = io.TextIOWrapper(io.BytesIO(b"\xef\xbb\xbf" + (json.dumps(credentials) + "\nunused\n").encode()))
