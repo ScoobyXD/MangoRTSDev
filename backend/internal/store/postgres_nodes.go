@@ -721,6 +721,17 @@ func (r *PostgresRepo) addNodeInformation(input NodeInformationInput) (domain.No
 		return domain.NodeInformation{}, err
 	}
 	defer tx.Rollback()
+	item, err := r.addNodeInformationTx(ctx, tx, input)
+	if err != nil {
+		return domain.NodeInformation{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.NodeInformation{}, err
+	}
+	return item, nil
+}
+
+func (r *PostgresRepo) addNodeInformationTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput) (domain.NodeInformation, error) {
 	companyID := strings.TrimSpace(input.CompanyID)
 	nodeID := strings.TrimSpace(input.NodeID)
 	infoType := strings.TrimSpace(input.Type)
@@ -759,9 +770,6 @@ func (r *PostgresRepo) addNodeInformation(input NodeInformationInput) (domain.No
 		if _, err := r.enqueueRealtimeOutboxTx(ctx, tx, outboxInput); err != nil {
 			return domain.NodeInformation{}, err
 		}
-		if err := tx.Commit(); err != nil {
-			return domain.NodeInformation{}, err
-		}
 		return item, nil
 	}
 
@@ -777,9 +785,6 @@ func (r *PostgresRepo) addNodeInformation(input NodeInformationInput) (domain.No
 		return domain.NodeInformation{}, err
 	}
 	item := nodeProjectionAsInformation(projection)
-	if err := tx.Commit(); err != nil {
-		return domain.NodeInformation{}, err
-	}
 	return item, nil
 }
 

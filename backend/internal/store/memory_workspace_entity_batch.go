@@ -7,12 +7,16 @@ import (
 )
 
 func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput) (result WorkspaceEntityBatchResult, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.createWorkspaceEntityBatchLocked(input)
+}
+
+func (r *MemoryRepo) createWorkspaceEntityBatchLocked(input WorkspaceEntityBatchInput) (result WorkspaceEntityBatchResult, err error) {
 	input, err = normalizeWorkspaceProcessDefinition(input)
 	if err != nil {
 		return WorkspaceEntityBatchResult{}, err
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
 
 	input.MutationOrigin = NormalizeMutationOrigin(input.MutationOrigin)
 	if input.EntityKind == EntityTypeLogicGate && len(input.Relationships) > 0 {

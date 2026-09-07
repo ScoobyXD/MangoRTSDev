@@ -8,27 +8,41 @@ import (
 )
 
 func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput) (result WorkspaceEntityBatchResult, err error) {
-	input, err = normalizeWorkspaceProcessDefinition(input)
-	if err != nil {
-		return WorkspaceEntityBatchResult{}, err
-	}
 	if input.ProcessDefinition != nil {
 		defer func() { err = workspaceProcessDefinitionWriteError(err) }()
 	}
-	if input.EntityKind == EntityTypeLogicGate && len(input.Relationships) > 0 {
-		return WorkspaceEntityBatchResult{}, ErrInvalid
-	}
 	ctx := ContextWithTimingRecorder(context.Background(), input.TimingRecorder)
 	defer observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.transaction")()
-	input.MutationOrigin = NormalizeMutationOrigin(input.MutationOrigin)
-	if input.EntityKind == EntityTypeNode && strings.TrimSpace(input.FolderID) != "" {
-		return WorkspaceEntityBatchResult{}, ErrInvalid
-	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return WorkspaceEntityBatchResult{}, err
 	}
 	defer tx.Rollback()
+	result, err = r.createWorkspaceEntityBatchTx(ctx, tx, input)
+	if err != nil {
+		return WorkspaceEntityBatchResult{}, err
+	}
+	stopCommit := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.commit")
+	err = tx.Commit()
+	stopCommit()
+	if err != nil {
+		return WorkspaceEntityBatchResult{}, err
+	}
+	return result, nil
+}
+
+func (r *PostgresRepo) createWorkspaceEntityBatchTx(ctx context.Context, tx *sql.Tx, input WorkspaceEntityBatchInput) (result WorkspaceEntityBatchResult, err error) {
+	input, err = normalizeWorkspaceProcessDefinition(input)
+	if err != nil {
+		return WorkspaceEntityBatchResult{}, err
+	}
+	if input.EntityKind == EntityTypeLogicGate && len(input.Relationships) > 0 {
+		return WorkspaceEntityBatchResult{}, ErrInvalid
+	}
+	input.MutationOrigin = NormalizeMutationOrigin(input.MutationOrigin)
+	if input.EntityKind == EntityTypeNode && strings.TrimSpace(input.FolderID) != "" {
+		return WorkspaceEntityBatchResult{}, ErrInvalid
+	}
 
 	result = WorkspaceEntityBatchResult{
 		CompanyID:      input.CompanyID,
@@ -256,12 +270,6 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 			return WorkspaceEntityBatchResult{}, err
 		}
 	}
-	stopCommit := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.commit")
-	if err := tx.Commit(); err != nil {
-		stopCommit()
-		return WorkspaceEntityBatchResult{}, err
-	}
-	stopCommit()
 	return result, nil
 }
 

@@ -24,7 +24,7 @@ import (
 // Run only under hermes/tests/native_smoke.py --go-integration. The Python
 // fixture owns an unmodified pinned Hermes gateway and a fake model provider
 // on the same Linux loopback interface;
-// this test owns the authenticated Go API and the ordinary Mango Node command.
+// this test owns the authenticated Go API and canonical in-memory commands.
 func TestAINativeRuntimeIntegration(t *testing.T) {
 	nativeURL := os.Getenv("HERMES_NATIVE_URL")
 	if nativeURL == "" {
@@ -61,6 +61,10 @@ func TestAINativeRuntimeIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	step, err := repo.CreateProcessStep(store.ProcessStepCreateInput{CompanyID: companyID, LogicGateID: process.LogicGateID, Name: "Native integration step", ActorUserID: user.UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sales, err := repo.CreateCompanyExplorerV2Folder(store.CompanyExplorerV2FolderInput{CompanyID: companyID, ParentEntityID: companyID, Name: "Sales", ActorUserID: user.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,6 +255,52 @@ func TestAINativeRuntimeIntegration(t *testing.T) {
 		t.Fatalf("native saved chat status=%d body=%s", status, data)
 	}
 
+	// The scripted model resolves the partial Folder name and carries only IDs
+	// returned by real tool callbacks through this entire creation workflow.
+	pickerSubmission := aiSubmission{CompanyID: companyID, RunID: store.NewUUIDv7String(), Message: "fixture picker workflow"}
+	status, data = request(http.MethodPost, "/v1/ai/runs", pickerSubmission, true)
+	if status != 202 {
+		t.Fatalf("native picker admission status=%d body=%s", status, data)
+	}
+	status, data = request(http.MethodGet, "/v1/ai/runs/"+pickerSubmission.RunID+"/events"+query, nil, true)
+	if status != 200 || !strings.Contains(string(data), "run.completed") || !strings.Contains(string(data), "Fixture picker workflow complete.") {
+		t.Fatalf("native picker stream status=%d body=%s", status, data)
+	}
+	placed, err := repo.SearchCompanyExplorer(store.CompanyExplorerSearchQuery{CompanyID: companyID, PermissionUserID: user.UserID, Query: "Customer Success", ResourceTypes: []string{"logic_gate"}})
+	if err != nil || len(placed.Results) != 1 || placed.Results[0].DisplayName != "Customer Success" || placed.Results[0].ResourceID == process.LogicGateID {
+		t.Fatalf("native picker did not create, rename and place its exact Process: %+v %v", placed, err)
+	}
+	path, _ := json.Marshal(placed.Results[0].LocationPath)
+	if !strings.Contains(string(path), sales.EntityID) {
+		t.Fatalf("native picker did not place its Process in the discovered Folder: %s", path)
+	}
+	pickerWork, err := repo.GetLogicGateWork(companyID, placed.Results[0].ResourceID, user.UserID)
+	if err != nil || len(pickerWork.Steps) != 1 || pickerWork.Steps[0].Name != "Review" || len(pickerWork.Nodes) != 1 {
+		t.Fatalf("native picker did not create its Step and Node: %+v %v", pickerWork, err)
+	}
+	pickerNode := pickerWork.Nodes[0]
+	if pickerNode.NodeTitle != "First customer" || pickerNode.ProcessStepID == nil || *pickerNode.ProcessStepID != pickerWork.Steps[0].ProcessStepID || pickerNode.PlacedByUserID != user.UserID {
+		t.Fatalf("native picker lost canonical Node placement or actor: %+v", pickerNode)
+	}
+	chats, err := repo.ListNodeProjections(companyID, pickerNode.NodeID)
+	if err != nil || len(chats) != 1 {
+		t.Fatalf("native picker did not create one Node textbox chat: %+v %v", chats, err)
+	}
+	var pickerChat struct {
+		BlockID  string `json:"block_id"`
+		AuthorID string `json:"author_id"`
+		Message  string `json:"message"`
+	}
+	if json.Unmarshal([]byte(chats[0].Information), &pickerChat) != nil || !isCanonicalUUID(pickerChat.BlockID) || pickerChat.AuthorID != user.UserID || pickerChat.Message != "Ready for review." {
+		t.Fatalf("native picker chat used the wrong textbox, body or actor: %+v", chats[0])
+	}
+	if _, err := repo.GetEditorJSONSnapshot(store.EditorJSONDocumentRef{CompanyID: companyID, ResourceType: "node", ResourceID: pickerNode.NodeID, DocumentID: pickerChat.BlockID}); err != nil {
+		t.Fatalf("native picker chat has no canonical Node editor textbox: %v", err)
+	}
+	if actionCallbacks.Load() != 11 {
+		t.Fatalf("expected three original and eight picker workflow callbacks, got %d", actionCallbacks.Load())
+	}
+
 	stopSubmission := aiSubmission{CompanyID: companyID, RunID: store.NewUUIDv7String(), Message: "fixture stop"}
 	status, data = request(http.MethodPost, "/v1/ai/runs", stopSubmission, true)
 	if status != 202 {
@@ -272,5 +322,5 @@ func TestAINativeRuntimeIntegration(t *testing.T) {
 	if err != nil || (gate.Status != "stopping" && gate.Status != "cancelled") {
 		t.Fatalf("native Stop did not retain the Mango action gate: %v", err)
 	}
-	t.Log("Real pinned Hermes HTTP → authenticated Go API → native plugin → existing Process/Step/Node command passed; duplicate submission, history without SSE, saved messages, local-ID stream and Stop verified.")
+	t.Log("Real pinned Hermes HTTP → authenticated Go API → native plugin → canonical in-memory commands passed; partial Folder search, Process create/rename/placement, Step/Node/textbox/chat creation, duplicate submission, history without SSE, saved messages, local-ID stream and Stop verified. Model responses are scripted fixtures.")
 }

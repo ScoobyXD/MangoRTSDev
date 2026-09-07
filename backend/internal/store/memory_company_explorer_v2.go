@@ -306,12 +306,16 @@ func (r *MemoryRepo) CreateCompanyExplorerV2Folder(input CompanyExplorerV2Folder
 }
 
 func (r *MemoryRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInput) (CompanyExplorerV2Row, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.upsertCompanyExplorerV2EdgeLocked(input)
+}
+
+func (r *MemoryRepo) upsertCompanyExplorerV2EdgeLocked(input CompanyExplorerV2EdgeInput) (CompanyExplorerV2Row, error) {
 	input, err := normalizeCompanyExplorerV2EdgeInput(input)
 	if err != nil {
 		return CompanyExplorerV2Row{}, err
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
 
 	if input.PermissionUserID != "" && !r.userHasCompanyMembershipLocked(input.CompanyID, input.PermissionUserID) {
 		return CompanyExplorerV2Row{}, ErrNotFound

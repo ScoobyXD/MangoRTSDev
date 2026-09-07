@@ -18,6 +18,8 @@ After verified sign-in, Mango resolves the existing user identity and company me
 3. Removing the legacy AI source must not delete live database records or business resources.
 4. AI chat, message, run and action links must include exact company/user scope and preserve native chat/message identities without a resource registry.
 5. Membership removal must deny AI history and actions while retaining deduplication, and permanent company/user deletion must remove its scoped Mango AI records.
+6. Hermes search must return existing canonical resource identities and visible paths without creating relationships or granting access.
+7. Hermes Process creation and placement, Step creation, Node assignment, textbox creation and Node chat creation must reuse their existing exact typed commands and commit each business mutation with its scoped AI receipt.
 
 ## AI Removal Story
 

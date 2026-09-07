@@ -40,28 +40,52 @@ def _schema(description, properties, required=None, **constraints):
 
 
 _ACTIONS = {
-    "mango_list_processes": _schema("List Mango Processes the current user can view in the selected company.", {}),
-    "mango_get_process": _schema("Read a Process, its Steps and permitted Nodes. Use the exact IDs returned here.", {"logic_gate_id": _UUID}),
-    "mango_list_nodes": _schema("List Mango Nodes the current user can view.", {}),
-    "mango_get_node": _schema("Read a Node and its editor document IDs.", {"node_id": _UUID}),
+    "mango_search": _schema(
+        "Find accessible Mango resources using the same search as Company Explorer and the universal picker. "
+        "Start here when typed or transcribed speech refers to a name or partial name; matching is case-insensitive exact, prefix and substring. "
+        "Use resource_types to narrow the kind (Process = logic_gate, Folder = folder, Node = node). "
+        "Results contain resource_type, canonical resource_id, display_name and location_path. Keep IDs internally for subsequent tools; "
+        "never invent IDs or ask the user to retrieve them or supply an exact full name. Use the request's location context to choose the match; "
+        "if several matches remain genuinely ambiguous, ask using names and locations before changing anything. "
+        "If the result limit is reached, narrow the name/type or increase limit before treating a result as unique. "
+        "For Steps, find their Process then use mango_get_process.",
+        {"query": {"type": "string", "minLength": 1, "maxLength": 500, "pattern": "\\S"},
+         "resource_types": {"type": "array", "items": {"type": "string", "enum": [
+             "folder", "logic_gate", "node", "project", "huddle_logic_gate", "huddle_node"]}},
+         "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, ["query"]),
+    "mango_list_processes": _schema("List Mango Processes the current user can view in the selected company. Use mango_search for a name or partial name.", {}),
+    "mango_get_process": _schema("Read a Process, its Steps and permitted Nodes. Resolve its name through mango_search, then use the exact IDs returned here for Step and Node operations.", {"logic_gate_id": _UUID}),
+    "mango_create_process": _schema("Create and name a Process using Mango's normal creation command. To place it in a requested Folder, first find that Folder with mango_search and supply its resource_id as folder_id; omitting folder_id uses normal default placement. Use the returned logic_gate_id for later actions. Identical creation in one run reuses the saved Process. Report success only from a successful result.",
+        {"name": _NAME, "folder_id": _UUID}, ["name"]),
+    "mango_update_process": _schema("Rename an existing Process without changing its other fields. Resolve its name through mango_search first.",
+        {"logic_gate_id": _UUID, "name": _NAME}),
+    "mango_create_step": _schema("Create a Step in an existing Process using its normal Step command. Optional after_process_step_id identifies the preceding Step in this same Process and creates the normal incoming connection. Read mango_get_process to resolve existing Steps. Identical creation in one run reuses the saved Step.",
+        {"logic_gate_id": _UUID, "name": {**_NAME, "maxLength": 200}, "after_process_step_id": _UUID}, ["logic_gate_id", "name"]),
+    "mango_move_process": _schema("Place an existing Process in a Folder using Company Explorer's normal move command. Find the Process and Folder by name with mango_search and use their exact resource_ids. Null folder_id places the Process at the company root.",
+        {"logic_gate_id": _UUID, "folder_id": {**_UUID, "type": ["string", "null"]}}),
+    "mango_list_nodes": _schema("List Mango Nodes the current user can view. Use mango_search for a name or partial name.", {}),
+    "mango_get_node": _schema("Read a Node and its editor document IDs. Resolve its name through mango_search first; use returned textbox IDs for editor and Node chat operations.", {"node_id": _UUID}),
     "mango_create_node": _schema("Create a Node in an existing Process Step. Identical creation in one run reuses the saved Node. Report success only from a successful result.",
         {"logic_gate_id": _UUID, "process_step_id": _UUID, "title": _NAME}),
     "mango_update_node": _schema("Update the requested Node fields; omitted fields remain unchanged. Null clears due_date or priority.",
         {"node_id": _UUID, "name": _NAME, "status": {"type": "string"},
          "due_date": {"type": ["string", "null"], "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
          "priority": {"type": ["integer", "null"], "minimum": 1, "maximum": 5}}, ["node_id"], minProperties=2),
-    "mango_move_node": _schema("Move a Node through the canonical Process/Step command, preserving status. Null Step means unassigned in the destination Process.",
+    "mango_move_node": _schema("Move a Node through the canonical Process/Step command, preserving status. Resolve the destination Process with mango_search and Step with mango_get_process. Null Step means unassigned in the destination Process. When the user also requests a textbox for this Step visit, create it on the Node with mango_create_editor after the successful move. This performs the current workflow only; it does not install a recurring Step trigger.",
         {"node_id": _UUID, "logic_gate_id": _UUID,
          "process_step_id": {**_UUID, "type": ["string", "null"]},
          "position": {"type": "integer", "minimum": 0}}, ["node_id", "logic_gate_id", "process_step_id"]),
     "mango_get_editor": _schema("Read an existing editor document, its annotations and revision before editing.", _EDITOR),
-    "mango_create_editor": _schema("Create an editor textbox for an existing Node or Project. Mango allocates its exact document ID; use the returned document_ref to read or edit it. Identical creation in one run reuses the saved textbox.",
+    "mango_create_editor": _schema("Create an editor textbox for an existing Node or Project. A textbox requested during a Node's Step workflow belongs to that Node. Mango allocates its exact document ID; use the returned document_ref to read or edit it, and its document_id as textbox_id for Node chat. Identical creation in one run reuses the saved textbox. This does not install a recurring Step trigger.",
         {"resource_type": {"type": "string", "enum": ["node", "project"]}, "resource_id": _UUID,
          "document": _DOCUMENT, "annotations": {"type": "array", "items": {"type": "object"}, "description": "Use [] for a new document without annotations."}}),
     "mango_update_editor": _schema("Save the full mango-tiptap-json document envelope using the revision from mango_get_editor. Preserve content and annotations the user did not ask to change. Existing editor conflict rules apply; read again after saving.",
         {**_EDITOR, "base_revision": {"type": "integer", "minimum": 0},
          "document": _DOCUMENT, "annotations": {"type": "array", "items": {"type": "object"}}},
         [*_EDITOR, "base_revision", "document", "annotations"]),
+    "mango_create_node_chat": _schema("Create a plain-text chat in an existing Node textbox on the current user's behalf. Use mango_get_node to resolve existing textbox IDs, or mango_create_editor if the requested Node has no textbox. Identical creation in one run reuses the saved chat. Report success only from a successful result.",
+        {"node_id": _UUID, "textbox_id": _UUID,
+         "body": {"type": "string", "minLength": 1, "maxLength": 32000, "pattern": "\\S", "description": "Plain text chat message; no editor JSON or HTML."}}),
 }
 
 

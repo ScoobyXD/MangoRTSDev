@@ -53,7 +53,17 @@ func (r *PostgresRepo) UpdateLogicGateHeaderWithWorkspaceEvent(companyID, logicG
 		return domain.LogicGate{}, domain.DomainEvent{}, err
 	}
 	defer tx.Rollback()
+	item, event, err := r.updateLogicGateHeaderWithWorkspaceEventTx(ctx, tx, companyID, logicGateID, header)
+	if err != nil {
+		return domain.LogicGate{}, domain.DomainEvent{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.LogicGate{}, domain.DomainEvent{}, err
+	}
+	return item, event, nil
+}
 
+func (r *PostgresRepo) updateLogicGateHeaderWithWorkspaceEventTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID, header string) (domain.LogicGate, domain.DomainEvent, error) {
 	var item domain.LogicGate
 	if err := tx.QueryRowContext(ctx, `
 		update logic_gates set header=$3
@@ -73,9 +83,6 @@ func (r *PostgresRepo) UpdateLogicGateHeaderWithWorkspaceEvent(companyID, logicG
 	}
 	event, err := r.appendDomainEventTx(ctx, tx, logicGateUpdatedWorkspaceEventInput(item))
 	if err != nil {
-		return domain.LogicGate{}, domain.DomainEvent{}, err
-	}
-	if err := tx.Commit(); err != nil {
 		return domain.LogicGate{}, domain.DomainEvent{}, err
 	}
 	return item, event, nil

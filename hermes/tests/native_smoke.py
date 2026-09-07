@@ -30,6 +30,11 @@ from concurrent.futures import ThreadPoolExecutor
 REVISION = "693641aa8b4359c602283bdbbc14041e03bc47bc"
 UUID_A = "11111111-1111-4111-8111-111111111111"
 UUID_B = "22222222-2222-4222-8222-222222222222"
+PICKER_FOLDER_ID = "33333333-3333-4333-8333-333333333333"
+PICKER_PROCESS_ID = "44444444-4444-4444-8444-444444444444"
+PICKER_STEP_ID = "55555555-5555-4555-8555-555555555555"
+PICKER_NODE_ID = "66666666-6666-4666-8666-666666666666"
+PICKER_TEXTBOX_ID = "77777777-7777-4777-8777-777777777777"
 CALLBACKS = []
 HISTORY = []
 HISTORY_CHANGED = threading.Condition()
@@ -38,6 +43,43 @@ PROVIDER_REQUESTS = []
 PROVIDER_PATHS = []
 STOP_STARTED = threading.Event()
 STOP_RELEASE = threading.Event()
+
+
+def picker_workflow_output(content):
+    # A scripted provider deliberately uses IDs from preceding native tool
+    # results. The callback is synthetic; actual command behavior is Go-tested.
+    results = {item["call_id"]: json.loads(item["output"]) for item in content
+               if isinstance(item, dict) and item.get("type") == "function_call_output"
+               and item.get("call_id", "").startswith("picker_")}
+    def call(name, arguments):
+        return [{"type": "function_call", "id": "fc_" + name, "call_id": "picker_" + name,
+                 "name": name, "status": "completed", "arguments": json.dumps(arguments)}]
+    if "picker_mango_search" not in results:
+        return call("mango_search", {"query": "sal", "resource_types": ["folder"]})
+    folder_id = results["picker_mango_search"]["results"][0]["resource_id"]
+    if "picker_mango_create_process" not in results:
+        return call("mango_create_process", {"name": "Customer Onboarding"})
+    process_id = results["picker_mango_create_process"]["logic_gate_id"]
+    if "picker_mango_update_process" not in results:
+        return call("mango_update_process", {"logic_gate_id": process_id, "name": "Customer Success"})
+    if "picker_mango_move_process" not in results:
+        return call("mango_move_process", {"logic_gate_id": process_id, "folder_id": folder_id})
+    if "picker_mango_create_step" not in results:
+        return call("mango_create_step", {"logic_gate_id": process_id, "name": "Review"})
+    step_id = results["picker_mango_create_step"]["step"]["process_step_id"]
+    if "picker_mango_create_node" not in results:
+        return call("mango_create_node", {"logic_gate_id": process_id, "process_step_id": step_id, "title": "First customer"})
+    node_id = results["picker_mango_create_node"]["node_id"]
+    if "picker_mango_create_editor" not in results:
+        return call("mango_create_editor", {"resource_type": "node", "resource_id": node_id,
+            "document": {"format": "mango-tiptap-json", "schema_version": 1,
+                         "document": {"type": "doc", "content": [{"type": "paragraph"}]}}, "annotations": []})
+    textbox_id = results["picker_mango_create_editor"]["document_ref"]["document_id"]
+    if "picker_mango_create_node_chat" not in results:
+        return call("mango_create_node_chat", {"node_id": node_id, "textbox_id": textbox_id, "body": "Ready for review."})
+    assert results["picker_mango_create_node_chat"]["chat_id"]
+    return [{"type": "message", "id": "msg_picker", "role": "assistant", "status": "completed",
+             "content": [{"type": "output_text", "text": "Fixture picker workflow complete.", "annotations": []}]}]
 
 
 class FixtureServer(BaseHTTPRequestHandler):
@@ -68,6 +110,24 @@ class FixtureServer(BaseHTTPRequestHandler):
             return self.send_json({"saved": True})
         if self.path == "/internal/hermes/actions":
             CALLBACKS.append({**payload, "credential": self.headers.get("Authorization")})
+            if payload["tool_call_id"].startswith("picker_"):
+                action, arguments = payload["action"], payload["arguments"]
+                if action == "mango_search":
+                    return self.send_json({"results": [{"resource_type": "folder", "resource_id": PICKER_FOLDER_ID,
+                        "display_name": "Sales", "location_path": [{"entity_type": "folder", "entity_id": PICKER_FOLDER_ID, "name": "Sales"}]}]})
+                if action in {"mango_create_process", "mango_update_process"}:
+                    return self.send_json({"logic_gate_id": PICKER_PROCESS_ID, "header": arguments["name"]})
+                if action == "mango_move_process":
+                    return self.send_json({"item_id": PICKER_PROCESS_ID, "folder_id": arguments["folder_id"]})
+                if action == "mango_create_step":
+                    return self.send_json({"step": {"process_step_id": PICKER_STEP_ID, "logic_gate_id": arguments["logic_gate_id"], "name": arguments["name"]}})
+                if action == "mango_create_node":
+                    return self.send_json({"node_id": PICKER_NODE_ID, "logic_gate_id": arguments["logic_gate_id"], "process_step_id": arguments["process_step_id"]})
+                if action == "mango_create_editor":
+                    return self.send_json({"document_ref": {"resource_type": "node", "resource_id": arguments["resource_id"], "document_id": PICKER_TEXTBOX_ID}, "revision": 1})
+                if action == "mango_create_node_chat":
+                    return self.send_json({"node_id": arguments["node_id"], "textbox_id": arguments["textbox_id"], "chat_id": UUID_A, "body": arguments["body"]})
+                return self.send_json({"error": "unexpected_picker_action"}, status=400)
             if payload["action"] == "mango_list_processes":
                 return self.send_json({"processes": [{"logic_gate_id": UUID_A, "name": "Fixture Process"}]})
             return self.send_json({"node_id": UUID_A, "created": True})
@@ -88,7 +148,9 @@ class FixtureServer(BaseHTTPRequestHandler):
             STOP_RELEASE.wait(timeout=20)
         action = "fixture action" in json.dumps(content) and not any(
             item.get("type") == "function_call_output" for item in content if isinstance(item, dict))
-        if action:
+        if "fixture picker workflow" in json.dumps(content):
+            output = picker_workflow_output(content)
+        elif action:
             output = [{"type": "function_call", "id": "fc_list", "call_id": "call_process_list",
                 "name": "mango_list_processes", "status": "completed", "arguments": "{}"},
                 {"type": "function_call", "id": "fc_mango", "call_id": "call_mango_fixture",
@@ -262,7 +324,7 @@ def main():
                     process.wait(timeout=15)
             fixture.shutdown()
             fixture.server_close()
-            print("Native shared Hermes -> authenticated Go -> canonical Node command passed.")
+            print("Native shared Hermes -> authenticated Go -> canonical in-memory picker/Process/Step/Node/textbox/chat workflow passed (scripted model).")
             return
         pairs = [{"company_id": UUID_A, "user_id": UUID_B}, {"company_id": UUID_B, "user_id": UUID_B}]
         names = [profile_name(**pair) for pair in pairs]
@@ -308,6 +370,18 @@ def main():
             assert "current tenant home" in (first_home / "skills" / "fixture-learning" / "SKILL.md").read_text()
             assert not (second_home / "memories" / "MEMORY.md").exists()
             assert not (second_home / "skills" / "fixture-learning").exists()
+            picker = scoped(port, 0, "/v1/runs", {"input": "fixture picker workflow", "session_id": "picker-workflow"}, "picker-workflow")
+            picker_events = scoped(port, 0, f"/v1/runs/{picker['run_id']}/events")
+            assert any(event["event"] == "run.completed" for event in picker_events), picker_events
+            assert wait_history(picker["run_id"], "run.finished")[-1]["data"]["output"] == "Fixture picker workflow complete."
+            picker_calls = [item for item in CALLBACKS if item["run_id"] == picker["run_id"]]
+            assert [item["action"] for item in picker_calls] == [
+                "mango_search", "mango_create_process", "mango_update_process", "mango_move_process",
+                "mango_create_step", "mango_create_node", "mango_create_editor", "mango_create_node_chat"]
+            assert {item["credential"] for item in picker_calls} == {"Bearer " + callback_keys[0]}
+            assert picker_calls[3]["arguments"] == {"logic_gate_id": PICKER_PROCESS_ID, "folder_id": PICKER_FOLDER_ID}
+            assert picker_calls[5]["arguments"] == {"logic_gate_id": PICKER_PROCESS_ID, "process_step_id": PICKER_STEP_ID, "title": "First customer"}
+            assert picker_calls[-1]["arguments"] == {"node_id": PICKER_NODE_ID, "textbox_id": PICKER_TEXTBOX_ID, "body": "Ready for review."}
             detached = scoped(port, 1, "/v1/runs", {"input": "fixture without browser", "session_id": "detached"}, "detached")
             assert wait_history(detached["run_id"], "run.finished")[-1]["data"]["output"] == "Fixture reply complete."
             stopped = scoped(port, 0, "/v1/runs", {"input": "fixture stop", "session_id": "stopped"}, "stopped")
@@ -340,10 +414,10 @@ def main():
             assert len(PROVIDER_REQUESTS) == provider_count, "Queue restart generated a model request."
             assert scoped(port, 0, "/v1/runs", body, "same-admission")["run_id"] == runs[0]
             assert scoped(port, 0, "/api/sessions/mango-shared-session/messages")["data"]
-            assert len(CALLBACKS) == 2
+            assert len(CALLBACKS) == 10
     fixture.shutdown()
     fixture.server_close()
-    print("Native shared gateway passed: concurrent profile auth/runs, isolated tools/history/memory/skills, detached delivery, Stop and restart replay.")
+    print("Native shared gateway passed: concurrent profile auth/runs, isolated tools/history/memory/skills, staged picker workflow with synthetic provider/callback, detached delivery, Stop and restart replay.")
 
 
 if __name__ == "__main__":
