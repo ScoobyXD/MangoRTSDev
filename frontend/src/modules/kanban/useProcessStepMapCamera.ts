@@ -65,7 +65,7 @@ export function useProcessStepMapCamera(viewport: RefObject<HTMLDivElement>, isB
     const element = viewport.current;
     if (!element) return;
     const wheel = (event: WheelEvent) => {
-      if ((event.target as Element).closest("input, select, textarea")) return;
+      if ((event.target as Element).closest("input, select, textarea, .process-step-map__step-editor")) return;
       event.preventDefault();
       const area = viewArea(), rect = element.getBoundingClientRect();
       const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? area.height : 1);

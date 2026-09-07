@@ -3,6 +3,12 @@ export type MangoTiptapPointerBookmark = {
   textOffset: number;
 };
 
+export type MangoTiptapPointerActivationRequest = {
+  requestID: number;
+  coordinates: { left: number; top: number };
+  bookmark: MangoTiptapPointerBookmark | null;
+};
+
 export function preserveMangoTiptapCaretScroll(root: HTMLElement): void {
   const ownerWindow = root.ownerDocument.defaultView;
   if (!ownerWindow) return;
@@ -20,7 +26,7 @@ type BrowserCaretPosition = {
   offset: number;
 };
 
-function browserCaretPosition(ownerDocument: Document, left: number, top: number): BrowserCaretPosition | null {
+export function readMangoTiptapBrowserCaretPosition(ownerDocument: Document, left: number, top: number): BrowserCaretPosition | null {
   const documentWithCaret = ownerDocument as Document & {
     caretPositionFromPoint?: (x: number, y: number) => BrowserCaretPosition | null;
     caretRangeFromPoint?: (x: number, y: number) => Range | null;
@@ -42,7 +48,7 @@ export function captureMangoTiptapPointerBookmark(
   eventTarget: EventTarget | null,
   coordinates: { left: number; top: number },
 ): MangoTiptapPointerBookmark | null {
-  const caret = browserCaretPosition(root.ownerDocument, coordinates.left, coordinates.top);
+  const caret = readMangoTiptapBrowserCaretPosition(root.ownerDocument, coordinates.left, coordinates.top);
   const NodeConstructor = root.ownerDocument.defaultView?.Node;
   const targetNode = NodeConstructor && eventTarget instanceof NodeConstructor ? eventTarget as Node : null;
   const block = closestMangoBlock(caret?.offsetNode ?? targetNode);

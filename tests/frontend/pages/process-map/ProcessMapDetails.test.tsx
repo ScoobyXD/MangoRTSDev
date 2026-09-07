@@ -134,9 +134,9 @@ test("the open Process editor preserves document identity, Step cards, inherited
     await resizeKey("ArrowRight");
     assert.equal(editorWidth, 240, "narrowing cannot cross the minimum width");
     await resizeKey("End");
-    assert.equal(editorWidth, 880, "widening leaves room for the map and its top controls");
+    assert.equal(editorWidth, 864, "widening preserves the right gap and room for the map's top controls");
     await resizeKey("ArrowLeft");
-    assert.equal(editorWidth, 880, "widening cannot cover the map's top controls");
+    assert.equal(editorWidth, 864, "widening cannot cover the map's top controls");
     await resizeKey("Home");
     assert.equal(editorDocument("logic-gate-overview"), overview, "resizing retains the mounted overview and its unsaved text");
     const stepCard = dom.window.document.querySelector('[data-process-step-id="step-one"]');

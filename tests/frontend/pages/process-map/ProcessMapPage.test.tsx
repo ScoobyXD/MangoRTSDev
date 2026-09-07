@@ -332,6 +332,68 @@ test("Open Board / SOP flushes pending instructions and preserves the map when a
   } finally { await h.dispose(); }
 });
 
+test("new and saved Process pages move the exact Step editor into its card and clear its placement on Escape or departure", async () => {
+  const h = await harness(true);
+  const prepareBody = async (stepID: string, text: string) => {
+    const editor = h.container.querySelector<HTMLElement>(`[data-process-step-id="${stepID}"] [data-mango-editor-format="tiptap_json"]`)!;
+    assert.ok(editor);
+    await act(async () => { h.markNearViewport(editor); editor.dispatchEvent(new h.dom.window.MouseEvent("dblclick", { bubbles: true })); });
+    await settle(() => Boolean(editor.querySelector(".mango-tiptap-prosemirror")), "the sidebar Step editor did not activate");
+    const live = editor.querySelector<TiptapEditorHTMLElement>(".mango-tiptap-prosemirror")!;
+    await act(async () => { live.focus(); live.editor!.commands.insertContentAt(1, text); });
+    await settle(() => h.container.querySelector(`[data-step-map-id="${stepID}"] .process-step-map__step-preview`)?.textContent?.includes(text) === true, "Step text did not reach its map preview");
+    return { editor, live };
+  };
+  const moveBodyToMap = async (stepID: string, editor: HTMLElement) => {
+    const card = h.container.querySelector<HTMLElement>(`[data-step-map-id="${stepID}"]`)!;
+    const paragraph = card.querySelector<HTMLElement>(".process-step-map__step-preview p")!;
+    Object.defineProperty(h.dom.window.document, "caretPositionFromPoint", { configurable: true, value: () => ({ offsetNode: paragraph.firstChild, offset: 3 }) });
+    await act(async () => paragraph.dispatchEvent(new h.dom.window.MouseEvent("dblclick", { bubbles: true, clientX: 170, clientY: 150 })));
+    await settle(() => Boolean(card.querySelector(".process-step-map__step-editor")?.contains(editor)) && editor.dataset.mangoTiptapLiveReady === "true", "the Process did not move the existing editor into its Step card");
+    assert.equal(card.querySelector('[aria-label="Step name"]'), null);
+    assert.equal(card.querySelectorAll('[data-mango-editor-format="tiptap_json"]').length, 1, "a map placement has one native Step editor");
+    return card;
+  };
+  try {
+    await h.start(true);
+    await h.renameStep("Receive");
+    await h.input('[placeholder="Untitled Process"]', "Receiving process");
+    await h.chooseFolder();
+    const stepID = h.cards()[0].dataset.stepMapId!;
+    const local = await prepareBody(stepID, "Record delivery.");
+    const localInstance = local.live.editor;
+    const card = await moveBodyToMap(stepID, local.editor);
+    assert.equal(local.live.editor, localInstance);
+    assert.equal(h.mutations().length, 0, "draft map editing stays local until Save Process");
+    await h.key(local.live, "Escape");
+    assert.ok(h.container.querySelector(`[data-process-step-id="${stepID}"]`)?.contains(local.editor), "Escape returns the same editor to its sidebar card");
+    assert.equal(h.dom.window.document.activeElement, card, "Escape returns focus to the Step card");
+    assert.equal(card.querySelector(".process-step-map__step-editor")!.hasAttribute("hidden"), true);
+    assert.match(local.editor.textContent ?? "", /Record delivery\./);
+    await moveBodyToMap(stepID, local.editor);
+    await h.click("Save Process");
+    await settle(() => h.container.querySelector(".process-map-focus") === null, "Save did not close the new Process");
+    assert.equal(local.editor.isConnected, false);
+    assert.match(JSON.stringify(h.batches()[0].process_definition.steps[0].body_json), /Record delivery\./, "Save Process includes text authored in the map card");
+    await h.reopenSaved();
+    assert.equal(h.container.querySelector('[data-mango-step-editor-location="map"]'), null, "reopening a saved Process cannot retain its old detached placement");
+    const saved = await prepareBody(stepID, "Check saved delivery.");
+    await moveBodyToMap(stepID, saved.editor);
+    await settle(() => h.requests.some((request) => request.method === "POST" && request.path === `/v1/editor-json/process_step/${stepID}/documents/${stepID}`), "saved Step instructions did not use their canonical editor save route");
+    assert.equal(h.batches().length, 1, "editing a saved Step must not recreate its Process");
+    await h.key(saved.live, "Escape");
+    assert.ok(h.container.querySelector(`[data-process-step-id="${stepID}"]`)?.contains(saved.editor));
+    await moveBodyToMap(stepID, saved.editor);
+    h.state.active = false;
+    await h.render();
+    assert.equal(saved.editor.isConnected, false, "leaving the page unmounts a Step editor placed on the map");
+    h.state.active = true;
+    await h.render();
+    await h.start(true);
+    assert.equal(h.container.querySelector('[data-mango-step-editor-location="map"]'), null, "a later Process starts without an old Step placement");
+  } finally { await h.dispose(); }
+});
+
 test("Create Step seeds a draft and failed Save keeps UUIDs and edits while pending Save rejects double submission", async () => {
   const h = await harness();
   try {

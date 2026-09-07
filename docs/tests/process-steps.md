@@ -74,11 +74,11 @@
 72. The Process outline expands to contain authored Step and route geometry without changing that geometry or Board layout.
 73. New Step-map boxes use dimensions of 256 by 80 canvas units.
 74. Existing saved Step boxes retain their dimensions until explicitly resized.
-75. In the focused map, dragging a Step card outside its connection ports, resize handles, and active title input moves that Step.
+75. In the focused map, dragging a Step card outside its connection ports, resize handles, and active text editors moves that Step.
 76. Hovering or selecting a Step in the focused map reveals six resize handles at its four corners and top and bottom midpoints.
 77. Each resize handle moves only its corresponding edges.
 78. Create Step in the focused map focuses its inline title with all text selected.
-79. Double-clicking a Step card or its title in the focused map opens inline title editing with all text selected.
+79. Double-clicking a Step title opens inline title editing with the caret at the clicked text position.
 80. Enter or blur commits a changed, trimmed nonblank inline title through the existing Step rename command.
 81. Escape cancels inline title changes and retains the last committed name.
 82. A blank inline title leaves the last committed Step name unchanged.
@@ -86,7 +86,7 @@
 84. Wheel zoom in the focused map keeps the world point beneath the pointer fixed within a 50% to 800% range.
 85. Process map views omit zoom buttons and Fit.
 86. Read-only access allows focused-map camera navigation.
-87. A Step, route, or connection editing gesture holds the focused-map camera fixed until that gesture ends.
+87. A Step or connection editing gesture holds the focused-map camera fixed until that gesture ends.
 88. On the company Process Map, Create Folder and Create Process remain visible and disabled inside focused Processes.
 89. Inline Step titles have no visible input border.
 90. The Process editor's right-hand Map view uses the same Process canvas and interactions as the company Process Map.
@@ -110,7 +110,7 @@
 108. Step and connection context menus expose their existing editing commands without persistent inspectors.
 109. Deleting a Step from the map requires confirmation.
 110. Delete on a focused Step port or resize handle targets that exact Step.
-111. Deleting a route waypoint preserves its operational connection.
+111. Selecting a trace highlights it without exposing editable route points.
 
 112. Focused Process maps start zoomed out within the existing camera range and reserve space for their fixed controls.
 113. The new Process uses the existing RACI cards and SOP editor without a separate saved draft.
@@ -141,13 +141,20 @@
 138. A Step mention notification opens its owning Process and targets the exact Step UUID and mentioned user.
 139. Autosaving unchanged Step mentions or retrying the same save must not create duplicate notifications.
 140. A saved mention with its default kind omitted counts as a normal mention when creating or comparing notifications.
-141. Step-map cards have a neutral white surface and show the Step name with a plain-text preview of its existing instruction body.
+141. Step-map cards have a neutral white surface and preview their existing instruction body with its paragraph, formatting, and list structure.
 142. Step-map previews never change the stored instruction document or authored card geometry.
 143. A saved Process map updates its Step preview from the existing editor's local snapshots and canonical document updates without issuing a save or replacing the shared work cache.
 144. A selected Step highlights its own card border without an offset outer frame.
 145. Step-card content uses compact top and bottom padding.
 146. A Step preview wraps to the card's current available width.
 147. A Step preview shows as much text as the card's remaining height permits.
+148. F2 opens a Step's inline title editor with the entire name selected.
+149. Double-clicking a Step card body never opens its title editor.
+150. Reset route restores the automatic route while preserving the exact operational connection and all Step geometry.
+151. Double-clicking a Step's instruction preview in the company Process Map activates that exact Step's existing editor at the clicked text position.
+152. Moving a Step editor between the card and sidebar preserves one editor, its undo history, and its existing save session.
+153. Clicking the sidebar instruction copy returns that Step's editor to the clicked text position.
+154. Removing a Step card or its map clears that card's inline editor placement.
 
 ## Process Story
 

@@ -3,10 +3,13 @@ import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { useAppFloatingMenuDismissal } from "../../app/AppModalPortal.js";
 import { NODE_ICON_GRADIENT_END, NODE_ICON_GRADIENT_START } from "../../icons/EntityIcons.js";
 import { APIHTTPError, isAbortError } from "../api/requestJSON.js";
-import { readMangoTiptapDocumentText } from "../editor/tiptap/mangoTiptapDocument.js";
+import { createEmptyMangoTiptapDocument } from "../editor/tiptap/mangoTiptapDocument.js";
+import { MangoTiptapStaticRenderer } from "../editor/tiptap/MangoTiptapStaticRenderer.js";
+import { captureMangoTiptapPointerBookmark, readMangoTiptapBrowserCaretPosition } from "../editor/tiptap/mangoTiptapPointerActivation.js";
+import type { ProcessStepEditorPlacement } from "../editor/ProcessStepInstructionEditor.js";
 import { createProcessStep, createProcessStepRelationship, deleteProcessStep, deleteProcessStepRelationship, updateProcessStep, type ProcessStepMutationResult } from "./kanbanApi.js";
 import type { ProcessStep, ProcessStepRelationship } from "./processWork.js";
-import { completeStepMapLayout, defaultStepMapRoute, moveStepMapBox, snapStepMapCoordinate, stepMapAnchors, stepMapBounds, stepMapPath, stepMapSequence, STEP_MAP_GRID, type ProcessStepMapLayout, type StepMapBox, type StepMapPoint, type StepMapResizeHandle } from "./processStepMapGeometry.js";
+import { completeStepMapLayout, defaultStepMapRoute, moveStepMapBox, stepMapAnchors, stepMapBounds, stepMapPath, stepMapSequence, STEP_MAP_GRID, type ProcessStepMapLayout, type StepMapBox, type StepMapPoint, type StepMapResizeHandle } from "./processStepMapGeometry.js";
 import { getProcessStepMap, saveProcessStepMap } from "./processStepMapApi.js";
 import { useProcessStepMapCamera } from "./useProcessStepMapCamera.js";
 import "./processStepMap.css";
@@ -35,6 +38,8 @@ export type ProcessStepMapEditorProps = {
   onChanged?: () => void;
   onBusyChange?: (busy: boolean) => void;
   onStepCreated?: (stepID: string) => void;
+  stepEditorPlacement?: ProcessStepEditorPlacement | null;
+  onStepEditorPlacementChange?: (placement: ProcessStepEditorPlacement | null) => void;
   authoring?: boolean;
   saveMode?: "saved" | "new";
   processName?: string;
@@ -51,9 +56,8 @@ export type ProcessStepMapProps = Omit<ProcessStepMapEditorProps, "commands" | "
 
 type Selection = { kind: "step" | "route"; id: string } | null;
 type LayoutGesture = {
-  kind: "move" | "resize" | "route";
+  kind: "move" | "resize";
   id: string;
-  pointIndex: number;
   pointerID: number;
   start: StepMapPoint;
   layout: ProcessStepMapLayout;
@@ -75,6 +79,7 @@ type ConnectionGesture = {
 type Gesture = LayoutGesture | ConnectionGesture;
 
 const emptyLayout: ProcessStepMapLayout = { revision: 0, steps: [], routes: [] };
+const emptyStepBody = createEmptyMangoTiptapDocument();
 const resizeHandles: StepMapResizeHandle[] = ["nw", "n", "ne", "se", "s", "sw"];
 const connectionPorts: ConnectionPort[] = ["input", "output"];
 const message = (error: unknown) => error instanceof Error ? error.message : "The change could not be saved. Please try again.";
@@ -101,7 +106,7 @@ export function ProcessStepMap(props: ProcessStepMapProps) {
   return <ProcessStepMapEditor key={`${apiBase}:${companyID}:${processID}`} {...editorProps} commands={commands} />;
 }
 
-export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, onChanged, onBusyChange, onStepCreated, authoring = false, saveMode = "saved", processName = "", initialEditingStepID, hoverModeEnabled = false, renderActions }: ProcessStepMapEditorProps) {
+export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, onChanged, onBusyChange, onStepCreated, stepEditorPlacement, onStepEditorPlacementChange, authoring = false, saveMode = "saved", processName = "", initialEditingStepID, hoverModeEnabled = false, renderActions }: ProcessStepMapEditorProps) {
   const [layout, setLayout] = useState<ProcessStepMapLayout | null>(null);
   const [preview, setPreview] = useState<ProcessStepMapLayout | null>(null);
   const [connectionPreview, setConnectionPreview] = useState<ConnectionGesture | null>(null);
@@ -109,6 +114,8 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
   const [editingStepID, setEditingStepID] = useState<string | null>(initialEditingStepID ?? null);
   const editingRef = useRef(editingStepID);
   const titleInput = useRef<HTMLInputElement>(null);
+  const titleCaret = useRef<number | null>(null);
+  const bodyActivationID = useRef(0);
   const [hoveredStepID, setHoveredStepID] = useState<string | null>(null);
   const [name, setName] = useState(() => steps.find((step) => step.process_step_id === initialEditingStepID)?.name ?? "");
   const [loading, setLoading] = useState(true);
@@ -129,8 +136,8 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
   const readController = useRef<AbortController | null>(null);
   const refreshPending = useRef(false);
   const layoutRef = useRef(layout);
-  const current = useRef({ steps, relationships, canEdit, onChanged, commands, onBusyChange, onStepCreated });
-  current.current = { steps, relationships, canEdit, onChanged, commands, onBusyChange, onStepCreated };
+  const current = useRef({ steps, relationships, canEdit, onChanged, commands, onBusyChange, onStepCreated, onStepEditorPlacementChange });
+  current.current = { steps, relationships, canEdit, onChanged, commands, onBusyChange, onStepCreated, onStepEditorPlacementChange };
   layoutRef.current = layout;
   const traceGradientID = `step-map-trace-${useId().replace(/:/g, "")}`;
   useAppFloatingMenuDismissal(deleteRequested, deleteConfirm, () => { setDeleteRequested(false); viewport.current?.focus({ preventScroll: true }); });
@@ -160,10 +167,13 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
 
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; readGeneration.current += 1; readController.current?.abort(); gesture.current = null; current.current.onBusyChange?.(false); };
+    return () => { mounted.current = false; readGeneration.current += 1; readController.current?.abort(); gesture.current = null; current.current.onBusyChange?.(false); current.current.onStepEditorPlacementChange?.(null); };
   }, []);
   useEffect(() => { onBusyChange?.(loading || busy || gestureActive); }, [onBusyChange, loading, busy, gestureActive]);
   const stepIDs = steps.map((step) => step.process_step_id).join(",");
+  useEffect(() => {
+    if (stepEditorPlacement && (!layout || !current.current.steps.some((step) => step.process_step_id === stepEditorPlacement.stepID))) current.current.onStepEditorPlacementChange?.(null);
+  }, [layout, stepIDs, stepEditorPlacement]);
   // Canonical Process refreshes replace relationships, including for layout changes; text edits do not.
   useEffect(() => { void load(); }, [load, stepIDs, relationships]);
   useEffect(() => {
@@ -183,7 +193,6 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
   const boxes = useMemo(() => new Map(display.steps.map((box) => [box.process_step_id, box])), [display.steps]);
   const sequence = useMemo(() => stepMapSequence(display.steps, relationships), [display.steps, relationships]);
   const stepByID = useMemo(() => new Map(steps.map((step) => [step.process_step_id, step])), [steps]);
-  const stepPreviews = useMemo(() => new Map(steps.map((step) => [step.process_step_id, readMangoTiptapDocumentText(step.body_json).replace(/\s+/g, " ").trim()])), [steps]);
   const routes = useMemo(() => relationships.flatMap((edge) => {
     const source = boxes.get(edge.source.resource_id), target = boxes.get(edge.target.resource_id);
     if (!source || !target) return [];
@@ -208,13 +217,13 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
   useEffect(() => {
     if (editingStepID && selectedStep?.process_step_id === editingStepID && !disabled) {
       titleInput.current?.focus();
-      titleInput.current?.setSelectionRange(0, titleInput.current.value.length, "forward");
+      titleInput.current?.setSelectionRange(titleCaret.current ?? 0, titleCaret.current ?? titleInput.current.value.length, "forward");
     }
   }, [editingStepID, selectedStep?.process_step_id, disabled]);
   useEffect(() => {
     const active = gesture.current;
     if (!active) return;
-    const exists = active.kind === "route" ? relationships.some((edge) => edge.resource_operational_relationship_id === active.id) : steps.some((step) => step.process_step_id === active.id) && (active.kind !== "connect" || !active.targetID || steps.some((step) => step.process_step_id === active.targetID));
+    const exists = steps.some((step) => step.process_step_id === active.id) && (active.kind !== "connect" || !active.targetID || steps.some((step) => step.process_step_id === active.targetID));
     if (!exists) { gesture.current = null; setGestureActive(false); setPreview(null); setConnectionPreview(null); if (refreshPending.current) void load(); }
   }, [steps, relationships, load]);
 
@@ -275,8 +284,9 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
   };
 
   const withRoutePoints = (base: ProcessStepMapLayout, id: string, points: StepMapPoint[]): ProcessStepMapLayout => ({ ...base, routes: [...base.routes.filter((route) => route.resource_operational_relationship_id !== id), { resource_operational_relationship_id: id, points }] });
-  const startGesture = (event: React.PointerEvent<HTMLElement>, kind: LayoutGesture["kind"], id: string, pointIndex = 0, resizeHandle: StepMapResizeHandle = "se") => {
+  const startGesture = (event: React.PointerEvent<HTMLElement>, kind: LayoutGesture["kind"], id: string, resizeHandle: StepMapResizeHandle = "se") => {
     event.stopPropagation();
+    if ((event.target as Element).closest(".process-step-map__step-editor")) return;
     if (disabled || busyRef.current || gesture.current || camera.isPanning() || event.button !== 0) return;
     if (editingRef.current) {
       finishRename();
@@ -284,11 +294,11 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
     }
     event.preventDefault();
     event.currentTarget.focus();
-    const base = kind === "route" ? withRoutePoints(display, id, routes.find(({ edge }) => edge.resource_operational_relationship_id === id)!.points) : display;
-    gesture.current = { kind, id, pointIndex, resizeHandle, pointerID: event.pointerId, start: { x: event.clientX, y: event.clientY }, layout: base, next: base, moved: false, bounds };
+    onStepEditorPlacementChange?.(null);
+    gesture.current = { kind, id, resizeHandle, pointerID: event.pointerId, start: { x: event.clientX, y: event.clientY }, layout: display, next: display, moved: false, bounds };
     setGestureActive(true);
     setContextMenu(null);
-    setSelection({ kind: kind === "route" ? "route" : "step", id });
+    setSelection({ kind: "step", id });
     event.currentTarget.setPointerCapture?.(event.pointerId);
   };
   const moveGesture = (event: React.PointerEvent) => {
@@ -308,10 +318,7 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
     const delta = { x: (event.clientX - active.start.x) / zoom, y: (event.clientY - active.start.y) / zoom };
     if (Math.abs(delta.x) + Math.abs(delta.y) < 3 && !active.moved) return;
     active.moved = true;
-    if (active.kind === "route") {
-      const route = active.layout.routes.find((item) => item.resource_operational_relationship_id === active.id)!;
-      active.next = withRoutePoints(active.layout, active.id, route.points.map((point, index) => index === active.pointIndex ? { x: snapStepMapCoordinate(point.x + delta.x), y: snapStepMapCoordinate(point.y + delta.y) } : point));
-    } else active.next = { ...active.layout, steps: active.layout.steps.map((box) => box.process_step_id === active.id ? moveStepMapBox(box, delta, active.kind === "resize" ? active.resizeHandle : false) : box) };
+    active.next = { ...active.layout, steps: active.layout.steps.map((box) => box.process_step_id === active.id ? moveStepMapBox(box, delta, active.kind === "resize" ? active.resizeHandle : false) : box) };
     setPreview(active.next);
   };
   const endGesture = (event: React.PointerEvent) => {
@@ -351,17 +358,45 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
     if (mounted.current && result.step) {
       setSelection({ kind: "step", id: result.step.process_step_id });
       setName(result.step.name);
+      titleCaret.current = null;
       editingRef.current = result.step.process_step_id;
       setEditingStepID(result.step.process_step_id);
       current.current.onStepCreated?.(result.step.process_step_id);
     }
   }, "Step created. Select its name to rename it.");
-  const startRename = (step: ProcessStep) => {
+  const startRename = (step: ProcessStep, caret: number | null = null) => {
     if (disabled) return;
+    onStepEditorPlacementChange?.(null);
+    titleCaret.current = caret;
     setSelection({ kind: "step", id: step.process_step_id });
     setName(step.name);
     editingRef.current = step.process_step_id;
     setEditingStepID(step.process_step_id);
+  };
+  const editCardAtPointer = (event: React.MouseEvent<HTMLElement>, step: ProcessStep) => {
+    if (disabled || (event.target as Element).closest("input, .process-step-map__resize, .process-step-map__port, .process-step-map__step-editor")) return;
+    const card = event.currentTarget;
+    const target = document.elementFromPoint?.(event.clientX, event.clientY) ?? event.target as Element;
+    const title = target.closest<HTMLElement>(".process-step-map__step-title");
+    if (title && card.contains(title)) {
+      const caret = readMangoTiptapBrowserCaretPosition(card.ownerDocument, event.clientX, event.clientY);
+      let offset = step.name.length;
+      if (caret && title.contains(caret.offsetNode)) {
+        const range = card.ownerDocument.createRange();
+        range.selectNodeContents(title);
+        range.setEnd(caret.offsetNode, caret.offset);
+        offset = range.toString().length;
+      }
+      startRename(step, offset);
+      return;
+    }
+    const preview = target.closest<HTMLElement>(".process-step-map__step-preview");
+    const container = card.querySelector<HTMLElement>(".process-step-map__step-editor");
+    if (!preview || !container || !onStepEditorPlacementChange) return;
+    event.preventDefault();
+    const coordinates = { left: event.clientX, top: event.clientY };
+    setSelection({ kind: "step", id: step.process_step_id });
+    onStepEditorPlacementChange({ stepID: step.process_step_id, container, activation: { requestID: ++bodyActivationID.current, coordinates, bookmark: captureMangoTiptapPointerBookmark(preview, target, coordinates) } });
   };
   const finishRename = (cancel = false) => {
     const id = editingRef.current;
@@ -441,7 +476,7 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
     {renderActions?.({ createStep: () => void createStep(), disabled, busy: busy || loading || gestureActive })}
     {error && <div className="process-step-map__error" role="alert">{error} <button type="button" disabled={busy} onClick={() => void load()}>Reload map</button></div>}
     <div className={`process-step-map__status${!loading && !conflict ? " is-hidden" : ""}`} role="status" aria-live="polite">{loading ? "Loading map…" : notice}</div>
-    <div ref={viewport} tabIndex={0} aria-label="Process canvas. Drag blank space to pan; scroll to zoom." className={`process-step-map__viewport${camera.panning ? " is-panning" : ""}${connectionPreview ? " is-connecting" : ""}`} onPointerDown={camera.startPan} onPointerMove={(event) => { camera.movePan(event); moveGesture(event); }} onPointerUp={(event) => { camera.endPan(event); endGesture(event); }} onPointerCancel={() => { camera.cancelPan(); cancelGesture(); }} onLostPointerCapture={() => { camera.cancelPan(); if (gesture.current?.kind === "connect") cancelGesture(); }} onKeyDown={(event) => {
+    <div ref={viewport} tabIndex={0} aria-label="Process canvas. Drag blank space to pan; scroll to zoom." className={`process-step-map__viewport${camera.panning ? " is-panning" : ""}${connectionPreview ? " is-connecting" : ""}`} onPointerDown={(event) => { onStepEditorPlacementChange?.(null); camera.startPan(event); }} onPointerMove={(event) => { camera.movePan(event); moveGesture(event); }} onPointerUp={(event) => { camera.endPan(event); endGesture(event); }} onPointerCancel={() => { camera.cancelPan(); cancelGesture(); }} onLostPointerCapture={() => { camera.cancelPan(); if (gesture.current?.kind === "connect") cancelGesture(); }} onKeyDown={(event) => {
       if (event.defaultPrevented || (event.target as Element).closest("input, textarea, select, [contenteditable='true']")) return;
       if (event.key === "Escape") { camera.cancelPan(); cancelGesture(); return; }
       if (event.key !== "Delete" && event.key !== "Backspace") return;
@@ -482,27 +517,20 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
             const box = boxes.get(step.process_step_id)!;
             const hovered = hoverModeEnabled && hoveredStepID === step.process_step_id && !gestureActive;
             const editing = editingStepID === step.process_step_id;
-            return <article key={step.process_step_id} tabIndex={-1} data-step-map-id={step.process_step_id} className={`process-step-map__step${selectedStep?.process_step_id === step.process_step_id ? " is-selected" : ""}${hovered ? " is-hovered" : ""}`} style={{ left: box.x - bounds.x, top: box.y - bounds.y, width: box.width, height: box.height }} onPointerEnter={() => { if (hoverModeEnabled) setHoveredStepID(step.process_step_id); }} onPointerLeave={() => setHoveredStepID(null)} onPointerDown={(event) => startGesture(event, "move", step.process_step_id)} onDoubleClick={(event) => { if (!(event.target as Element).closest("input, .process-step-map__resize, .process-step-map__port")) startRename(step); }}>
+            const editingBody = stepEditorPlacement?.stepID === step.process_step_id;
+            return <article key={step.process_step_id} tabIndex={-1} data-step-map-id={step.process_step_id} className={`process-step-map__step${selectedStep?.process_step_id === step.process_step_id ? " is-selected" : ""}${hovered ? " is-hovered" : ""}`} style={{ left: box.x - bounds.x, top: box.y - bounds.y, width: box.width, height: box.height }} onPointerEnter={() => { if (hoverModeEnabled) setHoveredStepID(step.process_step_id); }} onPointerLeave={() => setHoveredStepID(null)} onPointerDown={(event) => startGesture(event, "move", step.process_step_id)} onDoubleClick={(event) => editCardAtPointer(event, step)}>
               {connectionPorts.map((port) => <button key={port} type="button" className={`process-step-map__port is-${port}${connectionPreview?.targetID === step.process_step_id && connectionPreview.port !== port ? " is-connection-target" : ""}`} data-step-map-port={port} aria-label={`${port === "input" ? "Connect into" : "Connect from"} ${step.name}`} title="Drag to another Step's opposite anchor to connect. Or press Enter on each anchor." aria-disabled={!canEdit || busy || loading || !layout || (gestureActive && !connectionPreview)} onFocus={() => setSelection({ kind: "step", id: step.process_step_id })} onPointerDown={(event) => startConnection(event, step.process_step_id, port)} onKeyDown={(event) => keyConnection(event, step.process_step_id, port)} />)}
               {sequence.has(step.process_step_id) && <span className="process-step-map__sequence" aria-label={`Step number ${sequence.get(step.process_step_id)}`}>{sequence.get(step.process_step_id)}</span>}
               {editing ? <input ref={titleInput} className="process-step-map__title-input" aria-label="Step name" value={name} maxLength={200} readOnly={disabled} onChange={(event) => setName(event.target.value)} onPointerDown={(event) => event.stopPropagation()} onBlur={() => finishRename()} onKeyDown={(event) => {
                 event.stopPropagation();
                 if (event.key === "Enter" || event.key === "Escape") { event.preventDefault(); finishRename(event.key === "Escape"); event.currentTarget.closest<HTMLElement>("article")?.focus(); }
               }} /> : <button className="process-step-map__step-title" type="button" title="Drag to move. Double-click or press F2 to name. Arrow keys move one grid square; Shift moves four." aria-label={`Move ${step.name}`} aria-disabled={disabled} onFocus={() => setSelection({ kind: "step", id: step.process_step_id })} onClick={() => { if (!disabled) setSelection({ kind: "step", id: step.process_step_id }); }} onKeyDown={(event) => { if (event.key === "F2") { event.preventDefault(); startRename(step); } else keyMove(event, box); }}>{step.name}</button>}
-              {stepPreviews.get(step.process_step_id) && <span className="process-step-map__step-preview">{stepPreviews.get(step.process_step_id)}</span>}
-              {resizeHandles.map((handle) => <button key={handle} type="button" className="process-step-map__resize" data-resize-handle={handle} aria-label={`Resize ${step.name}${handle === "se" ? "" : ` ${handle}`}`} title="Drag to resize, or use arrow keys." aria-disabled={disabled} onFocus={() => setSelection({ kind: "step", id: step.process_step_id })} onPointerDown={(event) => startGesture(event, "resize", step.process_step_id, 0, handle)} onKeyDown={(event) => keyMove(event, box, handle)} />)}
+              <div className="process-step-map__step-preview" hidden={editingBody}><MangoTiptapStaticRenderer value={step.body_json ?? emptyStepBody} ariaLabel={`Instructions for ${step.name}`} /></div>
+              <div className="process-step-map__step-editor" hidden={!editingBody} />
+              {resizeHandles.map((handle) => <button key={handle} type="button" className="process-step-map__resize" data-resize-handle={handle} aria-label={`Resize ${step.name}${handle === "se" ? "" : ` ${handle}`}`} title="Drag to resize, or use arrow keys." aria-disabled={disabled} onFocus={() => setSelection({ kind: "step", id: step.process_step_id })} onPointerDown={(event) => startGesture(event, "resize", step.process_step_id, handle)} onKeyDown={(event) => keyMove(event, box, handle)} />)}
               {hovered && <div className="process-step-map__hover-preview" role="tooltip">{step.name}<span>{canEdit ? "Double-click to name this Step." : "Step connections are highlighted."}</span></div>}
             </article>;
           })}
-          {selectedRoute && selectedRoute.points.map((point, index) => <button key={index} type="button" className="process-step-map__waypoint" data-step-map-route-id={selectedRoute.edge.resource_operational_relationship_id} style={{ left: point.x - bounds.x, top: point.y - bounds.y }} aria-label={`Move route point ${index + 1}`} title="Drag route point or use arrow keys. Delete removes it." aria-disabled={disabled} onPointerDown={(event) => startGesture(event, "route", selectedRoute.edge.resource_operational_relationship_id, index)} onKeyDown={(event) => {
-            const delta = arrowDelta(event.key, event.shiftKey);
-            if (!delta && event.key !== "Delete" && event.key !== "Backspace") return;
-            event.preventDefault();
-            event.stopPropagation();
-            if (disabled || event.repeat) return;
-            const points = delta ? selectedRoute.points.map((item, i) => i === index ? { x: snapStepMapCoordinate(item.x + delta.x), y: snapStepMapCoordinate(item.y + delta.y) } : item) : selectedRoute.points.filter((_, i) => i !== index);
-            void saveLayout(withRoutePoints(display, selectedRoute.edge.resource_operational_relationship_id, points));
-          }} />)}
           {steps.length === 0 && saveMode === "new" && <p className="process-step-map__empty">{authoring ? "Start this process with a right-click or by pressing the plus button." : "Create your first Step to start this Process."}</p>}
           </>}
         </div>
@@ -519,11 +547,6 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
         <button className="process-step-map__context-action" type="button" role="menuitem" disabled={disabled} onClick={() => { setContextMenu(null); startRename(selectedStep); }}>Rename Step</button>
         <button className="process-step-map__context-action process-step-map__danger" type="button" role="menuitem" disabled={disabled} onClick={() => { setContextMenu(null); setDeleteRequested(true); }}>Delete Step</button>
       </> : selectedRoute ? <>
-        <button className="process-step-map__context-action" type="button" role="menuitem" disabled={disabled || selectedRoute.points.length >= 256} onClick={() => {
-          setContextMenu(null);
-          const last = selectedRoute.points[selectedRoute.points.length - 1] ?? defaultStepMapRoute(selectedRoute.source, selectedRoute.target)[0];
-          void saveLayout(withRoutePoints(display, selectedRoute.edge.resource_operational_relationship_id, [...selectedRoute.points, { x: snapStepMapCoordinate(last.x + 32), y: snapStepMapCoordinate(last.y + 32) }]));
-        }}>Add route point</button>
         <button className="process-step-map__context-action" type="button" role="menuitem" disabled={disabled} onClick={() => { setContextMenu(null); void saveLayout(withRoutePoints(display, selectedRoute.edge.resource_operational_relationship_id, defaultStepMapRoute(selectedRoute.source, selectedRoute.target))); }}>Reset route</button>
         <button className="process-step-map__context-action process-step-map__danger" type="button" role="menuitem" disabled={disabled} onClick={() => { setContextMenu(null); void changeDefinition(() => current.current.commands.disconnectSteps(selectedRoute.edge.resource_operational_relationship_id), "Connection deleted. Both Steps are preserved."); }}>Delete connection</button>
       </> : <button className="process-step-map__context-action" type="button" role="menuitem" disabled={disabled} onClick={() => { setContextMenu(null); void createStep(); }}>Create Step</button>}

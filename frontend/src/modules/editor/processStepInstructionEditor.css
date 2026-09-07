@@ -1,0 +1,5 @@
+.mango-step-editor-slot { min-width:0; }
+.mango-step-editor-host { min-width:0; }
+.mango-step-editor-host[data-mango-step-editor-location="map"] { height:100%; min-height:0; }
+.mango-step-editor-host[data-mango-step-editor-location="map"] > [data-mango-editor-format="tiptap_json"] { overflow:auto; }
+.mango-step-editor-copy { cursor:text; }
