@@ -52,6 +52,7 @@
 50. Local Hermes must receive only its provider, service and callback credentials through private stdin, with no AWS credentials, database credentials or host credential directories.
 51. Local Hermes must publish only on loopback and retain its scoped data volume when the launcher stops or restarts it.
 52. Local startup must check Docker prerequisites before retrieving application credentials or stopping the backend, and must never install Docker or apply database changes.
+53. The Hermes image must start as user 10001 with both Mango plugin modules and an accessible Python interpreter installed.
 
 ## Process story
 

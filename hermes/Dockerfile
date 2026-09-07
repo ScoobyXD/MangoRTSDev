@@ -5,12 +5,13 @@ FROM ghcr.io/astral-sh/uv:0.11.6-python3.13-trixie@sha256:b3c543b6c4f23a5f2df228
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates build-essential \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/hermes
+# Upstream's .python-version must not download an interpreter under root's private home.
 RUN git init . \
     && git remote add origin https://github.com/NousResearch/hermes-agent.git \
     && git fetch --depth 1 origin 693641aa8b4359c602283bdbbc14041e03bc47bc \
     && git checkout --detach FETCH_HEAD \
     && test "$(git rev-parse HEAD)" = "693641aa8b4359c602283bdbbc14041e03bc47bc" \
-    && uv sync --frozen --no-dev --extra messaging --extra bedrock
+    && uv sync --python /usr/local/bin/python3.13 --frozen --no-dev --extra messaging --extra bedrock
 
 COPY pyproject.toml mango_plugin.py mango_history.py /opt/mango-plugin/
 RUN uv pip install --python /opt/hermes/.venv/bin/python --no-deps /opt/mango-plugin \

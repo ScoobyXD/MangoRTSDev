@@ -2,4 +2,5 @@
 !Dockerfile
 !pyproject.toml
 !mango_plugin.py
+!mango_history.py
 !entrypoint.py
