@@ -108,6 +108,9 @@ $script:fixtureLaunchID = 'a' * 32
 $script:fixtureContainerID = 'b' * 64
 $script:fixtureContainerFound = $true
 $script:fixtureStoppedIDs = @()
+$script:fixtureRemovedIDs = @()
+$script:fixtureCleanupCommands = @()
+$script:fixtureStartupLogRequests = 0
 $script:fixtureDisposed = 0
 function Invoke-FixtureCleanupDocker {
   if (($args -join ' ') -eq 'container inspect --format {{.Id}} {{json .Config.Labels}} mangorts-hermes') {
@@ -117,9 +120,20 @@ function Invoke-FixtureCleanupDocker {
     }
     return
   }
-  Assert-True (($args[0..3] -join ' ') -eq 'container stop --time 10') 'Unexpected cleanup Docker operation.'
-  $script:fixtureStoppedIDs += $args[4]
+  Assert-True ($args[-1] -eq $script:fixtureContainerID) 'Cleanup must use the inspected immutable container ID.'
+  $script:fixtureCleanupCommands += $args -join ' '
   $global:LASTEXITCODE = 0
+  if (($args[0..2] -join ' ') -eq 'logs --tail 30') {
+    $script:fixtureStartupLogRequests++
+    return 'Fixture Hermes startup failure'
+  }
+  if (($args[0..3] -join ' ') -eq 'container stop --time 10') {
+    $script:fixtureStoppedIDs += $args[4]
+    return
+  }
+  if (($args[0..3] -join ' ') -eq 'container inspect --format {{.Id}}') { return $script:fixtureContainerID }
+  Assert-True (($args[0..1] -join ' ') -eq 'container rm') 'Unexpected cleanup Docker operation.'
+  $script:fixtureRemovedIDs += $args[2]
 }
 $fixtureProcess = [pscustomobject]@{ HasExited = $false }
 $fixtureProcess | Add-Member -MemberType ScriptMethod -Name Dispose -Value { $script:fixtureDisposed++ }
@@ -130,13 +144,19 @@ $fixtureRuntime = [pscustomobject]@{
 }
 Stop-LocalHermes -Runtime $fixtureRuntime
 Assert-True ($script:fixtureStoppedIDs.Count -eq 1 -and $script:fixtureStoppedIDs[0] -eq $script:fixtureContainerID) 'Cleanup must stop the verified immutable container ID, never the shared name.'
+Assert-True ($script:fixtureRemovedIDs.Count -eq 1 -and $script:fixtureRemovedIDs[0] -eq $script:fixtureContainerID -and $script:fixtureStartupLogRequests -eq 0) 'Normal cleanup must quietly remove only its container and retain every volume.'
+$script:fixtureCleanupCommands = @()
+$failureOutput = Stop-LocalHermes -Runtime $fixtureRuntime -ShowStartupOutput 6>&1 | Out-String
+Assert-True ($failureOutput.Contains('Fixture Hermes startup failure')) 'Early container errors must reach the caller through the PowerShell host.'
+Assert-True ($script:fixtureCleanupCommands.Count -eq 4 -and $script:fixtureCleanupCommands[0] -eq ('logs --tail 30 ' + $script:fixtureContainerID) -and $script:fixtureCleanupCommands[3] -eq ('container rm ' + $script:fixtureContainerID)) 'Failure cleanup must fetch bounded logs before stopping and removing the same owned container.'
 $script:fixtureStoppedIDs = @()
+$script:fixtureRemovedIDs = @()
 $script:fixtureLaunchID = 'c' * 32
-Stop-LocalHermes -Runtime $fixtureRuntime
-Assert-True ($script:fixtureStoppedIDs.Count -eq 0) 'A failed or older launcher must leave the replacement container running.'
+Stop-LocalHermes -Runtime $fixtureRuntime -ShowStartupOutput
+Assert-True ($script:fixtureStoppedIDs.Count -eq 0 -and $script:fixtureRemovedIDs.Count -eq 0 -and $script:fixtureStartupLogRequests -eq 1) 'A failed or older launcher must not read logs, stop or remove the replacement container.'
 $script:fixtureContainerFound = $false
-Stop-LocalHermes -Runtime $fixtureRuntime
-Assert-True ($script:fixtureStoppedIDs.Count -eq 0 -and $script:fixtureDisposed -eq 3) 'Absent containers must be ignored while every process handle is disposed.'
+Stop-LocalHermes -Runtime $fixtureRuntime -ShowStartupOutput
+Assert-True ($script:fixtureStoppedIDs.Count -eq 0 -and $script:fixtureStartupLogRequests -eq 1 -and $script:fixtureDisposed -eq 4) 'Absent containers must be ignored while every process handle is disposed.'
 $script:fixtureRestartCommands = @()
 function Invoke-FixtureRestartDocker {
   Assert-True ($args[-1] -eq $script:fixtureContainerID) 'Explicit restart must target only the previously inspected immutable container ID.'
