@@ -30,36 +30,19 @@ The supported server versions are PostgreSQL 17.x and 18.x; development uses 17.
 
 ## 3. Select your Mango account once
 
-Run this read-only query in the same development database. Replace the email if needed:
-
-```sql
-SELECT u.email,
-       u.display_name,
-       u.user_id,
-       c.company_id,
-       c.name AS company_name,
-       membership.role
-  FROM public.users u
-  JOIN public.company_memberships membership ON membership.user_id = u.user_id
-  JOIN public.companies c ON c.company_id = membership.company_id
- WHERE u.email = lower(btrim('jonathankim829@gmail.com'))
- ORDER BY c.name, c.company_id;
-```
-
-Choose the company you will use in Mango. Copy its exact `company_id` and `user_id`. The user ID is Mango's UUID, not a Cognito subject. If no row is returned, check the email and database and sign into Mango to establish your account before continuing.
-
-Add these **nonsecret** values to the existing ignored file `scripts/start_local_cognito_backend.local.ps1`. Preserve its other settings. Replace both placeholders with the UUIDs from the query:
+Save your Mango sign-in email in the existing ignored file `scripts/start_local_cognito_backend.local.ps1`. This value is nonsecret; preserve any other settings already in that file:
 
 ```powershell
-$MangoLocalHermesCompanyID = '<company_id>'
-$MangoLocalHermesUserID = '<user_id>'
+$MangoLocalHermesEmail = 'jonathankim829@gmail.com'
 ```
 
-Alternatively, supply them for one launch:
+The launcher looks up the exact existing Mango user and company with a read-only query. One company is selected automatically. If the account has several companies, choose one from the numbered list. The launcher remembers that company in the same local settings file and rechecks membership on every start. You do not need to find or copy UUIDs. An email matching multiple user identities stops startup instead of guessing.
+
+Alternatively, provide an email on the command line:
 
 ```powershell
 .\scripts\start_local_cognito_backend.ps1 -AwsProfile mangorts-dev -StopExisting `
-  -HermesCompanyID '<company_id>' -HermesUserID '<user_id>'
+  -HermesEmail 'jonathankim829@gmail.com'
 ```
 
 ## 4. Start the app
@@ -97,7 +80,7 @@ Do not delete the named volume to fix a startup error: it contains the native He
 | --- | --- |
 | Docker is missing or its engine is unavailable | Install/start Docker Desktop with Linux containers, then rerun the launcher. |
 | `mangorts-hermes:693641aa` is missing | Run the image build in step 1. |
-| Company/user scope is missing or invalid | Save both exact Mango UUIDs from step 3 or pass both launch parameters. |
+| Mango account is missing or ambiguous | Check the sign-in email and selected development database. An administrator must resolve duplicate user identities; the launcher never picks one arbitrarily. |
 | SSO session expired or Secrets Manager access denied | Sign into `mangorts-dev` again; if access is still denied, have the dev account administrator check the reported permission. Do not paste credentials into chat or files. |
 | `ai_not_configured_for_account` | Match the signed-in Mango user and selected company to the configured UUID pair. |
 | Missing `ai_*` relation | Run the DBeaver preflight and follow its result before enabling the route. |

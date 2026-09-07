@@ -53,6 +53,9 @@
 51. Local Hermes must publish only on loopback and retain its scoped data volume when the launcher stops or restarts it.
 52. Local startup must check Docker prerequisites before retrieving application credentials or stopping the backend, and must never install Docker or apply database changes.
 53. The Hermes image must start as user 10001 with both Mango plugin modules and an accessible Python interpreter installed.
+54. Local startup must resolve an account email to one existing Mango user and company through a read-only membership lookup without guessing or creating identities.
+55. Duplicate users for one email must stop local startup, and multiple companies must require an explicit selection.
+56. Local startup must remember only the selected company UUID and must recheck the user's membership on every launch.
 
 ## Process story
 

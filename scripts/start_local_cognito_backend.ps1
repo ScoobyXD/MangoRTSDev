@@ -10,7 +10,7 @@ param(
   [string]$NylasRedirectURI = "http://localhost:8080/nylas/oauth/callback",
   [string]$NylasFrontendRedirectURL = "http://localhost:5173/communications",
   [string]$HermesCompanyID = "",
-  [string]$HermesUserID = "",
+  [string]$HermesEmail = "",
   [switch]$SkipCredentialExport,
   [switch]$SkipNylas,
   [switch]$StopExisting,
@@ -36,7 +36,7 @@ $MangoLocalNylasStateSecretArn = ""
 $MangoLocalNylasWebhookSecret = ""
 $MangoLocalNylasWebhookSecretArn = ""
 $MangoLocalHermesCompanyID = ""
-$MangoLocalHermesUserID = ""
+$MangoLocalHermesEmail = ""
 if (-not $ResetProcessMap -and (Test-Path -LiteralPath $localConfigPath)) {
   . $localConfigPath
 }
@@ -336,16 +336,18 @@ if ($ResetProcessMap) {
 }
 
 $hermesSettings = $null
+$hermesDocker = $null
 $HermesCompanyID = First-NonBlank @($HermesCompanyID, $MangoLocalHermesCompanyID)
-$HermesUserID = First-NonBlank @($HermesUserID, $MangoLocalHermesUserID)
-if ($HermesCompanyID -or $HermesUserID) {
+$HermesEmail = First-NonBlank @($HermesEmail, $MangoLocalHermesEmail)
+if ($HermesCompanyID -or $HermesEmail) {
   if ($AwsProfile -ne 'mangorts-dev' -or $AwsRegion -ne 'us-west-1' -or
       (Get-OptionalTfvarString -Name 'environment' -Path $tfvarsPath -Default 'dev') -ne 'dev') {
     throw "Local Hermes startup uses only mangorts-dev in us-west-1 with the dev database configuration."
   }
   . (Join-Path $PSScriptRoot 'local_hermes.ps1')
   # Check local prerequisites before fetching application credentials or stopping the API.
-  $hermesSettings = Get-LocalHermesSettings -CompanyID $HermesCompanyID -UserID $HermesUserID
+  $hermesDocker = Get-LocalHermesDocker
+  if (-not $HermesEmail) { $HermesEmail = Read-Host 'Email you use to sign into Mango' }
 }
 
 if (-not $SkipCredentialExport) {
@@ -363,6 +365,16 @@ if (-not [string]::IsNullOrWhiteSpace($localTunnelURL) -and -not $PSBoundParamet
 }
 
 Set-LocalDatabaseEnvironment
+
+if ($null -ne $hermesDocker) {
+  $hermesScope = Resolve-LocalHermesScope -Email $HermesEmail -CompanyID $HermesCompanyID
+  $hermesSettings = Get-LocalHermesSettings -CompanyID $hermesScope.CompanyID -UserID $hermesScope.UserID -Docker $hermesDocker
+  Write-Host "Hermes account: $($hermesScope.Email), company: $($hermesScope.CompanyName)"
+  if (-not $MangoLocalHermesCompanyID -and -not $PSBoundParameters.ContainsKey('HermesCompanyID')) {
+    # Save only the validated, nonsecret selection; existing local settings stay intact.
+    [IO.File]::AppendAllText($localConfigPath, "`r`n`$MangoLocalHermesCompanyID = '$($hermesScope.CompanyID)'`r`n", (New-Object Text.UTF8Encoding($false)))
+  }
+}
 
 $projectName = Get-OptionalTfvarString -Name "project_name" -Path $tfvarsPath -Default "mangorts"
 $environmentName = Get-OptionalTfvarString -Name "environment" -Path $tfvarsPath -Default "dev"

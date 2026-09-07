@@ -1,14 +1,102 @@
 # Used by start_local_cognito_backend.ps1. This file does not start anything when loaded.
 
-function Get-LocalHermesSettings {
-  param([string]$CompanyID, [string]$UserID)
+function Resolve-LocalHermesScope {
+  param([string]$Email, [string]$CompanyID)
 
-  $company = [guid]::Empty
-  $user = [guid]::Empty
-  if (-not [guid]::TryParse($CompanyID, [ref]$company) -or $company -eq [guid]::Empty -or
-      -not [guid]::TryParse($UserID, [ref]$user) -or $user -eq [guid]::Empty) {
-    throw "Hermes needs both the Mango company ID and Mango user ID. See docs/setup/hermes-local.md."
+  if ([string]::IsNullOrWhiteSpace($Email) -or $Email -match '[\x00\r\n]') {
+    throw "Enter the email address you use to sign into Mango."
   }
+  $emailValue = $Email.Trim().ToLowerInvariant()
+  $company = [guid]::Empty
+  if (-not [string]::IsNullOrWhiteSpace($CompanyID) -and
+      (-not [guid]::TryParse($CompanyID, [ref]$company) -or $company -eq [guid]::Empty)) {
+    throw "HermesCompanyID must be an existing Mango company UUID."
+  }
+  $psql = Get-Command psql -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+  if (-not $psql) { throw "Mango account lookup needs PostgreSQL's psql on PATH." }
+  if ([string]::IsNullOrWhiteSpace($env:DB_HOST) -or [string]::IsNullOrWhiteSpace($env:DB_PORT) -or
+      [string]::IsNullOrWhiteSpace($env:DB_NAME) -or [string]::IsNullOrWhiteSpace($env:DB_USER)) {
+    throw "Set the local backend database environment before looking up the Mango account."
+  }
+
+  # Keep all matching users until ambiguity is checked, including users with no membership.
+  $emailLiteral = $emailValue.Replace("'", "''")
+  $sql = @"
+BEGIN READ ONLY;
+SELECT coalesce(json_agg(account ORDER BY account.company_name, account.company_id), '[]'::json)
+FROM (
+  SELECT u.user_id::text, u.email, c.company_id::text, c.name AS company_name
+  FROM public.users u
+  LEFT JOIN public.company_memberships membership ON membership.user_id = u.user_id
+  LEFT JOIN public.companies c ON c.company_id = membership.company_id
+  WHERE lower(btrim(u.email)) = '$emailLiteral'
+) account;
+ROLLBACK;
+"@
+  $previousConnectTimeout = $env:PGCONNECT_TIMEOUT
+  $previousOptions = $env:PGOPTIONS
+  $previousClientEncoding = $env:PGCLIENTENCODING
+  $previousOutputEncoding = $OutputEncoding
+  $previousConsoleEncoding = [Console]::OutputEncoding
+  try {
+    $env:PGCONNECT_TIMEOUT = '5'
+    $env:PGOPTIONS = '-c default_transaction_read_only=on -c statement_timeout=10000 -c standard_conforming_strings=on'
+    $env:PGCLIENTENCODING = 'UTF8'
+    $OutputEncoding = New-Object Text.UTF8Encoding($false)
+    [Console]::OutputEncoding = $OutputEncoding
+    $raw = & {
+      $ErrorActionPreference = 'Continue'
+      $value = $sql | & $psql.Source -X -A -t -q -w -v ON_ERROR_STOP=1 `
+        -h $env:DB_HOST -p $env:DB_PORT -d $env:DB_NAME -U $env:DB_USER -f - 2>$null
+      if ($LASTEXITCODE -eq 0) { $value }
+    }
+    if ([string]::IsNullOrWhiteSpace(($raw -join "`n"))) { throw "lookup failed" }
+    $accounts = ConvertFrom-Json -InputObject ($raw -join "`n") -ErrorAction Stop
+    $accounts = @($accounts)
+  } catch {
+    throw "Unable to look up the Mango account. Check the local backend database connection and psql access."
+  } finally {
+    $env:PGCONNECT_TIMEOUT = $previousConnectTimeout
+    $env:PGOPTIONS = $previousOptions
+    $env:PGCLIENTENCODING = $previousClientEncoding
+    $OutputEncoding = $previousOutputEncoding
+    [Console]::OutputEncoding = $previousConsoleEncoding
+  }
+  if ($accounts.Count -eq 0) { throw "No Mango account matches that email. Sign into Mango once or check the email." }
+  foreach ($account in $accounts) {
+    $accountUser = [guid]::Empty
+    $accountCompany = [guid]::Empty
+    if (-not [guid]::TryParse($account.user_id, [ref]$accountUser) -or $accountUser -eq [guid]::Empty -or
+        ($account.company_id -and (-not [guid]::TryParse($account.company_id, [ref]$accountCompany) -or $accountCompany -eq [guid]::Empty))) {
+      throw "The Mango account lookup returned an invalid identity; no account was selected."
+    }
+  }
+  if (@($accounts.user_id | Select-Object -Unique).Count -ne 1) {
+    throw "Multiple Mango users have that email; no account was selected. Resolve the duplicate accounts first."
+  }
+  $memberships = @($accounts | Where-Object { $_.company_id -and ($company -eq [guid]::Empty -or [guid]$_.company_id -eq $company) })
+  if ($memberships.Count -eq 0) { throw "That Mango account has no membership in the requested company. Sign into Mango and select an existing company first." }
+  $selected = $memberships[0]
+  if ($memberships.Count -gt 1) {
+    Write-Host 'Choose the company you will use in Mango:'
+    for ($index = 0; $index -lt $memberships.Count; $index++) {
+      Write-Host ("{0}. {1} ({2})" -f ($index + 1), $memberships[$index].company_name, $memberships[$index].company_id)
+    }
+    $choice = 0
+    if (-not [int]::TryParse((Read-Host 'Company number'), [ref]$choice) -or $choice -lt 1 -or $choice -gt $memberships.Count) {
+      throw "Invalid company number. Run the launcher again and choose one of the listed companies."
+    }
+    $selected = $memberships[$choice - 1]
+  }
+  return [pscustomobject]@{
+    CompanyID = ([guid]$selected.company_id).ToString()
+    UserID = ([guid]$selected.user_id).ToString()
+    CompanyName = $selected.company_name
+    Email = $emailValue
+  }
+}
+
+function Get-LocalHermesDocker {
   $docker = Get-Command docker -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
   if (-not $docker) {
     throw "Hermes needs Docker Desktop running with Linux containers. See docs/setup/hermes-local.md."
@@ -42,11 +130,24 @@ function Get-LocalHermesSettings {
   if (-not $imageExists) {
     throw "Build Hermes once from the repo root: docker build -t $image hermes"
   }
+  return $docker.Source
+}
+
+function Get-LocalHermesSettings {
+  param([string]$CompanyID, [string]$UserID, [string]$Docker)
+
+  $company = [guid]::Empty
+  $user = [guid]::Empty
+  if (-not [guid]::TryParse($CompanyID, [ref]$company) -or $company -eq [guid]::Empty -or
+      -not [guid]::TryParse($UserID, [ref]$user) -or $user -eq [guid]::Empty) {
+    throw "Hermes needs an existing Mango company ID and Mango user ID."
+  }
+  if ([string]::IsNullOrWhiteSpace($Docker)) { throw "Check local Docker before configuring Hermes." }
   return [pscustomobject]@{
     CompanyID = $company.ToString()
     UserID = $user.ToString()
-    Docker = $docker.Source
-    Image = $image
+    Docker = $Docker
+    Image = 'mangorts-hermes:693641aa'
     Name = "mangorts-hermes-$company-$user"
   }
 }
