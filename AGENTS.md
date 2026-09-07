@@ -37,6 +37,7 @@ So don't mess it up PLEASE
 14. The concept of "Coruscant" is from Star Wars, you know how the planet is one big city with 1000s of layers betwween the ground to the top levels. New levels simply built ontop of old ones, an unknown number of roads and buildings and entire layers unused and leading to nowhere. That's our codebase now, which needs fixing. So when I say Coruscant, I am refering to our slop codebase.
 15. When I ask you to make some change or new feature, do not do it in a way that introduced another abstraction for something that we already had a solution for.
 16. Also, we have Greptile now so when I ask you to use Greptile just use it to check our code.
+17. Follow Hermes's existing conventions for AI storage and execution where applicable. Preserve its native identities, store plain text as text and structured data as JSON, and use `ai` rather than `assistant` for Mango names and message roles; translate native provider terminology only at the boundary.
 
 ## Safety
 

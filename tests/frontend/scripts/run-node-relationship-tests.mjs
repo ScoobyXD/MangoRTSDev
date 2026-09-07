@@ -187,12 +187,12 @@ const componentTests = [
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/companyExplorerCreateProcessDialog.test.js"),
   },
   {
-    source: resolve(repoRoot, "tests/frontend/app/appAssistant.test.tsx"),
-    file: resolve(frontendRoot, ".test-dist/tests/frontend/app/appAssistant.test.js"),
+    source: resolve(repoRoot, "tests/frontend/app/appAI.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/app/appAI.test.js"),
   },
   {
-    source: resolve(repoRoot, "tests/frontend/app/appAssistantDictation.test.tsx"),
-    file: resolve(frontendRoot, ".test-dist/tests/frontend/app/appAssistantDictation.test.js"),
+    source: resolve(repoRoot, "tests/frontend/app/appAIDictation.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/app/appAIDictation.test.js"),
     environment: { VITE_AUTH_MODE: "cognito", VITE_COGNITO_REGION: "us-west-1", VITE_COGNITO_USER_POOL_ID: "test-pool", VITE_COGNITO_CLIENT_ID: "test-client" },
   },
   {

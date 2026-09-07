@@ -75,7 +75,7 @@ import { TextSelectionNodeCreator } from "../modules/nodes/TextSelectionNodeCrea
 import { returnToEditorEntitySourceNode } from "../modules/editor/editorEntityLinks";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "./ConfirmActionMenu";
 import { AppTaskbar } from "./AppTaskbar";
-import { AppAssistant } from "./AppAssistant";
+import { AppAI } from "./AppAI";
 import { EVENT_APP_DOCK_TAB_REQUESTED, appDockTabID, appTaskbarStorageScope, readAppDockTabs, saveAppDockTabs, upsertAppDockTab, type AppDockTab, type AppDockTabInput } from "./appDockTabs";
 import { readAppTimelineState, rollTimelineStateToDate, saveAppTimelineState, type AppTimelineState } from "./timelineState";
 import { buildGvicRoute, buildHuddleLogicGateRoute, buildLogicGateRoute, buildNodeRoute, buildProjectLogicGateNavigationPlan, buildProjectRoute, gvicRoleForViewID, type DeepLinkRoute, type GvicDeepLinkRoute } from "./deepLinkRoutes";
@@ -757,7 +757,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
 
   const pageEdgeGap = processMapVisible ? 0 : PAGE_EDGE_GAP;
   const canvasW = Math.max(1, viewSize.w - appSidebarWidth - APP_RESIZE_HANDLE_W - pageEdgeGap * 2);
-  const assistantBottomInset = dockTabs.length > 0 ? 62 : PAGE_EDGE_GAP;
+  const aiBottomInset = dockTabs.length > 0 ? 62 : PAGE_EDGE_GAP;
   const canvasH = Math.max(1, viewSize.h - pageEdgeGap * 2);
   const taskbarLeftInset = pageEdgeGap + appSidebarWidth + APP_RESIZE_HANDLE_W;
   const gridCols = Math.max(1, Math.round(canvasW / CELL_SIZE));
@@ -2317,7 +2317,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       </div>
       </div>
 
-      <AppAssistant apiBase={apiBase} userID={myWorkSubjectID} bottomInset={assistantBottomInset} />
+      <AppAI apiBase={apiBase} userID={myWorkSubjectID} bottomInset={aiBottomInset} />
       <AppTaskbar
         tabs={dockTabs}
         activeTabID={activeDockTabID}

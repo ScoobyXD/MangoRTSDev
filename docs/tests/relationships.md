@@ -16,10 +16,12 @@ After verified sign-in, Mango resolves the existing user identity and company me
 1. The app must create no AI inspection archive, archive owner relationship, or AI-generated resource relationship.
 2. Ordinary resource ownership, permission, assignment, and recycle behavior must remain governed by the existing typed relationship laws.
 3. Removing the legacy AI source must not delete live database records or business resources.
+4. AI chat, message, run and action links must include exact company/user scope and preserve native chat/message identities without a resource registry.
+5. Membership removal must deny AI history and actions while retaining deduplication, and permanent company/user deletion must remove its scoped Mango AI records.
 
 ## AI Removal Story
 
-The retained chat panel cannot execute actions. The app no longer writes inspection archives or injects AI work preconditions into ordinary resource commands. Existing business relationships retain their canonical identities and normal transaction rules; this source cleanup does not change live databases.
+The legacy AI runtime remains removed. The Hermes HTTP integration may invoke existing Mango business commands under their normal permissions and transaction rules, as specified in `hermes.md`. It creates no inspection archive, resource registry or AI-specific resource relationship. Its chats, native message copies, runs and shared action receipts carry the exact existing company and user IDs. Chat/run/message links include both scope columns, grant no access and never replace canonical Process/Step/Node relationships. Native session and integer message IDs remain unchanged; local run IDs identify Mango admission before Hermes assigns its execution ID. Membership removal retains dormant history and deduplication while denying access; permanent company or user deletion cascades through the Mango AI records. Committed action results are historical evidence and do not recreate deleted resources.
 
 # Current Process Step Relationship Business Logic Laws
 

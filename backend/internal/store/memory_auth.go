@@ -998,6 +998,7 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 		restore()
 		return DeleteCompanyUserResult{}, err
 	}
+	r.deleteAIMemberDataLocked("", userID)
 	return DeleteCompanyUserResult{User: deleted, DeleteExternalIdentity: true}, nil
 }
 
