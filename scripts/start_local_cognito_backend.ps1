@@ -9,6 +9,8 @@ param(
   [string]$EmailFrom = "",
   [string]$NylasRedirectURI = "http://localhost:8080/nylas/oauth/callback",
   [string]$NylasFrontendRedirectURL = "http://localhost:5173/communications",
+  [string]$HermesCompanyID = "",
+  [string]$HermesEmail = "",
   [switch]$SkipCredentialExport,
   [switch]$SkipNylas,
   [switch]$StopExisting,
@@ -33,6 +35,8 @@ $MangoLocalNylasAPIKeySecretArn = ""
 $MangoLocalNylasStateSecretArn = ""
 $MangoLocalNylasWebhookSecret = ""
 $MangoLocalNylasWebhookSecretArn = ""
+$MangoLocalHermesCompanyID = ""
+$MangoLocalHermesEmail = ""
 if (-not $ResetProcessMap -and (Test-Path -LiteralPath $localConfigPath)) {
   . $localConfigPath
 }
@@ -331,6 +335,21 @@ if ($ResetProcessMap) {
   return
 }
 
+$hermesSettings = $null
+$hermesDocker = $null
+$HermesCompanyID = First-NonBlank @($HermesCompanyID, $MangoLocalHermesCompanyID)
+$HermesEmail = First-NonBlank @($HermesEmail, $MangoLocalHermesEmail)
+if ($HermesCompanyID -or $HermesEmail) {
+  if ($AwsProfile -ne 'mangorts-dev' -or $AwsRegion -ne 'us-west-1' -or
+      (Get-OptionalTfvarString -Name 'environment' -Path $tfvarsPath -Default 'dev') -ne 'dev') {
+    throw "Local Hermes startup uses only mangorts-dev in us-west-1 with the dev database configuration."
+  }
+  . (Join-Path $PSScriptRoot 'local_hermes.ps1')
+  # Check local prerequisites before fetching application credentials or stopping the API.
+  $hermesDocker = Get-LocalHermesDocker
+  if (-not $HermesEmail) { $HermesEmail = Read-Host 'Email you use to sign into Mango' }
+}
+
 if (-not $SkipCredentialExport) {
   $hasEnvCredentials = -not [string]::IsNullOrWhiteSpace($env:AWS_ACCESS_KEY_ID) -and -not [string]::IsNullOrWhiteSpace($env:AWS_SECRET_ACCESS_KEY)
   if ($AwsProfile -or -not $hasEnvCredentials) {
@@ -346,6 +365,16 @@ if (-not [string]::IsNullOrWhiteSpace($localTunnelURL) -and -not $PSBoundParamet
 }
 
 Set-LocalDatabaseEnvironment
+
+if ($null -ne $hermesDocker) {
+  $hermesScope = Resolve-LocalHermesScope -Email $HermesEmail -CompanyID $HermesCompanyID
+  $hermesSettings = Get-LocalHermesSettings -CompanyID $hermesScope.CompanyID -UserID $hermesScope.UserID -Docker $hermesDocker
+  Write-Host "Hermes account: $($hermesScope.Email), company: $($hermesScope.CompanyName)"
+  if (-not $MangoLocalHermesCompanyID -and -not $PSBoundParameters.ContainsKey('HermesCompanyID')) {
+    # Save only the validated, nonsecret selection; existing local settings stay intact.
+    [IO.File]::AppendAllText($localConfigPath, "`r`n`$MangoLocalHermesCompanyID = '$($hermesScope.CompanyID)'`r`n", (New-Object Text.UTF8Encoding($false)))
+  }
+}
 
 $projectName = Get-OptionalTfvarString -Name "project_name" -Path $tfvarsPath -Default "mangorts"
 $environmentName = Get-OptionalTfvarString -Name "environment" -Path $tfvarsPath -Default "dev"
@@ -543,9 +572,32 @@ if ($AwsProfile) {
 }
 Write-Host "Email SQS: using the deployed DEV work queue."
 
-Push-Location (Join-Path $repoRoot "backend")
+$hermesRuntime = $null
+$hermesPreviousEnvironment = @{}
 try {
-  go run ./cmd/miraeopus-api
+  if ($null -ne $hermesSettings) {
+    foreach ($name in @('MANGORTS_HERMES_ROUTES', 'MANGORTS_LOCAL_HERMES_API_KEY', 'MANGORTS_LOCAL_HERMES_CALLBACK_KEY')) {
+      $hermesPreviousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+    }
+    $hermesOpenAIKey = Get-SecretStringValue `
+      -SecretID 'arn:aws:secretsmanager:us-west-1:686458136219:secret:mangorts/dev/openai-api-key-EaABNe' `
+      -PropertyNames @('api_key', 'openai_api_key', 'OPENAI_API_KEY')
+    try {
+      $hermesRuntime = Start-LocalHermes -Settings $hermesSettings -OpenAIKey $hermesOpenAIKey -StopExisting:$StopExisting
+    } finally { $hermesOpenAIKey = $null }
+  } elseif ([string]::IsNullOrWhiteSpace($env:MANGORTS_HERMES_ROUTES)) {
+    Write-Host 'Hermes is not configured. One-time setup: docs/setup/hermes-local.md'
+  }
+  Push-Location (Join-Path $repoRoot "backend")
+  try {
+    go run ./cmd/miraeopus-api
+  } finally { Pop-Location }
 } finally {
-  Pop-Location
+  try {
+    if ($null -ne $hermesRuntime) { Stop-LocalHermes -Runtime $hermesRuntime }
+  } finally {
+    foreach ($name in $hermesPreviousEnvironment.Keys) {
+      [Environment]::SetEnvironmentVariable($name, $hermesPreviousEnvironment[$name], 'Process')
+    }
+  }
 }

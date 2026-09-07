@@ -11,6 +11,7 @@ from uuid import UUID
 OPENAI_SECRET_ID = "arn:aws:secretsmanager:us-west-1:686458136219:secret:mangorts/dev/openai-api-key-EaABNe"
 DEFAULT_MODEL = "gpt-5.4-mini-2026-03-17"
 OPENAI_BASE_URL = "https://api.openai.com/v1"
+MAX_RUNTIME_INPUT = 16384
 
 
 def bind_home(home, company_id, user_id):
@@ -81,7 +82,26 @@ def load_openai_key(client, secret_id):
     return value.strip()
 
 
-def main():
+def read_runtime_credentials():
+    # Read one bounded line so Docker's open stdin never delays startup until EOF.
+    line = sys.stdin.buffer.readline(MAX_RUNTIME_INPUT + 1)
+    if len(line) > MAX_RUNTIME_INPUT or not line.endswith(b"\n"):
+        raise ValueError("Runtime credentials must be one complete bounded JSON line.")
+    # bytes also handles the UTF-8 BOM emitted by Windows PowerShell's stdin writer.
+    credentials = json.loads(line)
+    if not isinstance(credentials, dict) or set(credentials) != {"OPENAI_API_KEY", "API_SERVER_KEY", "MANGO_CALLBACK_KEY"}:
+        raise ValueError("Runtime credentials must contain exactly the three supported keys.")
+    if any(not isinstance(value, str) or not value.strip() or "\x00" in value for value in credentials.values()):
+        raise ValueError("Runtime credentials must be nonempty strings without null characters.")
+    return credentials
+
+
+def main(argv=()):
+    local_runtime = list(argv) == ["--runtime-stdin"]
+    if argv and not local_runtime:
+        raise ValueError("Only --runtime-stdin is supported.")
+    if local_runtime:
+        os.environ.update(read_runtime_credentials())
     os.umask(0o077)
     home = Path(os.environ["HERMES_HOME"])
     if not home.is_absolute() or home.is_symlink():
@@ -95,11 +115,12 @@ def main():
     lock_native_scope(home, os.environ)
     config = runtime_config(os.environ.get("MANGO_HERMES_MODEL", DEFAULT_MODEL))
     (home / "config.yaml").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-    import boto3
-
-    session = boto3.Session(region_name="us-west-1")  # AWS_PROFILE=mangorts-dev for local SSO; task role in cloud.
     os.environ["OPENAI_BASE_URL"] = OPENAI_BASE_URL
-    os.environ["OPENAI_API_KEY"] = load_openai_key(session.client("secretsmanager"), OPENAI_SECRET_ID)
+    if not local_runtime:
+        import boto3
+
+        session = boto3.Session(region_name="us-west-1")  # Use the narrowly scoped runtime task role in cloud.
+        os.environ["OPENAI_API_KEY"] = load_openai_key(session.client("secretsmanager"), OPENAI_SECRET_ID)
     os.environ["API_SERVER_ENABLED"] = "true"
     os.environ["API_SERVER_HOST"] = "0.0.0.0"
     os.environ["API_SERVER_PORT"] = "8642"
@@ -109,7 +130,7 @@ def main():
 
 if __name__ == "__main__":
     try:
-        main()
+        main(sys.argv[1:])
     except Exception as error:
         # SDK exception text may include request details. Report class only.
         print(f"Hermes startup failed ({type(error).__name__}); check required scope, runtime secret access, and volume configuration.", file=sys.stderr)

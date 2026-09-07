@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+import io
 import json
 import os
 from pathlib import Path
@@ -104,6 +105,59 @@ class PluginTests(unittest.TestCase):
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_windows_stdin_startup_uses_only_injected_credentials_without_aws_or_secret_files(self):
+        credentials = {"OPENAI_API_KEY": "fixture-local-provider", "API_SERVER_KEY": "a" * 32,
+                       "MANGO_CALLBACK_KEY": "b" * 32}
+        # The next line stays unread: startup must not wait for Docker stdin EOF.
+        stream = io.TextIOWrapper(io.BytesIO(b"\xef\xbb\xbf" +
+            (json.dumps(credentials) + "\nremaining input\n").encode("utf-8")), encoding="utf-8")
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "scope"
+            with patch.dict(sys.modules, {"boto3": None}), patch.dict(os.environ, {
+                "HERMES_HOME": str(home), "MANGO_COMPANY_ID": UUID_A, "MANGO_USER_ID": UUID_B,
+                "OPENAI_BASE_URL": "https://untrusted.invalid/v1", "HERMES_MANAGED_DIR": "",
+            }, clear=True), patch.object(sys, "stdin", stream), patch.object(entrypoint.os, "execvp") as execute:
+                entrypoint.main(["--runtime-stdin"])
+                self.assertEqual({key: os.environ[key] for key in credentials}, credentials)
+                self.assertEqual(os.environ["OPENAI_BASE_URL"], "https://api.openai.com/v1")
+                self.assertEqual(stream.readline(), "remaining input\n")
+                execute.assert_called_once_with("hermes", ["hermes", "gateway"])
+            self.assertEqual(json.loads((home / "mango-scope.json").read_text(encoding="utf-8")),
+                             {"company_id": UUID_A, "user_id": UUID_B})
+            config = (home / "config.yaml").read_text(encoding="utf-8")
+            for secret in credentials.values():
+                self.assertNotIn(secret, config)
+            self.assertFalse((home / ".env").exists())
+
+    def test_invalid_stdin_credentials_fail_before_writing_a_home(self):
+        credentials = {"OPENAI_API_KEY": "fixture-local-provider", "API_SERVER_KEY": "a" * 32,
+                       "MANGO_CALLBACK_KEY": "b" * 32}
+        invalid = [
+            "", json.dumps(credentials), "{invalid}\n", json.dumps(credentials) + " extra\n", "[]\n",
+            json.dumps({**credentials, "OPENAI_API_KEY": "x" * entrypoint.MAX_RUNTIME_INPUT}) + "\n",
+            json.dumps({**credentials, "OPENAI_API_KEY": "\u00e9" * (entrypoint.MAX_RUNTIME_INPUT // 2)}, ensure_ascii=False) + "\n",
+            json.dumps({key: value for key, value in credentials.items() if key != "OPENAI_API_KEY"}) + "\n",
+            json.dumps({**credentials, "AWS_SESSION_TOKEN": "not-allowed"}) + "\n",
+            json.dumps({**credentials, "OPENAI_API_KEY": None}) + "\n",
+            json.dumps({**credentials, "OPENAI_API_KEY": " "}) + "\n",
+            json.dumps({**credentials, "OPENAI_API_KEY": "invalid\x00key"}) + "\n",
+            json.dumps({**credentials, "API_SERVER_KEY": "a" * 31}) + "\n",
+            json.dumps({**credentials, "MANGO_CALLBACK_KEY": "b" * 31}) + "\n",
+            json.dumps({**credentials, "MANGO_CALLBACK_KEY": credentials["API_SERVER_KEY"]}) + "\n",
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "scope"
+            for index, payload in enumerate(invalid):
+                with self.subTest(case=index), patch.dict(os.environ, {
+                    "HERMES_HOME": str(home), "MANGO_COMPANY_ID": UUID_A, "MANGO_USER_ID": UUID_B,
+                }, clear=True), patch.object(sys, "stdin", io.TextIOWrapper(io.BytesIO(payload.encode("utf-8")))), \
+                        patch.object(entrypoint, "bind_home") as bind, patch.object(entrypoint.os, "execvp") as execute:
+                    with self.assertRaises(ValueError):
+                        entrypoint.main(["--runtime-stdin"])
+                    bind.assert_not_called()
+                    execute.assert_not_called()
+                    self.assertFalse(home.exists())
+
     def test_startup_pins_provider_destination_before_native_exec(self):
         with tempfile.TemporaryDirectory() as directory:
             sdk = MagicMock()
