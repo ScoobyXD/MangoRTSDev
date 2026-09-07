@@ -217,19 +217,20 @@ button, input, textarea, select {
   flex-shrink: 0;
   display: flex;
   max-width: 100%;
-  gap: 6px;
 }
 .mango-auth-nav button {
   min-height: 40px;
   padding: 8px 16px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 0;
   background: transparent;
   color: #fff;
   font-size: 12px;
   font-weight: 650;
   cursor: pointer;
 }
+.mango-auth-nav button:first-child { border-radius: 8px 0 0 8px; }
+.mango-auth-nav button:last-child { border-radius: 0 8px 8px 0; }
 .mango-auth-nav button[aria-pressed="true"] { background: #233e50; color: #fff; }
 .mango-auth-nav button[aria-pressed="false"]:hover { background: rgba(35, 62, 80, 0.7); }
 .mango-auth-content {

@@ -40,6 +40,7 @@
 36. Auth controls must remain reachable on small or short screens without overlapping the landing navigation.
 37. Sign Up and Sign In fields must use opaque light backgrounds with dark text, and their exposed headings and labels must stay legible over varied scenery.
 38. Landing navigation must have no shared background rectangle.
+39. Adjacent landing navigation highlights must touch along a straight edge with no gap.
 
 ## Wallpaper setup
 
