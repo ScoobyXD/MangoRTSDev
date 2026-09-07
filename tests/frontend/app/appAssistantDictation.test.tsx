@@ -87,6 +87,7 @@ async function harness() {
       assert.equal(JSON.parse(String(init.body)).AuthFlow, "REFRESH_TOKEN_AUTH");
       return Response.json({ AuthenticationResult: { AccessToken: "refreshed-test-token", ExpiresIn: 3600 } });
     }
+    if (url.includes("/v1/assistant/conversations?")) return Response.json({ conversations: [] });
     assert.match(url, /\/v1\/transcriptions\?/);
     assert.match(new Headers(init.headers).get("Authorization") ?? "", /^Bearer /);
     const response = deferred<Response>(); requests.push({ url, init, response }); return response.promise;
@@ -152,7 +153,7 @@ async function harness() {
   };
 }
 
-test("dictation waits for final audio, inserts literal text after the selection, and never enables Send", async () => {
+test("dictation waits for final audio, inserts literal text after the selection, and never submits it", async () => {
   const h = await harness();
   try {
     await h.setText("Before after");
@@ -177,10 +178,9 @@ test("dictation waits for final audio, inserts literal text after the selection,
     assert.equal(h.input().value, "Before <b>spoken</b>after");
     assert.equal(h.input().selectionStart, 20);
     assert.equal(h.input().readOnly, false);
-    assert.equal(h.button("Send").disabled, true);
-    await h.click("Send");
+    assert.equal(h.button("Send").disabled, false);
     await act(async () => { h.input().dispatchEvent(new h.dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); });
-    assert.equal(h.requests.length, 1, "clicking Send or pressing Enter never sends a request");
+    assert.equal(h.requests.length, 1, "dictation and pressing Enter never submit the draft");
     await h.setText("Still editable\nWith a new line");
     assert.equal(h.input().value, "Still editable\nWith a new line");
   } finally { await h.dispose(); }
@@ -208,7 +208,7 @@ test("permission, capture, no-speech and provider failures preserve the editable
     assert.doesNotMatch(h.container.textContent!, /Private provider details/);
     assert.equal(h.input().value, "Keep this draft");
     assert.equal(h.input().readOnly, false);
-    assert.equal(h.button("Send").disabled, true);
+    assert.equal(h.button("Send").disabled, false);
   } finally { await h.dispose(); }
 });
 
@@ -251,6 +251,10 @@ test("canceling permission or closing chat releases late grants and keeps the dr
     await h.click("Expand Mango chat");
     assert.equal(h.input().value, "Keep this draft");
     assert.equal(h.input().readOnly, false);
+    const newChatTrack = await h.record();
+    await h.click("New chat");
+    assert.equal(newChatTrack.stopped, true, "changing conversation cancels recording before clearing its draft");
+    assert.equal(h.input().value, "");
   } finally { await h.dispose(); }
 });
 
@@ -331,7 +335,7 @@ test("oversized audio never uploads and complete long transcripts remain editabl
     await h.record(); await h.complete(); await h.respond(transcript);
     assert.equal(h.input().value, `Keep this draft${transcript}`);
     assert.equal(h.input().readOnly, false);
-    assert.equal(h.button("Send").disabled, true);
+    assert.equal(h.button("Send").disabled, false);
   } finally { await h.dispose(); }
 });
 
@@ -345,6 +349,6 @@ test("dictation uses the shared authenticated API while realtime is disconnected
     await h.record(); await h.complete(); await h.respond("Dictation still works");
     assert.equal(h.requests.length, 1);
     assert.equal(h.input().value, "Dictation still works");
-    assert.equal(h.button("Send").disabled, true);
+    assert.equal(h.button("Send").disabled, false);
   } finally { setRealtimeHealthClientActive(key, false); await h.dispose(); }
 });

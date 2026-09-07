@@ -19,7 +19,7 @@ After verified sign-in, Mango resolves the existing user identity and company me
 
 ## AI Removal Story
 
-The retained chat panel cannot execute actions. The app no longer writes inspection archives or injects AI work preconditions into ordinary resource commands. Existing business relationships retain their canonical identities and normal transaction rules; this source cleanup does not change live databases.
+The legacy AI runtime remains removed. The Hermes HTTP integration may invoke existing Mango business commands under their normal permissions and transaction rules, as specified in `hermes.md`. It creates no inspection archive, resource registry or AI-specific resource relationship. Its user/company-scoped submission and action receipts are historical command evidence; they grant no access and do not replace canonical Process/Step/Node relationships. Receipt ownership uses the exact existing company and user IDs, retains dormant deduplication after membership removal, and cascades on permanent company or user deletion.
 
 # Current Process Step Relationship Business Logic Laws
 

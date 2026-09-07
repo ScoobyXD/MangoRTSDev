@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools==83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mangorts-hermes"
+version = "0.1.0"
+description = "Mango business tools for the pinned native Hermes HTTP server"
+requires-python = ">=3.11,<3.14"
+
+[project.entry-points."hermes_agent.plugins"]
+mango = "mango_plugin"
+
+[tool.setuptools]
+py-modules = ["mango_plugin"]

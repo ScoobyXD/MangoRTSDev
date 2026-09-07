@@ -101,6 +101,8 @@ type Server struct {
 	nylasConfig                            NylasConfig
 	deepgramAPIKey                         string
 	transcriptionClient                    *http.Client
+	hermesRoutes                           []HermesRoute
+	hermesClient                           *http.Client
 	attachmentStorage                      AttachmentObjectStorage
 	attachmentVariantEnsurer               AttachmentImageVariantEnsurer
 	attachmentRemoteImageDownloader        attachmentRemoteImageDownloader
@@ -129,6 +131,7 @@ type ServerOptions struct {
 	NylasClient                    NylasClient
 	NylasConfig                    NylasConfig
 	DeepgramAPIKey                 string
+	HermesRoutes                   []HermesRoute
 	AttachmentStorage              AttachmentObjectStorage
 	AttachmentVariantEnsurer       AttachmentImageVariantEnsurer
 	RealtimeTicketSecret           string
@@ -240,6 +243,8 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		maxBodyBytes:                       options.MaxRequestBodyBytes,
 		deepgramAPIKey:                     strings.TrimSpace(options.DeepgramAPIKey),
 		transcriptionClient:                newTranscriptionClient(),
+		hermesRoutes:                       options.HermesRoutes,
+		hermesClient:                       newHermesClient(),
 	}
 	if server.attachmentVariantEnsurer == nil && server.attachmentStorage != nil {
 		server.attachmentVariantEnsurer = repositoryAttachmentImageVariantEnsurer{repo: repo, storage: server.attachmentStorage}
@@ -290,6 +295,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v2/logic-gates/", s.handleLogicGateWorkV2Subresource)
 	mux.HandleFunc("/v1/me", s.handleMe)
 	mux.HandleFunc("/v1/transcriptions", s.handleTranscription)
+	mux.HandleFunc("/v1/assistant/", s.handleAssistant)
+	mux.HandleFunc("/internal/hermes/actions", s.handleHermesAction)
 	mux.HandleFunc("/v1/companies", s.handleCompanies)
 	mux.HandleFunc("/v1/companies/", s.handleCompanySubresource)
 	mux.HandleFunc("/v1/invitations", s.handleInvitations)
