@@ -133,10 +133,11 @@ test("QA state and deployment identities are isolated", () => {
   assert.match(qaWorkflow, /key\s*=\s*"mangorts\/qa\/terraform\.tfstate"/);
   assert.match(qaWorkflow, /use_lockfile\s*=\s*true/);
   assert.doesNotMatch(qaWorkflow, /TF_STATE_KEY/);
-  assert.match(qaWorkflow, /environment:\s*qa/);
+  assert.match(qaWorkflow, /inputs\.stage == 'deploy' && 'qa' \|\| 'qa-bootstrap'/);
   assert.match(qaWorkflow, /AWS_QA_DEPLOY_ROLE_ARN/);
   assert.doesNotMatch(qaWorkflow, /AWS_DEV_DEPLOY_ROLE_ARN/);
-  assert.match(qaMain, /github_oidc_subjects\s*=\s*\["repo:\$\{var\.github_owner\}\/\$\{var\.github_repository\}:environment:qa"\]/);
+  assert.match(qaMain, /repo:\$\{var\.github_owner\}\/\$\{var\.github_repository\}:environment:qa"/);
+  assert.match(qaMain, /repo:\$\{var\.github_owner\}\/\$\{var\.github_repository\}:environment:qa-bootstrap"/);
   assert.doesNotMatch(qaMain, /ref:refs\/heads|github_branch/);
   assert.doesNotMatch(qaVariables, /variable "github_branch"/);
   assert.doesNotMatch(qaWorkflow, /TF_GITHUB_BRANCH/);

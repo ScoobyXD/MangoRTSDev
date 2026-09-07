@@ -82,7 +82,10 @@ module "platform" {
   nylas_microsoft_scopes      = var.nylas_microsoft_scopes
   github_owner                = var.github_owner
   github_repository           = var.github_repository
-  github_oidc_subjects        = ["repo:${var.github_owner}/${var.github_repository}:environment:qa"]
+  github_oidc_subjects = [
+    "repo:${var.github_owner}/${var.github_repository}:environment:qa",
+    "repo:${var.github_owner}/${var.github_repository}:environment:qa-bootstrap",
+  ]
   create_github_oidc_provider = false
   github_oidc_provider_arn    = var.github_oidc_provider_arn
 
