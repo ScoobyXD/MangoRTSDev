@@ -187,11 +187,14 @@ test("saved Process instruction cards follow canonical step events and stop edit
     assert.ok(visibleObserver, "a visible Step editor must use the normal realtime subscription path");
     visibleObserver.callback([{ target, isIntersecting: true, intersectionRatio: 1 } as IntersectionObserverEntry], visibleObserver as unknown as IntersectionObserver);
   };
+  const sockets: Array<{ onmessage: ((event: { data: string }) => void) | null }> = [];
   install("WebSocket", class {
     static CONNECTING = 0;
     static OPEN = 1;
     static CLOSED = 3;
     readyState = 0;
+    onmessage: ((event: { data: string }) => void) | null = null;
+    constructor() { sockets.push(this); }
     close() { this.readyState = 3; }
     send() {}
   });
@@ -267,6 +270,7 @@ test("saved Process instruction cards follow canonical step events and stop edit
   const controllerRef: React.MutableRefObject<MangoTiptapFormattingController | null> = { current: null };
   const reportedErrors: string[] = [];
   const reportedSaveStates: string[] = [];
+  const reportedStepBodies = new Map<string, MangoTiptapDocument>();
   const card = (id: string) => container.querySelector<HTMLElement>(`[data-process-step-id="${id}"]`);
   const refresh = async () => { await act(async () => { dispatchLogicGateWorkUpdated(companyID, processID); }); };
   try {
@@ -275,6 +279,7 @@ test("saved Process instruction cards follow canonical step events and stop edit
       <LogicGateTiptapEditorSurface apiBase={apiBase} companyID={companyID} resourceID={processID} documentID="logic-gate-overview"
         focusInformationID={stepB} focusMentionUserID="step-reader" focusRequestID={1}
         value={JSON.stringify(body("Overview snapshot"))} editable requestJSON={requestJSON} formattingControllerRef={controllerRef}
+        onStepBodyChange={(stepID, document) => reportedStepBodies.set(stepID, document)}
         onError={(message) => reportedErrors.push(message)} onSaveStateChange={(state) => reportedSaveStates.push(state.status)} />
     </React.Suspense>));
     await waitFor(() => Boolean(card(stepA)), "saved Process steps did not load");
@@ -285,11 +290,22 @@ test("saved Process instruction cards follow canonical step events and stop edit
     assert.deepEqual(reportedErrors, [], "a visible Step editor must prepare and subscribe without an error");
     await act(async () => { stepEditor.querySelector<HTMLElement>(".mango-tiptap-prosemirror")!.focus(); });
     assert.match(stepEditor.textContent ?? "", /Canonical Prepare instructions/);
+    assert.match(JSON.stringify(reportedStepBodies.get(stepA)), /Canonical Prepare instructions/, "initial canonical reads must update the matching map preview");
     assert.ok(documentRequests.some((request) => request.path.includes(`/editor-json/process_step/${stepA}/documents/${stepA}?`)));
     await act(async () => { controllerRef.current!.applyTextAlignment("right"); });
     await act(async () => { await flushMangoTiptapResource({ companyID, resourceType: "logic_gate", resourceID: processID }); });
     assert.match(JSON.stringify(canonicalBodies.get(stepA)), /"textAlign":"right"/);
+    assert.match(JSON.stringify(reportedStepBodies.get(stepA)), /"textAlign":"right"/, "saved-mode local snapshots must update the preview through the same callback");
     assert.equal(documentRequests.filter((request) => request.method === "POST").length, 1);
+
+    const readsBeforeRemote = reads;
+    canonicalBodies.set(stepA, body("Remote Prepare instructions"));
+    await waitFor(() => sockets.some((socket) => socket.onmessage), "the existing editor realtime socket did not open");
+    await act(async () => sockets.at(-1)!.onmessage?.({ data: JSON.stringify({ type: "editor.snapshot.required", company_id: companyID, scope: `editor-json:process_step:${stepA}:${stepA}`, event_id: "remote-event", resource_type: "process_step", resource_id: stepA, document_id: stepA, resource_revision: 2, operation_id: "remote-operation", client_id: "another-editor" }) }));
+    await waitFor(() => JSON.stringify(reportedStepBodies.get(stepA)).includes("Remote Prepare instructions"), "remote canonical instructions must update the matching map preview");
+    assert.match(stepEditor.textContent ?? "", /Remote Prepare instructions/);
+    assert.equal(reads, readsBeforeRemote, "preview publication must not request Process work");
+    assert.equal(documentRequests.filter((request) => request.method === "POST").length, 1, "canonical previews must not write an editor document");
 
     assert.equal(scrolledTargets.length, 0, "a notification for an unloaded Step must wait for that exact Step");
     snapshot = { ...snapshot, steps: [...snapshot.steps, { process_step_id: stepB, logic_gate_id: processID, name: "Ship", position: 20, body_json: stepBMentionBody }] };

@@ -206,19 +206,19 @@
 204. An initially empty scene MUST remain eligible to fit the first nonempty company bounds; ordinary later refreshes MUST preserve the camera.
 205. An empty company scene MUST show an explanatory status with read-only Retry inside the map and MUST NOT silently reset or backfill saved map geometry.
 206. Create Step in a focused new or saved Process adds to that exact Process.
-207. A focused Process shows its Folder path and compact filename near the top edge, aligned with the top of its right-hand editor.
+207. A focused Process floats its Folder path and compact filename near the top edge, aligned with the top of its right-hand editor.
 208. Folder selection and Folder creation MUST use compact elevated surfaces inside the shared map pane.
 209. Save Process and its save status MUST appear in the focused Process breadcrumb row.
 210. The company map's blank-canvas context menu MUST offer Create Folder, Create Process, and Create Step.
 211. Hover mode MUST retain its checked state when entering or leaving a focused Process.
 212. Opening a new Process animates its work area while its editor and breadcrumb stay fixed.
 213. A focused Process MUST immediately show a labeled rectangular outline around its Step canvas, including when it has no Steps.
-214. A focused Process starts with equal margins around its outline within the available canvas to the left of its editor.
+214. A focused Process starts with equal margins around its outline within the full map workspace, including the area beneath its editor.
 215. A reduced-motion preference MUST skip Process entrance and exit animations.
 216. The Process outline MUST expand as needed to contain all authored Step and route geometry.
 217. Process outline sizing MUST remain local presentation without rewriting authored geometry or creating another resource or layout record.
 218. Panning or zooming a focused Process MUST move or scale its outline, Steps, and routes together without changing the outline's world dimensions.
-219. Dragging blank space in a focused Process MUST pan its camera.
+219. Dragging blank space anywhere in a focused Process workspace outside its floating controls MUST pan its camera.
 220. Wheel zoom in a focused Process MUST preserve the world point beneath the pointer within a 50% to 800% zoom range.
 221. New and saved Process maps omit zoom buttons and Fit.
 222. Focused Process controls and the breadcrumb MUST stay fixed while its camera moves.
@@ -226,7 +226,7 @@
 224. The focused Process camera MUST remain fixed during a Step, route, or connection editing gesture.
 225. Deferred breadcrumb focus restoration MUST preserve any newer focus choice made by the user.
 226. New and saved Process maps omit Step and connection inspectors.
-227. Focused Processes omit the company creation card and provide a plus button for creating a Step in the current Process.
+227. Focused Processes omit the company creation card and provide a top-right plus button beside the editor for creating a Step in the current Process.
 228. Focused Step title editing MUST show borderless text with the entire name selected when editing begins.
 229. Folder breadcrumb controls and Folder picker choices MUST use an orange gradient.
 230. The company creation card MUST sit 56 pixels below the map's top edge, or 52 pixels on viewports at most 700 pixels wide.
@@ -256,7 +256,7 @@
 254. Spatial candidate filtering MUST include both real placement bounds and the restricted 4-by-3 footprint before resolving and reusing placement and parent permissions.
 255. A complete tile read MUST keep placements and traces independent while preserving endpoint authorization, crossing traces, clipping, and detail eligibility.
 256. The focused map omits RACI role cards without changing existing assignments or permissions.
-257. The focused map keeps its existing SOP editor open in a right-hand column without an Editor disclosure or QCD scorecard.
+257. The focused map keeps its existing SOP editor open in a floating right-hand column without reducing the full workspace canvas or adding an Editor disclosure or QCD scorecard.
 258. Changing a new Process destination expands its exact Folder path in Company Explorer.
 259. Successful creation refreshes the existing map and selects the exact committed Process without moving an established camera.
 260. Successful creation reveals and selects the Process in its expanded Explorer Folder without opening the Board.
@@ -270,14 +270,17 @@
 268. Tile readers MUST share immutable normalized geometry, and editing MUST own any mutable copies.
 269. Batched tile publication MUST publish current coverage before retiring mutation masks, and protected purges MUST cancel pending publication.
 270. Validation requests that exceed 512 candidates MUST prioritize current visible detail before other visible coverage and offscreen history.
-271. The right-hand editor provides bottom Editor and Steps tabs while retaining the mounted overview and Step editors across tab changes.
+271. The right-hand editor provides top Editor and Steps tabs while retaining the mounted overview and Step editors across tab changes.
 272. Creating a Step opens the Steps tab and reveals that exact Step's existing instruction card.
 273. The focused map's context menu closes when a left click occurs outside the menu.
 274. An empty focused Process displays “Start this process with a right-click or by pressing the plus button.”
 275. The focused Process outline uses a blue rim.
 276. Confirmed editor save recovery releases the focused Process's busy state.
-277. Formatting controls affect only the currently visible editor section.
+277. The focused Process overview and Step instruction editors omit formatting toolbars.
 278. Leaving a saved focused Process or opening its Board waits for the existing overview and Step save flush to succeed.
+279. The right-hand editor's left edge supports pointer and keyboard width adjustment without resetting the camera or mounted documents.
+280. A canceled editor resize restores its starting width.
+281. A new Step appears as a wide neutral rectangle showing its title and a preview of its current instruction text without a person or agent icon.
 Last updated: 2026-09-07
 
 # Process Story: One company canvas moves from overview to Process work

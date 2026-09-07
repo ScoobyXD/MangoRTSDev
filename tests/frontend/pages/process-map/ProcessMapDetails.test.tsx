@@ -9,7 +9,7 @@ import type { ProcessMapDetailsContents } from "../../../../frontend/src/pages/p
 
 test("the open Process editor preserves document identity, Step cards, inherited RACI, and read-only access", async () => {
   const { IDBKeyRange, indexedDB } = createRequire(resolve("frontend/package.json"))("fake-indexeddb");
-  const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: "http://process-details.test/", pretendToBeVisual: true });
+  const dom = new JSDOM('<!doctype html><div id="root" class="process-map-workspace"></div>', { url: "http://process-details.test/", pretendToBeVisual: true });
   const restores: Array<() => void> = [];
   const install = (name: string, value: unknown) => {
     const prior = Object.getOwnPropertyDescriptor(globalThis, name);
@@ -39,6 +39,8 @@ test("the open Process editor preserves document identity, Step cards, inherited
   dom.window.HTMLElement.prototype.scrollIntoView = () => undefined;
   dom.window.Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
   dom.window.Range.prototype.getBoundingClientRect = () => new dom.window.DOMRect();
+  const workspace = dom.window.document.getElementById("root")!;
+  workspace.getBoundingClientRect = () => new dom.window.DOMRect(0, 0, 1200, 800);
   const requests: Array<{ path: string; method: string }> = [];
   const response = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
   const body = { format: "mango-tiptap-json", schema_version: 1, document: { type: "doc", content: [{ type: "paragraph" }] } };
@@ -72,10 +74,15 @@ test("the open Process editor preserves document identity, Step cards, inherited
   const [{ createRoot }, { ProcessMapDetails }] = await Promise.all([
     import("react-dom/client"), import("../../../../frontend/src/pages/process-map/ProcessMapDetails.js"),
   ]);
-  const root = createRoot(dom.window.document.getElementById("root")!);
+  const root = createRoot(workspace);
   let contents: ProcessMapDetailsContents = {};
   let busy = true;
-  const render = (processID: string, isNew: boolean, focusStepID?: string, refreshVersion = 0) => root.render(<ProcessMapDetails key={processID} apiBase="http://process-details.test" companyID="details-company" processID={processID} isNew={isNew} steps={isNew ? steps : undefined} focusStepID={focusStepID} refreshVersion={refreshVersion} onChange={(next) => { contents = next; }} onBusyChange={(next) => { busy = next; }} />);
+  let editorWidth = 416;
+  let renderPanel = () => {};
+  const render = (processID: string, isNew: boolean, focusStepID?: string, refreshVersion = 0) => {
+    renderPanel = () => root.render(<ProcessMapDetails key={processID} apiBase="http://process-details.test" companyID="details-company" processID={processID} isNew={isNew} steps={isNew ? steps : undefined} focusStepID={focusStepID} refreshVersion={refreshVersion} editorWidth={editorWidth} onEditorWidthChange={(width) => { editorWidth = width; renderPanel(); }} onChange={(next) => { contents = next; }} onBusyChange={(next) => { busy = next; }} />);
+    renderPanel();
+  };
   const settle = async (predicate: () => boolean) => {
     const deadline = Date.now() + 3000;
     while (!predicate()) {
@@ -93,10 +100,50 @@ test("the open Process editor preserves document identity, Step cards, inherited
     assert.equal(dom.window.document.querySelector('[data-raci-add-principal], .process-map-details__toggle'), null);
     assert.equal(editorTab().getAttribute("aria-pressed"), "true");
     const overview = editorDocument("logic-gate-overview");
+    const sections = editorTab().parentElement!;
+    assert.ok(sections.compareDocumentPosition(overview!) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING, "Editor and Steps navigation appears before the document");
+    assert.equal(dom.window.document.querySelector('[role="toolbar"], button[aria-label="Bold"]'), null, "the overview has no formatting toolbar");
+    const separator = dom.window.document.querySelector<HTMLElement>('[role="separator"][aria-label="Resize Process editor"]')!;
+    assert.ok(separator, "the editor provides an accessible width handle");
+    separator.setPointerCapture = () => undefined;
+    separator.releasePointerCapture = () => undefined;
+    assert.equal(separator.tabIndex, 0);
+    assert.equal(separator.getAttribute("aria-orientation"), "vertical");
+    const resizeKey = async (key: string) => { await act(async () => separator.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }))); };
+    const resizePointer = async (type: string, x: number) => {
+      const event = new dom.window.MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x });
+      Object.defineProperty(event, "pointerId", { value: 1 });
+      await act(async () => separator.dispatchEvent(event));
+    };
+    await resizeKey("ArrowLeft");
+    assert.equal(editorWidth, 440, "moving the left edge left widens the editor");
+    await resizeKey("ArrowRight");
+    assert.equal(editorWidth, 416);
+    await resizePointer("pointerdown", 784);
+    await resizePointer("pointermove", 684);
+    assert.equal(editorWidth, 516);
+    await resizePointer("pointerup", 684);
+    assert.equal(editorWidth, 516, "releasing the handle retains its new width");
+    await resizePointer("pointerdown", 684);
+    await resizePointer("pointermove", 584);
+    assert.equal(editorWidth, 616);
+    await resizePointer("pointercancel", 584);
+    assert.equal(editorWidth, 516, "canceling a drag restores the original width");
+    await resizeKey("Home");
+    assert.equal(editorWidth, 240, "the editor keeps enough width to edit text");
+    await resizeKey("ArrowRight");
+    assert.equal(editorWidth, 240, "narrowing cannot cross the minimum width");
+    await resizeKey("End");
+    assert.equal(editorWidth, 880, "widening leaves room for the map and its top controls");
+    await resizeKey("ArrowLeft");
+    assert.equal(editorWidth, 880, "widening cannot cover the map's top controls");
+    await resizeKey("Home");
+    assert.equal(editorDocument("logic-gate-overview"), overview, "resizing retains the mounted overview and its unsaved text");
     const stepCard = dom.window.document.querySelector('[data-process-step-id="step-one"]');
     assert.ok(stepCard, "the existing Step instruction card must be mounted");
     await act(async () => render("new-process", true, "step-one"));
     await settle(() => stepsTab().getAttribute("aria-pressed") === "true");
+    assert.equal(dom.window.document.querySelector('[role="toolbar"], button[aria-label="Bold"]'), null, "Step instructions have no formatting toolbar");
     assert.equal(editorDocument("logic-gate-overview"), overview, "opening Steps preserves the overview editor and its pending text");
     assert.equal(dom.window.document.querySelector('[data-process-step-id="step-one"]'), stepCard);
     await act(async () => editorTab().click());
@@ -132,9 +179,15 @@ test("the open Process editor preserves document identity, Step cards, inherited
     assert.equal(requests.filter((request) => request.path.startsWith("/v1/editor-json/") && request.method === "POST").length, 2, "one failed save and one Retry use the same editor command");
     await act(async () => render("readonly-process", false));
     await settle(() => !busy && Boolean(editorDocument("existing-sop")));
-    const bold = dom.window.document.querySelector<HTMLButtonElement>('button[aria-label="Bold"]');
-    assert.ok(bold);
-    assert.equal(bold.disabled, true, "the map respects the existing Process edit permission");
+    const readonlyOverview = editorDocument("existing-sop")!;
+    assert.equal(readonlyOverview.hasAttribute("data-mango-editor-editable"), false, "the overview respects the existing Process edit permission");
+    await act(async () => { markNearViewport(readonlyOverview); readonlyOverview.dispatchEvent(new dom.window.MouseEvent("dblclick", { bubbles: true })); });
+    await settle(() => Boolean(readonlyOverview.querySelector(".mango-tiptap-prosemirror")));
+    assert.equal(readonlyOverview.querySelector<TiptapEditorHTMLElement>(".mango-tiptap-prosemirror")!.editor!.isEditable, false, "activating the overview must keep its live editor read only");
+    await act(async () => stepsTab().click());
+    const readonlyStep = dom.window.document.querySelector<HTMLElement>('[data-process-step-id="step-one"] [data-mango-editor-format="tiptap_json"]')!;
+    assert.ok(readonlyStep);
+    assert.equal(readonlyStep.hasAttribute("data-mango-editor-editable"), false, "Step instructions respect the existing Process edit permission");
     assert.equal(requests.some((request) => request.path.endsWith("/gvic") || request.path.endsWith("/user-groups")), false, "the editor must not read or change hidden RACI assignments");
   } finally {
     await act(async () => root.unmount());

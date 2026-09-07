@@ -165,7 +165,8 @@ export const LogicGateTiptapEditorSurface: React.FC<LogicGateTiptapEditorSurface
           onFocus={() => { setActiveDocument(step.process_step_id); onFocus?.(); }}
           {...documentCallbacks(step.process_step_id)}
           onEntityLink={props.onEntityLink} onEntityOpen={props.onEntityOpen}
-          onDocumentSnapshotChange={saveMode === "local" ? (document) => onStepBodyChange?.(step.process_step_id, document) : undefined}
+          onDocumentSnapshotChange={(document) => { if (isCurrentDocument(step.process_step_id)) onStepBodyChange?.(step.process_step_id, document); }}
+          onCanonicalDocumentChange={(document) => { if (isCurrentDocument(step.process_step_id)) onStepBodyChange?.(step.process_step_id, document); }}
         />
       </section>)}
     </div>
