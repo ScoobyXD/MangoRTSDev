@@ -12,11 +12,12 @@ import { ProcessMapDetails, type ProcessMapDetailsContents } from "./ProcessMapD
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_FIND_REQUESTED } from "../../modules/dashboardEvents.js";
 import type { CompanyExplorerWorkspaceEntityBatchResponse } from "../../modules/company-explorer/CompanyExplorerContentModel.js";
 import type { MangoTiptapDocument } from "../../modules/editor/tiptap/mangoTiptapDocument.js";
+import type { ProcessStepEditorPlacement } from "../../modules/editor/ProcessStepInstructionEditor.js";
 
 type ProcessContents = { steps: ProcessStep[]; relationships: ProcessStepRelationship[]; layout: ProcessStepMapLayout };
 export type SavedMapProcess = { processID: string; name: string; folderID: string };
 
-export function ProcessMapCreateProcess({ apiBase, companyID, processID, firstStep, initialFolderID, folders, foldersLoading, active, onSaved, onBack, onBusyChange, hoverModeEnabled, editorWidth, onEditorWidthChange }: {
+export function ProcessMapCreateProcess({ apiBase, companyID, processID, firstStep, initialFolderID, folders, foldersLoading, active, onSaved, onBack, onBusyChange, hoverModeEnabled, editorWidth, onEditorWidthChange, stepEditorPlacement, onStepEditorPlacementChange, onStepEditorReturn }: {
   apiBase: string; companyID: string; processID: string; firstStep: boolean; initialFolderID: string;
   folders: CompanyExplorerFolder[]; foldersLoading: boolean; active: boolean;
   onSaved: (process: SavedMapProcess, response?: CompanyExplorerWorkspaceEntityBatchResponse) => void; onBack: () => void;
@@ -24,6 +25,9 @@ export function ProcessMapCreateProcess({ apiBase, companyID, processID, firstSt
   hoverModeEnabled: boolean;
   editorWidth: number;
   onEditorWidthChange: (width: number) => void;
+  stepEditorPlacement?: ProcessStepEditorPlacement | null;
+  onStepEditorPlacementChange?: (placement: ProcessStepEditorPlacement | null) => void;
+  onStepEditorReturn?: () => void;
 }) {
   const [name, setName] = useState("");
   const [editingName, setEditingName] = useState(false);
@@ -166,9 +170,9 @@ export function ProcessMapCreateProcess({ apiBase, companyID, processID, firstSt
         {(!name.trim() || !selectedFolder) && <span className="process-map-workspace__status">{!name.trim() ? "Name this Process in the path." : "Choose a Folder in the path."}</span>}
       </div>
     </div>
-    <ProcessMapDetails key={processID} apiBase={apiBase} companyID={companyID} processID={processID} isNew canEdit={active && !saving} disabled={saving} onChange={updateDetails} onBusyChange={setDetailsBusy} steps={contents.steps} onStepBodyChange={updateStepBody} focusStepID={focusStepID} editorWidth={editorWidth} onEditorWidthChange={onEditorWidthChange} />
+    <ProcessMapDetails key={processID} apiBase={apiBase} companyID={companyID} processID={processID} isNew canEdit={active && !saving} disabled={saving} onChange={updateDetails} onBusyChange={setDetailsBusy} steps={contents.steps} onStepBodyChange={updateStepBody} focusStepID={focusStepID} editorWidth={editorWidth} onEditorWidthChange={onEditorWidthChange} stepEditorPlacement={stepEditorPlacement} onStepEditorReturn={onStepEditorReturn} />
     {error && <div role="alert" className="process-map-authoring-error">{error} Your changes are still here. If Save already completed, find the saved Process; later changes will be left behind. <button type="button" disabled={saving || editorBusy || detailsBusy} onClick={() => { void openSavedVersion(); }}>Find saved Process</button></div>}
-    <ProcessStepMapEditor steps={contents.steps} relationships={contents.relationships} canEdit={active && !saving} commands={commands} onBusyChange={setEditorBusy} saveMode="new" processName={name} initialEditingStepID={firstStep ? contents.steps[0]?.process_step_id : undefined} hoverModeEnabled={hoverModeEnabled} authoring onStepCreated={setFocusStepID}
+    <ProcessStepMapEditor steps={contents.steps} relationships={contents.relationships} canEdit={active && !saving} commands={commands} onBusyChange={setEditorBusy} saveMode="new" processName={name} initialEditingStepID={firstStep ? contents.steps[0]?.process_step_id : undefined} hoverModeEnabled={hoverModeEnabled} authoring onStepCreated={setFocusStepID} stepEditorPlacement={stepEditorPlacement} onStepEditorPlacementChange={onStepEditorPlacementChange}
       renderActions={({ createStep, disabled }) => <button type="button" className="process-map-workspace__add-step" aria-label="+ Create Step" title="Create Step" disabled={disabled} onClick={createStep}>+</button>} />
   </section>;
 }

@@ -9,6 +9,7 @@ import { orderedProcessSteps, type ProcessStep, type ProcessWorkSnapshot } from 
 import { createCoalescedCanonicalRefresh } from "../realtime/coalescedCanonicalRefresh.js";
 import { subscribeRealtimeScope } from "../realtime/realtimeWebSocket.js";
 import { scheduleTransientInformationFocus } from "./transientInformationFocus.js";
+import { ProcessStepInstructionEditor, type ProcessStepEditorPlacement } from "./ProcessStepInstructionEditor.js";
 import "./processStepInstructions.css";
 
 const LazyMangoTiptapEditor = React.lazy(async () => {
@@ -20,6 +21,8 @@ export type LogicGateTiptapEditorSurfaceProps = Omit<MangoTiptapEditorProps, "re
   apiBase: string;
   steps?: readonly ProcessStep[];
   onStepBodyChange?: (stepID: string, body: MangoTiptapDocument) => void;
+  stepEditorPlacement?: ProcessStepEditorPlacement | null;
+  onStepEditorReturn?: () => void;
   section?: "overview" | "steps";
   focusInformationID?: string;
   focusMentionUserID?: string;
@@ -27,7 +30,7 @@ export type LogicGateTiptapEditorSurfaceProps = Omit<MangoTiptapEditorProps, "re
 };
 
 export const LogicGateTiptapEditorSurface: React.FC<LogicGateTiptapEditorSurfaceProps> = ({
-  apiBase, steps: localSteps, onStepBodyChange, section, focusInformationID, focusMentionUserID, focusRequestID,
+  apiBase, steps: localSteps, onStepBodyChange, stepEditorPlacement, onStepEditorReturn, section, focusInformationID, focusMentionUserID, focusRequestID,
   leadingContent, className, style, onSaveStateChange, onFocus, ...props
 }) => {
   const { companyID, resourceID: processID, documentID, saveMode = "server" } = props;
@@ -127,6 +130,7 @@ export const LogicGateTiptapEditorSurface: React.FC<LogicGateTiptapEditorSurface
     onSelectionTextAlignmentChange: props.onSelectionTextAlignmentChange,
   };
   const canEdit = props.editable !== false && (saveMode === "local" || snapshot?.permissions.can_edit === true);
+  const StepEditor = onStepEditorReturn ? ProcessStepInstructionEditor : LazyMangoTiptapEditor;
   const documentCallbacks = (id: string) => ({
     onError: (message: string) => { if (isCurrentDocument(id)) props.onError?.(message); },
     onRecoveryStorageError: (message: string) => { if (isCurrentDocument(id)) props.onRecoveryStorageError?.(message); },
@@ -154,10 +158,11 @@ export const LogicGateTiptapEditorSurface: React.FC<LogicGateTiptapEditorSurface
           <h3><span className="mango-process-instructions__number">{index + 1}</span>{step.name}</h3>
           {saveMode !== "local" && <EditorSaveStatusIcon compact storageKey={mangoTiptapPendingStorageKey({ companyID, resourceType: "process_step", resourceID: step.process_step_id, documentID: step.process_step_id })} />}
         </div>
-        <LazyMangoTiptapEditor {...formattingProps}
+        <StepEditor {...formattingProps}
           companyID={companyID} resourceType="process_step" resourceID={step.process_step_id} documentID={step.process_step_id}
           currentUserID={props.currentUserID} requestJSON={props.requestJSON} saveMode={saveMode}
           value={step.body_json ? JSON.stringify(step.body_json) : undefined}
+          body={step.body_json} placement={stepEditorPlacement?.stepID === step.process_step_id ? stepEditorPlacement : null} onReturn={onStepEditorReturn}
           editable={canEdit}
           ariaLabel="Step instructions" placeholder="Write instructions for this step…"
           style={{ minHeight: 112 }} attachmentContext={attachmentContext} mentionUsers={props.mentionUsers}

@@ -256,7 +256,7 @@
 254. Spatial candidate filtering MUST include both real placement bounds and the restricted 4-by-3 footprint before resolving and reusing placement and parent permissions.
 255. A complete tile read MUST keep placements and traces independent while preserving endpoint authorization, crossing traces, clipping, and detail eligibility.
 256. The focused map omits RACI role cards without changing existing assignments or permissions.
-257. The focused map keeps its existing SOP editor open in a floating right-hand column without reducing the full workspace canvas or adding an Editor disclosure or QCD scorecard.
+257. The focused map keeps its existing SOP editor open in a floating right-hand column with a visible gap to the workspace edge, without reducing the full workspace canvas or adding an Editor disclosure or QCD scorecard.
 258. Changing a new Process destination expands its exact Folder path in Company Explorer.
 259. Successful creation refreshes the existing map and selects the exact committed Process without moving an established camera.
 260. Successful creation reveals and selects the Process in its expanded Explorer Folder without opening the Board.

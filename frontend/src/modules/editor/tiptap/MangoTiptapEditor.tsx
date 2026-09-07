@@ -41,6 +41,8 @@ import {
   captureMangoTiptapPointerBookmark,
   preserveMangoTiptapCaretScroll,
   resolveMangoTiptapPointerBookmark,
+  type MangoTiptapPointerActivationRequest,
+  type MangoTiptapPointerBookmark,
 } from "./mangoTiptapPointerActivation.js";
 
 import { MangoEditorLifecycle, type MangoEditorLifecycleSnapshot } from "../editorLifecycle";
@@ -187,6 +189,7 @@ export type MangoTiptapEditorProps = {
   onEntityLink?: (entity: EditorEntityLink) => Promise<void>;
   annotations?: MangoTiptapAnnotation[];
   target?: MangoTiptapTarget | null;
+  pointerActivation?: MangoTiptapPointerActivationRequest | null;
   onTargetHandled?: (requestID: number) => void;
   formattingControllerRef?:
     | React.MutableRefObject<EditorDocumentFormattingController | null>
@@ -826,6 +829,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   annotations = EMPTY_ANNOTATIONS,
   onEntityLink,
   target,
+  pointerActivation,
   onTargetHandled,
   formattingControllerRef,
   formattingControllerActive = true,
@@ -887,6 +891,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const [editorActive, setEditorActive] = useState(false);
   const [liveSurfaceReady, setLiveSurfaceReady] = useState(false);
   const pointerActivationPendingRef = useRef(false);
+  const pointerActivationSequenceRef = useRef(0);
   const selectionPointerDownRef = useRef(false);
   const [document, setDocument] = useState(initial.document);
   const [error, setError] = useState(initial.error ?? "");
@@ -1261,26 +1266,23 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     }
   }, [prepare, saveMode]);
 
-  const activateFromPointer = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
-    const target = event.target instanceof Element ? event.target : null;
-    if (target?.closest('[data-mango-tiptap-leading-content="true"]')) return;
-    if (target?.closest('[data-mango-entity-link="true"]')) return;
-    event.preventDefault();
+  const activateAtPointer = useCallback((root: HTMLDivElement, coordinates: { left: number; top: number }, pointerBookmark: MangoTiptapPointerBookmark | null) => {
+    const activationSequence = ++pointerActivationSequenceRef.current;
     pointerActivationPendingRef.current = true;
-    setLiveSurfaceReady(false);
-    const coordinates = { left: event.clientX, top: event.clientY };
-    const root = event.currentTarget;
-    const pointerBookmark = captureMangoTiptapPointerBookmark(root, event.target, coordinates);
+    if (!editorRef.current) setLiveSurfaceReady(false);
     const preservedScrollTop = root.scrollTop;
     const preservedScrollLeft = root.scrollLeft;
     void activate().then(() => {
+      if (activationSequence !== pointerActivationSequenceRef.current || !root.isConnected) return;
+      const view = root.ownerDocument.defaultView;
+      if (!view) return;
       let attempts = 0;
       const focusAtPointer = () => {
+        if (activationSequence !== pointerActivationSequenceRef.current || !root.isConnected) return;
         const editor = editorRef.current;
         if (!editor || !root.contains(editor.view.dom)) {
           attempts += 1;
-          if (attempts < 8) window.requestAnimationFrame(focusAtPointer);
+          if (attempts < 8) view.requestAnimationFrame(focusAtPointer);
           else pointerActivationPendingRef.current = false;
           return;
         }
@@ -1304,14 +1306,33 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         root.scrollLeft = preservedScrollLeft;
         pointerActivationPendingRef.current = false;
         setLiveSurfaceReady(true);
-        window.requestAnimationFrame(() => {
+        view.requestAnimationFrame(() => {
+          if (activationSequence !== pointerActivationSequenceRef.current || !root.isConnected) return;
           root.scrollTop = preservedScrollTop;
           root.scrollLeft = preservedScrollLeft;
         });
       };
-      window.requestAnimationFrame(focusAtPointer);
+      view.requestAnimationFrame(focusAtPointer);
     });
+    return () => {
+      if (activationSequence !== pointerActivationSequenceRef.current) return;
+      pointerActivationSequenceRef.current += 1;
+      pointerActivationPendingRef.current = false;
+    };
   }, [activate]);
+  const activateFromPointer = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('[data-mango-tiptap-leading-content="true"]')) return;
+    if (target?.closest('[data-mango-entity-link="true"]')) return;
+    event.preventDefault();
+    const coordinates = { left: event.clientX, top: event.clientY };
+    activateAtPointer(event.currentTarget, coordinates, captureMangoTiptapPointerBookmark(event.currentTarget, event.target, coordinates));
+  }, [activateAtPointer]);
+  useEffect(() => {
+    if (!pointerActivation || !rootRef.current) return undefined;
+    return activateAtPointer(rootRef.current, pointerActivation.coordinates, pointerActivation.bookmark);
+  }, [activateAtPointer, pointerActivation]);
   const activateFromNonLeadingContent = useCallback((event: React.SyntheticEvent<HTMLDivElement>) => {
     const target = event.target instanceof Element ? event.target : null;
     if (target?.closest('[data-mango-tiptap-leading-content="true"]')) return;

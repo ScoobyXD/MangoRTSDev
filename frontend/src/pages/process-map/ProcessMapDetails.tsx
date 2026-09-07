@@ -9,6 +9,7 @@ import { editorSaveNeedsFailureAttention, type EditorSaveState } from "../../mod
 import { getLogicGateInformationProjectionSingleFlight, getLogicGateRecordSingleFlight, invalidateLogicGateRecordStoreCaches } from "../../modules/logic-gates/logicGateRecordStore.js";
 import { canEditResourceAccess } from "../../modules/nodes/types.js";
 import type { ProcessStep } from "../../modules/kanban/processWork.js";
+import type { ProcessStepEditorPlacement } from "../../modules/editor/ProcessStepInstructionEditor.js";
 import "./processMapDetails.css";
 
 export type ProcessMapDetailsContents = { editor_document?: MangoTiptapDocument };
@@ -28,9 +29,11 @@ export type ProcessMapDetailsProps = {
   focusStepID?: string;
   editorWidth: number;
   onEditorWidthChange: (width: number) => void;
+  stepEditorPlacement?: ProcessStepEditorPlacement | null;
+  onStepEditorReturn?: () => void;
 };
 
-export function ProcessMapDetails({ apiBase, companyID, processID, isNew = false, canEdit = true, disabled = false, refreshVersion = 0, onChange, onBusyChange, steps, onStepBodyChange, focusStepID, editorWidth, onEditorWidthChange }: ProcessMapDetailsProps) {
+export function ProcessMapDetails({ apiBase, companyID, processID, isNew = false, canEdit = true, disabled = false, refreshVersion = 0, onChange, onBusyChange, steps, onStepBodyChange, focusStepID, editorWidth, onEditorWidthChange, stepEditorPlacement, onStepEditorReturn }: ProcessMapDetailsProps) {
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const [users, setUsers] = useState<CompanyUser[]>([]);
   const [resourceCanEdit, setResourceCanEdit] = useState(isNew);
@@ -44,7 +47,7 @@ export function ProcessMapDetails({ apiBase, companyID, processID, isNew = false
   const panelID = useId();
   const panelRef = useRef<HTMLElement>(null);
   const resize = useRef<{ pointerID: number; startX: number; width: number } | null>(null);
-  const clampWidth = (width: number) => Math.min(Math.max(240, width), Math.max(240, (panelRef.current?.closest(".process-map-workspace")?.getBoundingClientRect().width || window.innerWidth) - 320));
+  const clampWidth = (width: number) => Math.min(Math.max(240, width), Math.max(240, (panelRef.current?.closest(".process-map-workspace")?.getBoundingClientRect().width || window.innerWidth) - 336));
   const contents = useRef<ProcessMapDetailsContents>({});
   const live = useRef(true);
   const changeCallback = useRef(onChange);
@@ -157,6 +160,7 @@ export function ProcessMapDetails({ apiBase, companyID, processID, isNew = false
         <LogicGateTiptapEditorSurface key={`${processID}:${documentID}`} apiBase={apiBase} companyID={companyID} resourceID={processID} documentID={documentID}
           section={section} focusInformationID={section === "steps" ? focusStepID : undefined}
           steps={steps} onStepBodyChange={onStepBodyChange}
+          stepEditorPlacement={stepEditorPlacement} onStepEditorReturn={onStepEditorReturn}
           dataAttributes={{ "data-process-sop-document-id": documentID }}
           value={isNew && contents.current.editor_document ? JSON.stringify(contents.current.editor_document) : undefined}
           saveMode={isNew ? "local" : "server"} requestJSON={requestJSON} editable={writeEnabled}

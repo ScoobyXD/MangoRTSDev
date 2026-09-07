@@ -4,6 +4,7 @@ import { ProcessStepMap, type ProcessStepMapEditorProps } from "../../modules/ka
 import { clearProcessWorkCache, getCachedProcessWork, getProcessWorkSingleFlight, invalidateLogicGateArenaViewCache, PROCESS_WORK_UPDATED_EVENT } from "../../modules/kanban/kanbanApi.js";
 import type { ProcessWorkSnapshot } from "../../modules/kanban/processWork.js";
 import type { MangoTiptapDocument } from "../../modules/editor/tiptap/mangoTiptapDocument.js";
+import type { ProcessStepEditorPlacement } from "../../modules/editor/ProcessStepInstructionEditor.js";
 import { createCoalescedCanonicalRefresh } from "../../modules/realtime/coalescedCanonicalRefresh.js";
 import { subscribeRealtimeScope } from "../../modules/realtime/realtimeWebSocket.js";
 
@@ -13,6 +14,8 @@ export type ProcessMapSavedProcessProps = {
   processID: string;
   onBusyChange?: (busy: boolean) => void;
   hoverModeEnabled?: boolean;
+  stepEditorPlacement?: ProcessStepEditorPlacement | null;
+  onStepEditorPlacementChange?: (placement: ProcessStepEditorPlacement | null) => void;
   renderActions?: ProcessStepMapEditorProps["renderActions"];
   renderDetails?: (canEdit: boolean, refreshVersion: number, focusStepID: string | undefined, onStepBodyChange: (stepID: string, body: MangoTiptapDocument) => void) => ReactNode;
 };
@@ -21,7 +24,7 @@ export function ProcessMapSavedProcess(props: ProcessMapSavedProcessProps) {
   return <SavedProcess key={`${props.apiBase}:${props.companyID}:${props.processID}`} {...props} />;
 }
 
-function SavedProcess({ apiBase, companyID, processID, onBusyChange, hoverModeEnabled, renderActions, renderDetails }: ProcessMapSavedProcessProps) {
+function SavedProcess({ apiBase, companyID, processID, onBusyChange, hoverModeEnabled, renderActions, renderDetails, stepEditorPlacement, onStepEditorPlacementChange }: ProcessMapSavedProcessProps) {
   const [snapshot, setSnapshot] = useState<ProcessWorkSnapshot | null>(() => getCachedProcessWork(apiBase, companyID, processID)?.contents ?? null);
   const [loading, setLoading] = useState(true);
   const [mapBusy, setMapBusy] = useState(false);
@@ -104,6 +107,7 @@ function SavedProcess({ apiBase, companyID, processID, onBusyChange, hoverModeEn
     {!snapshot && renderActions?.({ createStep: () => {}, disabled: true, busy: loading })}
     {snapshot && <ProcessStepMap apiBase={apiBase} companyID={companyID} processID={processID}
       steps={snapshot.steps} relationships={snapshot.relationships} canEdit={!loading && !error && snapshot.permissions.can_edit} processName={snapshot.logic_gate.header}
+      stepEditorPlacement={stepEditorPlacement} onStepEditorPlacementChange={onStepEditorPlacementChange}
       onChanged={() => refreshRef.current()} onBusyChange={setMapBusy} hoverModeEnabled={hoverModeEnabled} authoring onStepCreated={setFocusStepID} renderActions={renderActions} />}
   </section>;
 }
