@@ -40,6 +40,13 @@ func TestAIEarlyActionResolvesTheExactAdmissionKey(t *testing.T) {
 		t.Fatalf("pending admission: %d %s", w.Code, w.Body)
 	}
 	native := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		prefix := "/p/" + f.route.profileName()
+		if !strings.HasPrefix(r.URL.Path, prefix+"/") {
+			t.Errorf("request escaped exact native profile: %s", r.URL.Path)
+			w.WriteHeader(404)
+			return
+		}
+		r.URL.Path = strings.TrimPrefix(r.URL.Path, prefix)
 		switch r.URL.Path {
 		case "/v1/runs/run_test":
 			writeJSON(w, 200, map[string]string{"run_id": "run_test", "session_id": aiTestRunID, "status": "running"})
@@ -109,5 +116,69 @@ func TestAINativeQueuedExecutionKeepsLocalAdmission(t *testing.T) {
 	w := f.request(t, http.MethodGet, "/v1/ai/runs/"+aiTestRunID+"?company_id="+f.route.CompanyID, nil, f.user)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"status":"running"`) {
 		t.Fatalf("native queued admission: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestAIHistoryRecoveryRequiresTerminalAdmissionAndRetainsNativeMessages(t *testing.T) {
+	f := newAIFixture(t)
+	if w := f.submit(t); w.Code != 202 {
+		t.Fatalf("admission: %d %s", w.Code, w.Body)
+	}
+	recovered := aiHistoryBody("run_test:recovery:fixture:history.recovered", "history.recovered", map[string]any{})
+	if w := f.history(t, recovered, f.route.CallbackKey); w.Code != 409 {
+		t.Fatalf("nonterminal recovery: %d %s", w.Code, w.Body)
+	}
+	run, err := f.repo.GetAIRun(context.Background(), f.route.CompanyID, f.user.UserID, aiTestRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range run.History {
+		if event.Type == "history.recovered" {
+			t.Fatal("nonterminal recovery marker was saved")
+		}
+	}
+	if _, err = f.repo.SetAIRunStatus(context.Background(), f.route.CompanyID, f.user.UserID, aiTestRunID, "completed"); err != nil {
+		t.Fatal(err)
+	}
+	// A historical admitted execution can be absent from the current gateway.
+	f.s.hermesRoutes[0].URL = "http://127.0.0.1:1"
+	snapshot := aiTranscriptBody()
+	snapshot["event_id"] = "run_test:recovery:fixture:snapshot:messages.saved"
+	if w := f.history(t, snapshot, f.route.CallbackKey); w.Code != 200 {
+		t.Fatalf("recovered snapshot: %d %s", w.Code, w.Body)
+	}
+	for range 2 {
+		if w := f.history(t, recovered, f.route.CallbackKey); w.Code != 200 {
+			t.Fatalf("recovered marker retry: %d %s", w.Code, w.Body)
+		}
+	}
+	run, err = f.repo.GetAIRun(context.Background(), f.route.CompanyID, f.user.UserID, aiTestRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	markers := 0
+	for _, event := range run.History {
+		if event.Type == "history.recovered" {
+			markers++
+		}
+		if event.Type == "run.finished" || event.Type == "model.completed" || event.Type == "tool.completed" {
+			t.Fatalf("repair invented an original execution observation: %s", event.Type)
+		}
+	}
+	if markers != 1 || run.Status != "completed" {
+		t.Fatalf("recovery changed execution state or duplicated its marker: %+v", run)
+	}
+	messages, err := f.repo.ListAIMessages(context.Background(), f.route.CompanyID, f.user.UserID, aiTestRunID, 100, 0)
+	if err != nil || len(messages) != 2 || messages[0].MessageID != 1 || messages[1].MessageID != 3 || messages[1].Role != "ai" || messages[1].RunID != "" {
+		t.Fatalf("repair changed native message identity: %+v %v", messages, err)
+	}
+	recovered["data"] = map[string]any{"completed": true}
+	if w := f.history(t, recovered, f.route.CallbackKey); w.Code != 400 {
+		t.Fatalf("recovery accepted invented completion data: %d %s", w.Code, w.Body)
+	}
+	recovered["data"] = map[string]any{}
+	recovered["session_id"] = "wrong-session"
+	if w := f.history(t, recovered, f.route.CallbackKey); w.Code != 404 {
+		t.Fatalf("recovery escaped exact admitted session: %d %s", w.Code, w.Body)
 	}
 }

@@ -22,7 +22,9 @@ from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from entrypoint import bind_home, lock_native_scope, runtime_config
+from entrypoint import configure_gateway
+from mango_scope import profile_name, derive_key
+from concurrent.futures import ThreadPoolExecutor
 
 REVISION = "693641aa8b4359c602283bdbbc14041e03bc47bc"
 UUID_A = "11111111-1111-4111-8111-111111111111"
@@ -60,11 +62,13 @@ class FixtureServer(BaseHTTPRequestHandler):
                 if HISTORY_RETRIES_REMAINING:
                     HISTORY_RETRIES_REMAINING -= 1
                     return self.send_json({"error": "fixture_admission_not_bound_yet"}, status=503)
-                HISTORY.append(payload)
+                HISTORY.append({**payload, "credential": self.headers.get("Authorization")})
                 HISTORY_CHANGED.notify_all()
             return self.send_json({"saved": True})
         if self.path == "/internal/hermes/actions":
-            CALLBACKS.append(payload)
+            CALLBACKS.append({**payload, "credential": self.headers.get("Authorization")})
+            if payload["action"] == "mango_list_processes":
+                return self.send_json({"processes": [{"logic_gate_id": UUID_A, "name": "Fixture Process"}]})
             return self.send_json({"node_id": UUID_A, "created": True})
         PROVIDER_PATHS.append(self.path)
         if self.path != "/v1/responses":
@@ -74,13 +78,19 @@ class FixtureServer(BaseHTTPRequestHandler):
         content = payload.get("input", [])
         process_match = re.search(r"MANGO_PROCESS_ID=([0-9a-f-]{36})", json.dumps(content))
         step_match = re.search(r"MANGO_STEP_ID=([0-9a-f-]{36})", json.dumps(content))
+        if process_match:
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "function_call_output" and item.get("call_id") == "call_process_list":
+                    assert process_match[1] in str(item.get("output")), "The real Mango process listing did not return its permitted Process."
         if "fixture stop" in json.dumps(content):
             STOP_STARTED.set()
             STOP_RELEASE.wait(timeout=20)
         action = "fixture action" in json.dumps(content) and not any(
             item.get("type") == "function_call_output" for item in content if isinstance(item, dict))
         if action:
-            output = [{"type": "function_call", "id": "fc_mango", "call_id": "call_mango_fixture",
+            output = [{"type": "function_call", "id": "fc_list", "call_id": "call_process_list",
+                "name": "mango_list_processes", "status": "completed", "arguments": "{}"},
+                {"type": "function_call", "id": "fc_mango", "call_id": "call_mango_fixture",
                 "name": "mango_create_node", "status": "completed", "arguments": json.dumps({
                     "logic_gate_id": process_match[1] if process_match else UUID_A,
                     "process_step_id": step_match[1] if step_match else UUID_B, "title": "Fixture Node"})},
@@ -151,19 +161,21 @@ def request(port, key, path, body=None, idempotency=None, host="127.0.0.1"):
 
 
 @contextmanager
-def native_gateway(source, home, fixture_port, key, root, *, host="127.0.0.1", callback_url=None, callback_key=None, port=None):
+def native_gateway(source, home, fixture_port, key, root, *, pairs, callback_url=None, callback_key=None, port=None):
     port = port or free_port()
     env = {name: os.environ[name] for name in ("PATH", "SystemRoot", "WINDIR", "TEMP", "TMP") if name in os.environ}
     env.update({"PYTHONPATH": os.pathsep.join([str(root / "guard"), str(Path(__file__).resolve().parents[1]), str(source)]),
         "HERMES_HOME": str(home), "HOME": str(home), "USERPROFILE": str(home), "LOCALAPPDATA": str(home),
         "HERMES_TEST_ISOLATION": "1", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUNBUFFERED": "1",
-        "API_SERVER_ENABLED": "true", "API_SERVER_HOST": host, "API_SERVER_PORT": str(port),
+        "API_SERVER_ENABLED": "true", "API_SERVER_HOST": "127.0.0.1", "API_SERVER_PORT": str(port),
         "API_SERVER_KEY": key, "OPENAI_API_KEY": secrets.token_hex(24),
         "OPENAI_BASE_URL": f"http://127.0.0.1:{fixture_port}/v1",
         "MANGO_CALLBACK_URL": callback_url or f"http://127.0.0.1:{fixture_port}/internal/hermes/actions",
-        "MANGO_CALLBACK_KEY": callback_key or secrets.token_hex(24), "NO_PROXY": "*"})
-    lock_native_scope(home, env)
-    log_path = root / (home.name + "-gateway.log")
+        "MANGO_CALLBACK_KEY": callback_key or secrets.token_hex(24), "NO_PROXY": "*",
+        "MANGO_HERMES_PROFILES": json.dumps(pairs),
+        "MANGO_HERMES_PROFILE_VOLUMES": json.dumps({profile_name(**pair): None for pair in pairs})})
+    configure_gateway(home, env)
+    log_path = root / "gateway.log"
     with log_path.open("w", encoding="utf-8") as log:
         process = subprocess.Popen([sys.executable, "-m", "hermes_cli.main", "gateway"], cwd=source, env=env,
             stdout=log, stderr=subprocess.STDOUT, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -171,15 +183,19 @@ def native_gateway(source, home, fixture_port, key, root, *, host="127.0.0.1", c
             deadline = time.monotonic() + 45
             while time.monotonic() < deadline:
                 if process.poll() is not None:
-                    raise RuntimeError("Native gateway exited:\n" + log_path.read_text(encoding="utf-8")[-9000:])
+                    raise RuntimeError("Native gateway exited:\n" + log_path.read_text(encoding="utf-8")[-10000:])
                 try:
-                    request(port, key, "/health", host=host)
+                    request(port, key, "/health")
                     break
                 except (URLError, ConnectionError, TimeoutError):
                     time.sleep(0.2)
             else:
-                raise RuntimeError("Native gateway not ready:\n" + log_path.read_text(encoding="utf-8")[-9000:])
-            yield port
+                raise RuntimeError("Native gateway not ready:\n" + log_path.read_text(encoding="utf-8")[-10000:])
+            try:
+                yield port
+            except Exception:
+                print(log_path.read_text(encoding="utf-8")[-10000:])
+                raise
         finally:
             process.terminate()
             try:
@@ -189,18 +205,14 @@ def native_gateway(source, home, fixture_port, key, root, *, host="127.0.0.1", c
                 process.wait(timeout=5)
 
 
-def prepare_home(home, company, user):
-    bind_home(home, company, user)
-    (home / "config.yaml").write_text(json.dumps(runtime_config("gpt-5.4-mini-2026-03-17")), encoding="utf-8")
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", type=Path, required=True)
-    parser.add_argument("--go-integration", action="store_true", help="Prove the real Go Node command through a WSL fixture test.")
+    parser.add_argument("--go-integration", action="store_true")
+    parser.add_argument("--go-test-binary", type=Path, help="Optional isolated Linux Go HTTP test binary, built with go test -c.")
     args = parser.parse_args()
     source = args.source.resolve()
-    revision = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
+    revision = subprocess.check_output(["git", "-c", "safe.directory=" + str(source), "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
     assert revision == REVISION, "Use the reviewed pinned upstream source."
     fixture = ThreadingHTTPServer(("127.0.0.1", 0), FixtureServer)
     threading.Thread(target=fixture.serve_forever, daemon=True).start()
@@ -208,46 +220,39 @@ def main():
         root = Path(directory)
         guard = root / "guard"
         guard.mkdir()
-        if args.go_integration and os.name == "nt":
-            raise RuntimeError("Run inside WSL Ubuntu with the pinned Python environment.")
         allowed_hosts = ("127.0.0.1", "localhost", "::1", None)
         (guard / "sitecustomize.py").write_text(
             "import socket\n_original=socket.getaddrinfo\ndef _local(host,*args,**kwargs):\n"
             f" if host not in {allowed_hosts!r}: raise OSError('Non-fixture network disabled in Hermes smoke test')\n"
             " return _original(host,*args,**kwargs)\nsocket.getaddrinfo=_local\n", encoding="utf-8")
-        for name, company, user in (("tenant-a", UUID_A, UUID_B), ("tenant-b", UUID_B, UUID_A)):
-            prepare_home(root / name, company, user)
-        key = secrets.token_hex(24)
+        key, callback_key = secrets.token_hex(24), secrets.token_hex(24)
+        home = root / "gateway"
         if args.go_integration:
-            callback_port, callback_key, port = free_port(), secrets.token_hex(24), free_port()
+            if os.name == "nt":
+                raise RuntimeError("Run the Go fixture inside WSL or the isolated test container.")
+            callback_port, port = free_port(), free_port()
             scope_file = root / "go-scope.json"
-            assignments = [f"HERMES_NATIVE_URL=http://127.0.0.1:{port}", f"HERMES_NATIVE_KEY={key}",
-                f"MANGO_NATIVE_CALLBACK_PORT={callback_port}", f"MANGO_NATIVE_CALLBACK_KEY={callback_key}",
-                f"MANGO_NATIVE_SCOPE_FILE={scope_file}"]
+            env = dict(os.environ, HERMES_NATIVE_URL=f"http://127.0.0.1:{port}", HERMES_NATIVE_KEY=key,
+                MANGO_NATIVE_CALLBACK_PORT=str(callback_port), MANGO_NATIVE_CALLBACK_KEY=callback_key,
+                MANGO_NATIVE_SCOPE_FILE=str(scope_file))
+            command = ([str(args.go_test_binary), "-test.run=^TestAINativeRuntimeIntegration$", "-test.timeout=180s", "-test.v"]
+                if args.go_test_binary else ["/usr/local/go/bin/go", "test", "./internal/http", "-run", "^TestAINativeRuntimeIntegration$", "-count=1", "-timeout=180s", "-v"])
             backend = Path(__file__).resolve().parents[2] / "backend"
-            go_args = ["/usr/local/go/bin/go", "test", "./internal/http", "-run",
-                       "^TestAINativeRuntimeIntegration$", "-count=1", "-timeout=180s", "-v"]
-            command = ["env"] + assignments + go_args
-            process = subprocess.Popen(command, cwd=backend, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            process = subprocess.Popen(command, cwd=backend if backend.exists() else root, env=env,
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             try:
                 deadline = time.monotonic() + 75
                 while not scope_file.exists():
                     if process.poll() is not None or time.monotonic() >= deadline:
                         process.terminate()
                         output, _ = process.communicate(timeout=15)
-                        raise RuntimeError("Go fixture did not provide its scope:\n" + output)
+                        raise RuntimeError("Go fixture did not provide scope:\n" + output)
                     time.sleep(0.2)
-                scope = json.loads(scope_file.read_text(encoding="utf-8"))
-                prepare_home(root / "go-tenant", scope["company_id"], scope["user_id"])
-                with native_gateway(source, root / "go-tenant", fixture.server_port, key, root,
-                        callback_url=f"http://127.0.0.1:{callback_port}/internal/hermes/actions",
-                        callback_key=callback_key, port=port):
+                pair = json.loads(scope_file.read_text())
+                with native_gateway(source, home, fixture.server_port, key, root, pairs=[pair],
+                        callback_url=f"http://127.0.0.1:{callback_port}/internal/hermes/actions", callback_key=callback_key, port=port):
                     output, _ = process.communicate(timeout=180)
-                    assert process.returncode == 0, output + "\nProvider paths: " + str(PROVIDER_PATHS) + "\nProvider request shapes: " + str([
-                        {"keys": list(payload), "stream": payload.get("stream"),
-                         "input_types": [item.get("type") for item in payload.get("input", []) if isinstance(item, dict)]}
-                        for payload in PROVIDER_REQUESTS])
+                    assert process.returncode == 0, output
                     assert "--- PASS: TestAINativeRuntimeIntegration" in output, output
                     print(output)
             finally:
@@ -256,85 +261,68 @@ def main():
                     process.wait(timeout=15)
             fixture.shutdown()
             fixture.server_close()
-            print("Native Hermes -> authenticated Go -> existing Node command smoke passed.")
+            print("Native shared Hermes -> authenticated Go -> canonical Node command passed.")
             return
-        body = {"input": "fixture action", "session_id": "mango-smoke-session", "provider": "openai-api"}
-        with native_gateway(source, root / "tenant-a", fixture.server_port, key, root) as port:
-            capabilities = request(port, key, "/v1/capabilities")
-            assert capabilities["features"]["runs_idempotency"]["durable"] is True
-            tools = request(port, key, "/v1/toolsets")
-            assert "mango_create_node" in json.dumps(tools), tools
-            started = request(port, key, "/v1/runs", body, "mango-smoke-request")
-            run_id = started["run_id"]
-            events = request(port, key, f"/v1/runs/{run_id}/events")
-            status = request(port, key, f"/v1/runs/{run_id}")
-            assert status["status"] == "completed", status
-            assert any(event["event"] == "message.delta" for event in events), events
-            assert any(event["event"] == "run.completed" for event in events), events
-            assert len(CALLBACKS) == 1, {"callbacks": CALLBACKS, "events": events,
-                "messages": request(port, key, "/api/sessions/mango-smoke-session/messages")}
-            assert CALLBACKS[0]["run_id"] == run_id
-            assert CALLBACKS[0]["session_id"] == body["session_id"]
-            assert CALLBACKS[0]["tool_call_id"] == "call_mango_fixture"
-            assert "company_id" not in CALLBACKS[0]["arguments"]
-            history = wait_history(run_id, "run.finished")
-            assert {event["data"].get("tool_name") for event in history if event["type"] == "tool.completed"} >= {"mango_create_node", "memory", "skill_manage"}, history
-            assert history[-1]["data"].get("output") == "Fixture reply complete.", history
-            snapshots = [event for event in history if event.get("messages_complete")]
-            assert snapshots and snapshots[-1]["message_ids"], history
-            assert snapshots[-1]["chat_created_at"], snapshots[-1]
-            native_messages = [message for event in history for message in event.get("messages", [])]
-            assert all(isinstance(message["message_id"], int) for message in native_messages)
-            assert any(message["role"] == "assistant" and message["content"] == "Fixture reply complete." for message in native_messages), native_messages
-            assert request(port, key, "/v1/runs", body, "mango-smoke-request")["run_id"] == run_id
-            messages = request(port, key, "/api/sessions/mango-smoke-session/messages")
-            assert any(message["role"] == "assistant" for message in messages["data"]), messages
-            memory = root / "tenant-a" / "memories" / "MEMORY.md"
-            assert "Tenant A prefers green" in memory.read_text(encoding="utf-8")
-            skill = root / "tenant-a" / "skills" / "fixture-learning" / "SKILL.md"
-            assert "current tenant home" in skill.read_text(encoding="utf-8")
-            detached = request(port, key, "/v1/runs", {"input": "fixture history without browser",
-                "session_id": "mango-detached-session", "provider": "openai-api"}, "mango-detached-request")
-            detached_history = wait_history(detached["run_id"], "run.finished")
-            assert detached_history[-1]["data"].get("output") == "Fixture reply complete."
-            assert any(event.get("messages_complete") and event["message_ids"] for event in detached_history)
-            stopped = request(port, key, "/v1/runs", {"input": "fixture stop",
-                "session_id": "mango-stop-session", "provider": "openai-api"}, "mango-stop-request")
-            assert STOP_STARTED.wait(timeout=15), "Fake provider never saw the stop-test run."
+        pairs = [{"company_id": UUID_A, "user_id": UUID_B}, {"company_id": UUID_B, "user_id": UUID_B}]
+        names = [profile_name(**pair) for pair in pairs]
+        api_keys = [derive_key(key, "api", name) for name in names]
+        callback_keys = [derive_key(callback_key, "callback", name) for name in names]
+        body = {"input": "fixture action", "session_id": "mango-shared-session", "provider": "openai-api"}
+        def scoped(port, index, path, payload=None, identity=None):
+            return request(port, api_keys[index], "/p/" + names[index] + path, payload, identity)
+        with native_gateway(source, home, fixture.server_port, key, root, pairs=pairs, callback_key=callback_key) as port:
+            for index in range(2):
+                capabilities = scoped(port, index, "/v1/capabilities")
+                assert capabilities["features"]["runs_idempotency"]["durable"] is True
+                try:
+                    request(port, api_keys[1-index], "/p/" + names[index] + "/v1/capabilities")
+                except HTTPError as error:
+                    assert error.code == 401
+                else:
+                    raise AssertionError("A sibling key authorized another profile.")
+            # Same session and idempotency keys, one gateway and overlapping runs.
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = [pool.submit(scoped, port, i, "/v1/runs",
+                    body if i == 0 else {**body, "input": "fixture second tenant"}, "same-admission") for i in range(2)]
+                runs = [future.result()["run_id"] for future in futures]
+            assert runs[0] != runs[1]
+            for index, run_id in enumerate(runs):
+                events = scoped(port, index, f"/v1/runs/{run_id}/events")
+                assert any(event["event"] == "run.completed" for event in events), events
+                saved = wait_history(run_id, "run.finished")
+                assert {item["credential"] for item in saved} == {"Bearer " + callback_keys[index]}
+                assert any(item.get("messages_complete") and item["message_ids"] for item in saved), saved
+                assert saved[-1]["data"].get("output") == "Fixture reply complete.", saved
+                try:
+                    scoped(port, 1-index, f"/v1/runs/{run_id}")
+                except HTTPError as error:
+                    assert error.code == 404
+                else:
+                    raise AssertionError("Cross-profile run access succeeded.")
+            assert len(CALLBACKS) == 2, CALLBACKS
+            assert CALLBACKS[0]["credential"] == "Bearer " + callback_keys[0]
+            assert CALLBACKS[0]["run_id"] == runs[0]
+            first_home, second_home = [home / "profiles" / name for name in names]
+            assert "Tenant A prefers green" in (first_home / "memories" / "MEMORY.md").read_text()
+            assert "current tenant home" in (first_home / "skills" / "fixture-learning" / "SKILL.md").read_text()
+            assert not (second_home / "memories" / "MEMORY.md").exists()
+            assert not (second_home / "skills" / "fixture-learning").exists()
+            detached = scoped(port, 1, "/v1/runs", {"input": "fixture without browser", "session_id": "detached"}, "detached")
+            assert wait_history(detached["run_id"], "run.finished")[-1]["data"]["output"] == "Fixture reply complete."
+            stopped = scoped(port, 0, "/v1/runs", {"input": "fixture stop", "session_id": "stopped"}, "stopped")
+            assert STOP_STARTED.wait(timeout=15)
             try:
-                stop = request(port, key, f"/v1/runs/{stopped['run_id']}/stop", {})
-                assert stop["status"] in {"stopping", "cancelled"}, stop
+                scoped(port, 0, f"/v1/runs/{stopped['run_id']}/stop", {})
             finally:
                 STOP_RELEASE.set()
-            stopped_events = request(port, key, f"/v1/runs/{stopped['run_id']}/events")
-            assert any(event["event"] == "run.cancelled" for event in stopped_events), stopped_events
-        with native_gateway(source, root / "tenant-a", fixture.server_port, key, root) as port:
-            assert request(port, key, "/v1/runs", body, "mango-smoke-request")["run_id"] == run_id
-            assert request(port, key, "/api/sessions/mango-smoke-session/messages")["data"]
-            assert len(CALLBACKS) == 1
-        second_key = secrets.token_hex(24)
-        with native_gateway(source, root / "tenant-b", fixture.server_port, second_key, root) as port:
-            assert request(port, second_key, "/api/sessions")["data"] == []
-            assert not (root / "tenant-b" / "memories" / "MEMORY.md").exists()
-            assert not (root / "tenant-b" / "skills" / "fixture-learning").exists()
-            try:
-                request(port, second_key, "/api/sessions/mango-smoke-session/messages")
-            except HTTPError as error:
-                assert error.code == 404
-            else:
-                raise AssertionError("Second tenant read first tenant's transcript.")
-            before = len(PROVIDER_REQUESTS)
-            second = request(port, second_key, "/v1/runs", {"input": "fixture second tenant",
-                "session_id": "mango-other-session", "provider": "openai-api"}, "mango-other-request")
-            request(port, second_key, f"/v1/runs/{second['run_id']}/events")
-            assert "Tenant A prefers green" not in json.dumps(PROVIDER_REQUESTS[before:])
-        expected = {"memory", "skills_list", "skill_view", "skill_manage", "session_search",
-                    "mango_list_processes", "mango_get_process", "mango_create_node"}
-        actual = {tool.get("name") for payload in PROVIDER_REQUESTS for tool in payload.get("tools", [])}
-        assert actual <= expected, actual
+            assert any(event["event"] == "run.cancelled" for event in scoped(port, 0, f"/v1/runs/{stopped['run_id']}/events"))
+        with native_gateway(source, home, fixture.server_port, key, root, pairs=pairs, callback_key=callback_key) as port:
+            assert scoped(port, 0, "/v1/runs", body, "same-admission")["run_id"] == runs[0]
+            assert scoped(port, 0, "/api/sessions/mango-shared-session/messages")["data"]
+            assert len(CALLBACKS) == 2
     fixture.shutdown()
     fixture.server_close()
-    print("Pinned native HTTP smoke passed: streamed reply, trusted action callback, durable history without a browser, native message IDs, memory/skills, transcript, cancellation, restart replay, separate homes.")
+    print("Native shared gateway passed: concurrent profile auth/runs, isolated tools/history/memory/skills, detached delivery, Stop and restart replay.")
 
 
 if __name__ == "__main__":

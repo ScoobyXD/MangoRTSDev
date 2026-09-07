@@ -11,6 +11,7 @@ param(
   [string]$NylasFrontendRedirectURL = "http://localhost:5173/communications",
   [string]$HermesCompanyID = "",
   [string]$HermesEmail = "",
+  [switch]$RepairHermesHistory,
   [switch]$SkipCredentialExport,
   [switch]$SkipNylas,
   [switch]$StopExisting,
@@ -336,9 +337,13 @@ if ($ResetProcessMap) {
 }
 
 $hermesSettings = $null
+$hermesServiceCredentials = $null
 $hermesDocker = $null
 $HermesCompanyID = First-NonBlank @($HermesCompanyID, $MangoLocalHermesCompanyID)
 $HermesEmail = First-NonBlank @($HermesEmail, $MangoLocalHermesEmail)
+if ($RepairHermesHistory -and -not ($HermesCompanyID -or $HermesEmail)) {
+  throw "Configure a Mango Hermes account before using -RepairHermesHistory. See docs/setup/hermes-local.md."
+}
 if ($HermesCompanyID -or $HermesEmail) {
   if ($AwsProfile -ne 'mangorts-dev' -or $AwsRegion -ne 'us-west-1' -or
       (Get-OptionalTfvarString -Name 'environment' -Path $tfvarsPath -Default 'dev') -ne 'dev') {
@@ -367,9 +372,13 @@ if (-not [string]::IsNullOrWhiteSpace($localTunnelURL) -and -not $PSBoundParamet
 Set-LocalDatabaseEnvironment
 
 if ($null -ne $hermesDocker) {
-  $hermesScope = Resolve-LocalHermesScope -Email $HermesEmail -CompanyID $HermesCompanyID
-  $hermesSettings = Get-LocalHermesSettings -CompanyID $hermesScope.CompanyID -UserID $hermesScope.UserID -Docker $hermesDocker
+  $hermesScope = Resolve-LocalHermesScope -Email $HermesEmail -CompanyID $HermesCompanyID -RepairHermesHistory:$RepairHermesHistory
+  $hermesSettings = Get-LocalHermesSettings -CompanyID $hermesScope.CompanyID -UserID $hermesScope.UserID `
+    -Profiles $hermesScope.Profiles -ActiveRunCount $hermesScope.ActiveRunCount -HistoryRepairs $hermesScope.HistoryRepairs -Docker $hermesDocker
+  $hermesServiceCredentials = Get-LocalHermesServiceCredentials -Path $hermesSettings.CredentialsPath `
+    -RequireExisting:$hermesSettings.RequireExistingCredentials
   Write-Host "Hermes account: $($hermesScope.Email), company: $($hermesScope.CompanyName)"
+  if ($RepairHermesHistory) { Write-Host "Hermes history repair: $($hermesScope.HistoryRepairs.Count) admitted terminal runs selected for native transcript recovery." }
   if (-not $MangoLocalHermesCompanyID -and -not $PSBoundParameters.ContainsKey('HermesCompanyID')) {
     # Save only the validated, nonsecret selection; existing local settings stay intact.
     [IO.File]::AppendAllText($localConfigPath, "`r`n`$MangoLocalHermesCompanyID = '$($hermesScope.CompanyID)'`r`n", (New-Object Text.UTF8Encoding($false)))
@@ -583,8 +592,9 @@ try {
       -SecretID 'arn:aws:secretsmanager:us-west-1:686458136219:secret:mangorts/dev/openai-api-key-EaABNe' `
       -PropertyNames @('api_key', 'openai_api_key', 'OPENAI_API_KEY')
     try {
-      $hermesRuntime = Start-LocalHermes -Settings $hermesSettings -OpenAIKey $hermesOpenAIKey -StopExisting:$StopExisting
-    } finally { $hermesOpenAIKey = $null }
+      $hermesRuntime = Start-LocalHermes -Settings $hermesSettings -ServiceCredentials $hermesServiceCredentials `
+        -OpenAIKey $hermesOpenAIKey -StopExisting:$StopExisting
+    } finally { $hermesOpenAIKey = $null; $hermesServiceCredentials = $null }
   } elseif ([string]::IsNullOrWhiteSpace($env:MANGORTS_HERMES_ROUTES)) {
     Write-Host 'Hermes is not configured. One-time setup: docs/setup/hermes-local.md'
   }

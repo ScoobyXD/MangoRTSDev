@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import mango_history as history
+import mango_scope
 
 RUN = "run_" + "a" * 32
 SESSION = "history-fixture"
@@ -24,6 +25,14 @@ class HistoryTests(unittest.TestCase):
         self.context = patch.dict(sys.modules, {"gateway.session_context": context})
         self.context.start()
         self.addCleanup(self.context.stop)
+        constants = types.ModuleType("hermes_constants")
+        constants.get_hermes_home = lambda: Path("fixture-profile").resolve()
+        self.constants = patch.dict(sys.modules, {"hermes_constants": constants})
+        self.constants.start()
+        self.addCleanup(self.constants.stop)
+        binding = patch.object(mango_scope, "bound_profile", return_value="fixture-profile")
+        binding.start()
+        self.addCleanup(binding.stop)
         self.events = []
         outbox = MagicMock()
         outbox.enqueue.side_effect = self.events.append
@@ -62,16 +71,39 @@ class HistoryTests(unittest.TestCase):
 
     def test_completion_uses_exact_output_hook_and_clears_run_state(self):
         history.on_reply(session_id=SESSION, turn_id="turn", assistant_response="Visible final reply.", reasoning="private reasoning")
-        with patch.object(history, "_safe_snapshot") as capture:
+        with patch.object(history, "_safe_snapshot", return_value=True) as capture:
             history.on_run_end(session_id=SESSION, turn_id="turn", completed=True)
         capture.assert_called_once_with((RUN, SESSION), "finished")
         self.assertEqual([event["type"] for event in self.events], ["message.completed", "run.finished"])
         self.assertEqual(self.events[-1]["data"]["output"], "Visible final reply.")
         self.assertNotIn("private reasoning", json.dumps(self.events))
-        self.assertNotIn(RUN, history._outputs)
-        with patch.object(history, "_safe_snapshot"):
+        self.assertEqual(history._outputs, {})
+        with patch.object(history, "_safe_snapshot", return_value=True):
             history.on_run_end(session_id=SESSION, turn_id="next", failed=True)
         self.assertNotIn("output", self.events[-1]["data"])
+
+    def test_failed_final_snapshot_never_claims_saved_history_and_cleans_run_state(self):
+        history.on_reply(session_id=SESSION, assistant_response="Visible final reply.")
+        history._model_starts.add(history._run_key((RUN, SESSION)))
+        with patch.object(history, "snapshot", side_effect=OSError("private database detail")), self.assertLogs(history.logger, level="ERROR") as logs:
+            history.on_run_end(session_id=SESSION, completed=True)
+        self.assertEqual([event["type"] for event in self.events], ["message.completed"])
+        self.assertEqual(history._outputs, {})
+        self.assertEqual(history._model_starts, set())
+        self.assertIn(RUN, logs.output[0])
+        self.assertNotIn("private database detail", logs.output[0])
+
+    def test_missing_native_session_never_claims_saved_history(self):
+        db = MagicMock()
+        db.get_session.return_value = None
+        native = types.ModuleType("hermes_state")
+        native.SessionDB = MagicMock(return_value=db)
+        projection = types.ModuleType("agent.compaction_display")
+        projection.project_compaction_message_for_display = lambda row: row
+        with patch.dict(sys.modules, {"hermes_state": native, "agent.compaction_display": projection}), patch.object(history, "_native_dbs", {str(Path("fixture-profile").resolve()): db}), self.assertLogs(history.logger, level="ERROR"):
+            history.on_run_end(session_id=SESSION, completed=True)
+        self.assertEqual(self.events, [])
+        db.get_messages.assert_not_called()
 
     def test_transcript_keeps_native_ids_and_only_visible_content(self):
         db = MagicMock()
@@ -87,10 +119,10 @@ class HistoryTests(unittest.TestCase):
         native.SessionDB = MagicMock(return_value=db)
         projection = types.ModuleType("agent.compaction_display")
         projection.project_compaction_message_for_display = lambda row: row
-        with patch.dict(sys.modules, {"hermes_state": native, "agent.compaction_display": projection}), patch.object(history, "_native_db", db):
-            history.snapshot((RUN, SESSION), "finished")
+        with patch.dict(sys.modules, {"hermes_state": native, "agent.compaction_display": projection}), patch.object(history, "_native_dbs", {str(Path("fixture-profile").resolve()): db}):
+            history.on_run_end(session_id=SESSION, completed=True)
         db.get_messages.assert_called_once_with(SESSION, include_compacted=True)
-        batch, complete = self.events
+        batch, complete, finished = self.events
         self.assertEqual([message["message_id"] for message in batch["messages"]], [7, 11])
         self.assertEqual(batch["messages"][1]["content"], "Answer")
         self.assertTrue(all(message["current_run"] is False for message in batch["messages"]))
@@ -98,6 +130,7 @@ class HistoryTests(unittest.TestCase):
         self.assertTrue(complete["messages_complete"])
         self.assertEqual(complete["messages"], [])
         self.assertEqual(complete["chat_created_at"], "1970-01-01T00:01:40Z")
+        self.assertEqual(finished["type"], "run.finished")
         self.assertNotIn("private", json.dumps(self.events))
 
     def test_model_observers_never_copy_raw_provider_payloads(self):
@@ -128,7 +161,7 @@ class HistoryTests(unittest.TestCase):
         native.SessionDB = MagicMock(return_value=db)
         projection = types.ModuleType("agent.compaction_display")
         projection.project_compaction_message_for_display = lambda row: row
-        with patch.dict(sys.modules, {"hermes_state": native, "agent.compaction_display": projection}), patch.object(history, "_native_db", db), patch.object(history, "_MAX_BATCH_BYTES", 300):
+        with patch.dict(sys.modules, {"hermes_state": native, "agent.compaction_display": projection}), patch.object(history, "_native_dbs", {str(Path("fixture-profile").resolve()): db}), patch.object(history, "_MAX_BATCH_BYTES", 300):
             history.snapshot((RUN, SESSION), "finished")
         self.assertEqual(len(self.events), 4)
         self.assertTrue(self.events[-1]["messages_complete"])
@@ -151,7 +184,7 @@ class HistoryTests(unittest.TestCase):
         native.SessionDB = MagicMock(return_value=db)
         projection = types.ModuleType("agent.compaction_display")
         projection.project_compaction_message_for_display = lambda row: row
-        with patch.dict(sys.modules, {"hermes_state": native, "agent.compaction_display": projection}), patch.object(history, "_native_db", db):
+        with patch.dict(sys.modules, {"hermes_state": native, "agent.compaction_display": projection}), patch.object(history, "_native_dbs", {str(Path("fixture-profile").resolve()): db}):
             first = threading.Thread(target=history.snapshot, args=((RUN, SESSION), "first"), name="snapshot-first")
             second = threading.Thread(target=history.snapshot, args=((RUN, SESSION), "second"))
             first.start()
@@ -166,6 +199,16 @@ class HistoryTests(unittest.TestCase):
 
 
 class OutboxTests(unittest.TestCase):
+    def setUp(self):
+        constants = types.ModuleType("hermes_constants")
+        constants.get_hermes_home = lambda: Path("fixture-profile").resolve()
+        modules = patch.dict(sys.modules, {"hermes_constants": constants})
+        modules.start()
+        self.addCleanup(modules.stop)
+        key = patch.object(mango_scope, "callback_key", return_value="fixture-" + "x" * 40)
+        key.start()
+        self.addCleanup(key.stop)
+
     def test_lost_acknowledgement_survives_restart_and_preserves_fifo(self):
         httpx = types.ModuleType("httpx")
         httpx.HTTPError = OSError

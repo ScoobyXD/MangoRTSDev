@@ -80,7 +80,7 @@ func validHermesHistoryData(kind string, raw json.RawMessage) bool {
 		allowed["model"], allowed["call"] = "text", "number"
 	case "model.completed":
 		allowed["call"], allowed["duration_seconds"] = "number", "number"
-	case "model.failed", "messages.saved":
+	case "model.failed", "messages.saved", "history.recovered":
 	case "tool.started", "tool.completed":
 		allowed["tool_name"], allowed["tool_call_id"] = "text", "text"
 		if kind == "tool.completed" {
@@ -172,6 +172,10 @@ func (s *Server) handleHermesHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		writeAIStoreError(w, err)
+		return
+	}
+	if body.Type == "history.recovered" && !store.AITerminalStatus(run.Status) {
+		writeError(w, 409, "ai_history_recovery_requires_terminal_run")
 		return
 	}
 	for _, saved := range run.History {

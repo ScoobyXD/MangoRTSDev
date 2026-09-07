@@ -52,8 +52,8 @@ export function useAIChat(apiBase: string, companyID: string, visible: boolean) 
     const run = await getAIRun(apiBase, companyID, completed.runID, controller.signal);
     if (controller.signal.aborted) return false;
     if (run.run_id !== completed.runID) throw new Error("Invalid run response.");
-    // The durable callback sends this observation after its final transcript snapshots.
-    if (!run.history?.some((event) => event.event === "run.finished")) {
+    // Both observations follow complete native transcript snapshots in the durable queue.
+    if (!run.history?.some((event) => event.event === "run.finished" || event.event === "history.recovered")) {
       setNotice((current) => current.includes(historyPendingNotice) ? current : [current, historyPendingNotice].filter(Boolean).join(" "));
       return false;
     }

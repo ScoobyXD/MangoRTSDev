@@ -11,12 +11,12 @@ RUN git init . \
     && git fetch --depth 1 origin 693641aa8b4359c602283bdbbc14041e03bc47bc \
     && git checkout --detach FETCH_HEAD \
     && test "$(git rev-parse HEAD)" = "693641aa8b4359c602283bdbbc14041e03bc47bc" \
-    && uv sync --python /usr/local/bin/python3.13 --frozen --no-dev --extra messaging --extra bedrock
+    && uv sync --python /usr/local/bin/python3.13 --frozen --no-dev --extra messaging --extra bedrock --extra mcp
 
-COPY pyproject.toml mango_plugin.py mango_history.py /opt/mango-plugin/
+COPY pyproject.toml mango_plugin.py mango_history.py mango_scope.py mango_integrations.py mango_recovery.py /opt/mango-plugin/
 RUN uv pip install --python /opt/hermes/.venv/bin/python --no-deps /opt/mango-plugin \
     && useradd --create-home --uid 10001 hermes \
-    && mkdir -p /data && chown hermes:hermes /data
+    && mkdir -p /data/profiles && chown hermes:hermes /data /data/profiles
 COPY entrypoint.py /opt/mango-entrypoint.py
 ENV PATH="/opt/hermes/.venv/bin:${PATH}" HERMES_HOME=/data PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 USER 10001:10001

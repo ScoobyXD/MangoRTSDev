@@ -19,8 +19,8 @@ import time
 from urllib.parse import urlsplit, urlunsplit
 
 logger = logging.getLogger(__name__)
-_outbox = None
-_native_db = None
+_outboxes = {}
+_native_dbs = {}
 _lock = threading.RLock()
 _outputs = {}
 _model_starts = set()
@@ -43,9 +43,15 @@ def native_context(session_id):
     return run_id, session_id
 
 
-def callback_configuration():
+def callback_configuration(home=None):
+    from hermes_constants import get_hermes_home
+    from mango_scope import callback_key
+
     url = urlsplit(os.environ.get("MANGO_CALLBACK_URL", ""))
-    key = os.environ.get("MANGO_CALLBACK_KEY", "")
+    try:
+        key = callback_key(get_hermes_home() if home is None else home)
+    except (KeyError, ValueError, OSError):
+        return None
     if (url.scheme not in {"http", "https"} or not url.hostname or url.username
             or url.password or url.query or url.fragment
             or url.path != "/internal/hermes/actions" or len(key) < 32):
@@ -58,6 +64,9 @@ class HistoryOutbox:
 
     def __init__(self, home, *, start_worker=True):
         self.path = Path(home) / "mango_history_outbox.db"
+        # Capture exact profile credentials before crossing into a delivery
+        # thread. Retried callbacks never consult that thread's ambient home.
+        self.configuration = callback_configuration(home)
         self.wake = threading.Event()
         with self.connect() as db:
             db.execute("CREATE TABLE IF NOT EXISTS events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, run_id TEXT NOT NULL, payload TEXT NOT NULL, rejected_status INTEGER)")
@@ -85,7 +94,7 @@ class HistoryOutbox:
             row = db.execute("SELECT sequence,payload,run_id FROM events WHERE rejected_status IS NULL ORDER BY sequence LIMIT 1").fetchone()
         if row is None:
             return "empty"
-        configuration = callback_configuration()
+        configuration = self.configuration
         if configuration is None:
             return "retry"
         import httpx
@@ -125,12 +134,18 @@ class HistoryOutbox:
 
 
 def outbox():
-    global _outbox
+    from hermes_constants import get_hermes_home
+    return profile_outbox(get_hermes_home())
+
+
+def profile_outbox(home, *, start_worker=True):
+    from mango_scope import bound_profile
+    bound_profile(home)
+    home = str(Path(home).resolve())
     with _lock:
-        if _outbox is None:
-            from hermes_constants import get_hermes_home
-            _outbox = HistoryOutbox(get_hermes_home())
-        return _outbox
+        if home not in _outboxes:
+            _outboxes[home] = HistoryOutbox(home, start_worker=start_worker)
+        return _outboxes[home]
 
 
 def _event(context, kind, identity, data=None, **fields):
@@ -167,16 +182,20 @@ def snapshot(context, identity):
 
 
 def _snapshot_locked(context, identity):
-    global _native_db
     from agent.compaction_display import project_compaction_message_for_display
     from hermes_state import SessionDB
+    from hermes_constants import get_hermes_home
+    from mango_scope import bound_profile
 
-    if _native_db is None:
-        _native_db = SessionDB()
-    db = _native_db
+    home = get_hermes_home()
+    bound_profile(home)
+    key = str(Path(home).resolve())
+    if key not in _native_dbs:
+        _native_dbs[key] = SessionDB(db_path=Path(home) / "state.db", read_only=True)
+    db = _native_dbs[key]
     session = db.get_session(context[1])
     if session is None:
-        return
+        raise ValueError("Native session is unavailable for transcript capture")
     messages = []
     for row in db.get_messages(context[1], include_compacted=True):
         projected = project_compaction_message_for_display(row)
@@ -214,8 +233,10 @@ def _snapshot_locked(context, identity):
 def _safe_snapshot(context, identity):
     try:
         snapshot(context, identity)
+        return True
     except Exception:
-        logger.error("Mango could not capture the native visible transcript.")
+        logger.error("Mango could not capture the native visible transcript for run %s; saved-history completion was not confirmed.", context[0])
+        return False
 
 
 def on_run_start(*, session_id="", turn_id="", model="", **kwargs):
@@ -233,8 +254,8 @@ def on_model_start(*, session_id="", api_request_id="", api_call_count=0, model=
     if context:
         _safe_event(context, "model.started", api_request_id, {"model": model if isinstance(model, str) else "", "call": _number(api_call_count)})
         with _lock:
-            first = context[0] not in _model_starts
-            _model_starts.add(context[0])
+            first = _run_key(context) not in _model_starts
+            _model_starts.add(_run_key(context))
         if first:
             _safe_snapshot(context, "input")
 
@@ -255,21 +276,25 @@ def on_reply(*, session_id="", turn_id="", assistant_response="", **kwargs):
     context = native_context(session_id)
     if context and isinstance(assistant_response, str):
         with _lock:
-            _outputs[context[0]] = assistant_response
+            _outputs[_run_key(context)] = assistant_response
         _safe_event(context, "message.completed", turn_id or "turn", {"output": assistant_response})
 
 
 def on_run_end(*, session_id="", turn_id="", completed=False, failed=False, interrupted=False, **kwargs):
     context = native_context(session_id)
     if context:
-        _safe_snapshot(context, "finished")
+        captured = _safe_snapshot(context, "finished")
         data = {"completed": bool(completed), "failed": bool(failed), "interrupted": bool(interrupted)}
         with _lock:
-            output = _outputs.pop(context[0], None)
-            _model_starts.discard(context[0])
+            output = _outputs.pop(_run_key(context), None)
+            _model_starts.discard(_run_key(context))
         if output is not None:
             data["output"] = output
-        _safe_event(context, "run.finished", turn_id or "turn", data)
+        # The browser treats this marker as proof the complete transcript was
+        # queued. Preserve its local reply when capture failed; cleanup above
+        # still runs, and the native session remains the recovery authority.
+        if captured:
+            _safe_event(context, "run.finished", turn_id or "turn", data)
 
 
 def observe_tool(tool_name, args, next_call, session_id="", tool_call_id="", **kwargs):
@@ -293,12 +318,21 @@ def observe_tool(tool_name, args, next_call, session_id="", tool_call_id="", **k
         _safe_event(context, "tool.completed", tool_call_id, {**data, "succeeded": bool(succeeded)})
 
 
+def _run_key(context):
+    from hermes_constants import get_hermes_home
+    return str(get_hermes_home()), context[0]
+
+
 def register(ctx):
     ctx.register_middleware("tool_execution", observe_tool)
     for name, callback in (("pre_llm_call", on_run_start), ("pre_api_request", on_model_start),
                            ("post_api_request", on_model_end), ("api_request_error", on_model_error),
                            ("post_llm_call", on_reply), ("on_session_end", on_run_end)):
         ctx.register_hook(name, callback)
-    if callback_configuration() is not None:
-        # Existing queued callbacks are delivered when the native service restarts.
-        outbox()
+    from mango_scope import profiles
+    # Restart every served profile's durable queue, including profiles without
+    # a new request. The lock deduplicates native per-profile plugin loading.
+    for name in profiles():
+        home = Path(os.environ["HERMES_HOME"]) / "profiles" / name
+        if callback_configuration(home) is not None:
+            profile_outbox(home)

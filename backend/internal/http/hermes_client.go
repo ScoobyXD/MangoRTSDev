@@ -3,6 +3,9 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,8 +15,9 @@ import (
 	"time"
 )
 
-// Each route is one independently provisioned Hermes process and persistent home.
-// Configuration contains environment variable names, never credentials.
+// Every route shares one gateway origin. Native profile names are the exact
+// company/user UUIDs without punctuation, never model-selected identities.
+// Configuration names injected gateway seeds, never literal credentials.
 type HermesRoute struct {
 	CompanyID      string `json:"company_id"`
 	UserID         string `json:"user_id"`
@@ -37,7 +41,8 @@ func ParseHermesRoutes(raw string, lookup func(string) string) ([]HermesRoute, e
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		return nil, errors.New("invalid MANGORTS_HERMES_ROUTES JSON")
 	}
-	seenScope, seenURL, seenKey := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	seenScope := map[string]bool{}
+	var origin, apiSeed, callbackSeed string
 	for i := range routes {
 		route := &routes[i]
 		u, err := url.Parse(route.URL)
@@ -45,14 +50,32 @@ func ParseHermesRoutes(raw string, lookup func(string) string) ([]HermesRoute, e
 			return nil, errors.New("invalid Hermes route: exact company/user UUIDs and private HTTP service origin required")
 		}
 		route.URL = strings.TrimRight(route.URL, "/")
-		route.APIKey, route.CallbackKey = strings.TrimSpace(lookup(route.APIKeyEnv)), strings.TrimSpace(lookup(route.CallbackKeyEnv))
+		route.CompanyID, route.UserID = strings.ToLower(route.CompanyID), strings.ToLower(route.UserID)
+		api, callback := strings.TrimSpace(lookup(route.APIKeyEnv)), strings.TrimSpace(lookup(route.CallbackKeyEnv))
 		scope := route.CompanyID + ":" + route.UserID
-		if len(route.APIKey) < 32 || len(route.CallbackKey) < 32 || route.APIKey == route.CallbackKey || seenScope[scope] || seenURL[strings.ToLower(route.URL)] || seenKey[route.APIKey] || seenKey[route.CallbackKey] {
-			return nil, errors.New("Hermes routes require unique scopes, origins, and distinct injected service/callback keys of at least 32 characters")
+		if len(api) < 32 || len(callback) < 32 || api == callback || seenScope[scope] {
+			return nil, errors.New("Hermes routes require unique scopes and distinct injected service/callback seeds of at least 32 characters")
 		}
-		seenScope[scope], seenURL[strings.ToLower(route.URL)], seenKey[route.APIKey], seenKey[route.CallbackKey] = true, true, true, true
+		if i > 0 && (route.URL != origin || api != apiSeed || callback != callbackSeed) {
+			return nil, errors.New("Hermes profiles must share one gateway origin and its injected credential seeds")
+		}
+		origin, apiSeed, callbackSeed = route.URL, api, callback
+		name := route.profileName()
+		route.APIKey = hermesProfileKey(api, "api", name)
+		route.CallbackKey = hermesProfileKey(callback, "callback", name)
+		seenScope[scope] = true
 	}
 	return routes, nil
+}
+
+func (r HermesRoute) profileName() string {
+	return strings.ReplaceAll(r.CompanyID+r.UserID, "-", "")
+}
+
+func hermesProfileKey(seed, purpose, profile string) string {
+	mac := hmac.New(sha256.New, []byte(seed))
+	mac.Write([]byte("mango-hermes-" + purpose + ":" + profile))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func newHermesClient() *http.Client {
@@ -76,7 +99,7 @@ func (s *Server) hermesRequest(ctx context.Context, route HermesRoute, method, p
 		}
 		reader = bytes.NewReader(encoded)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, route.URL+path, reader)
+	req, err := http.NewRequestWithContext(ctx, method, route.URL+"/p/"+route.profileName()+path, reader)
 	if err != nil {
 		return nil, err
 	}
