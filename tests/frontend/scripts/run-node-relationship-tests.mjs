@@ -122,6 +122,12 @@ const testFiles = [
 ];
 const componentTests = [
   {
+    source: resolve(repoRoot, "tests/frontend/auth/authWallpaper.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/auth/authWallpaper.test.cjs"),
+    bundleDependencies: true,
+    jsx: "automatic",
+  },
+  {
     source: resolve(repoRoot, "tests/frontend/auth/signup.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/auth/signup.test.cjs"),
     bundleDependencies: true,
@@ -365,7 +371,9 @@ for (const componentTest of componentTests) {
     ...(componentTest.bundleDependencies
       ? { external: ["react", "react-dom", "react-dom/*", "jsdom"] }
       : { packages: "external" }),
-    define: { "import.meta.env": JSON.stringify(componentTest.environment ?? {}) },
+    define: { "import.meta.env": JSON.stringify(componentTest.environment ?? {}), "import.meta.glob": "__emptyViteGlob" },
+    // Repository images are discovered by Vite; component tests use an empty asset collection.
+    banner: { js: "const __emptyViteGlob = () => ({});" },
     ...(componentTest.loader ? { loader: componentTest.loader } : {}),
     outfile: componentTest.file,
   };

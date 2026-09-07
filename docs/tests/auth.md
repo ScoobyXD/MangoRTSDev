@@ -26,6 +26,20 @@
 24. A mailbox-disabled actor must be denied personal and shared mailbox HTTP and realtime access without contacting the provider; ordinary product authentication must remain available.
 25. Cognito must verify a replacement email before changing the user's current email attribute.
 
+26. The scenic login page must show compact, equal Sign Up and Sign In forms at the bottom left on desktop and keep all controls reachable on small or short screens.
+27. Landing navigation must select Sign In / Login by default and show only a minimal What We Offer placeholder when requested.
+28. Switching landing sections or wallpapers must preserve mounted auth forms, entered values, and pending confirmation work.
+29. Sign-up, sign-in, invitations, password recovery, account challenges, and deep-link return behavior must keep using the existing auth flows.
+30. Wallpapers must use repository scene folders and let the browser select an available crop and resolution for the viewport and pixel density.
+31. Missing wallpapers must leave a usable gradient background without blocking authentication or requesting nonexistent image files.
+32. Wallpaper rotation must decode the next scene before showing it and retain the current scene if the next image fails.
+33. Wallpaper rotation must wait about one minute between scenes, run only with multiple scenes, pause while the page is hidden, and stop for reduced motion.
+34. Wallpaper loading must request only the current scene and the next scene when needed, and remove timers and listeners when unmounted.
+
+## Wallpaper setup
+
+Add scene folders and image variants under `frontend/src/assets/auth-wallpapers/` following its [setup guide](../../frontend/src/assets/auth-wallpapers/README.md). Repository image changes are published by the existing frontend deployment.
+
 ## Process Story
 
 A valid Cognito session resolves one Mango user and its company memberships. A user without memberships receives an initial company once. Repeated requests preserve the Mango profile and mailbox policy, while a terminal session failure returns the browser to sign-in.

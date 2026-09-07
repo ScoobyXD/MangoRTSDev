@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../app/ConfirmActionMenu";
 import { preloadAccountManagerSurface, preloadEntitiesSurface, preloadHomeSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface, preloadMyWorkSurface, preloadProcessMapSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "../app/preloadDashboardModules";
 import { HeaderRecycleBinIcon, HeaderSettingsIcon } from "../icons/index.js";
-import { MangoWordmark } from "../icons/index.js";
+import { AuthWallpaper } from "./AuthWallpaper";
 import { getActiveCompanyID, getStoredActiveCompanyID, setActiveCompanyID } from "./currentCompany";
 import {
   acceptInvitation,
@@ -222,82 +222,9 @@ const INVITE_ROLE_OPTIONS: SettingsSelectOption[] = [
 
 const COMPANY_SEARCH_LIMIT = 100;
 
-const panelStyle: React.CSSProperties = {
-  width: "100%",
-  height: "100dvh",
-  display: "flex",
-  flexDirection: "column",
-  padding: 24,
-  overflowY: "auto",
-  background:
-    "linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(242,245,250,0.92) 42%, rgba(232,237,246,0.96) 100%)",
-  color: "#111827",
-  fontFamily: "var(--mango-font-family)",
-};
-
-const formStyle: React.CSSProperties = {
-  width: "100%",
-  maxWidth: 456,
-  margin: "auto",
-  flexShrink: 0,
-  display: "grid",
-  gap: 16,
-  padding: 24,
-  border: "1px solid rgba(255, 255, 255, 0.84)",
-  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.94) 0%, rgba(246, 247, 251, 0.9) 100%)",
-  borderRadius: 8,
-  boxShadow: "12px 12px 30px rgba(174, 174, 192, 0.30), -10px -10px 24px rgba(255, 255, 255, 0.96), inset 1px 1px 0 rgba(255, 255, 255, 0.92)",
-  backdropFilter: "blur(16px) saturate(1.08)",
-  WebkitBackdropFilter: "blur(16px) saturate(1.08)",
-};
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  minWidth: 0,
-  height: 42,
-  border: "1px solid rgba(255, 255, 255, 0.82)",
-  borderRadius: 8,
-  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.96) 0%, rgba(246, 247, 251, 0.92) 100%)",
-  color: "#111827",
-  font: "inherit",
-  fontSize: 13,
-  fontWeight: 520,
-  outline: "none",
-  padding: "0 12px",
-  boxShadow: "inset 3px 3px 7px rgba(174, 174, 192, 0.22), inset -3px -3px 7px rgba(255, 255, 255, 0.92), 0 0 0 1px rgba(100, 116, 139, 0.08)",
-};
-
-const buttonStyle: React.CSSProperties = {
-  minHeight: 42,
-  border: "1px solid transparent",
-  borderRadius: 8,
-  background:
-    "linear-gradient(145deg, rgba(255, 255, 255, 0.97) 0%, rgba(247, 248, 252, 0.92) 100%) padding-box, linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%) border-box",
-  color: "#111827",
-  cursor: "pointer",
-  font: "inherit",
-  fontSize: 13,
-  fontWeight: 760,
-  letterSpacing: 0,
-  padding: "0 14px",
-  boxShadow: "7px 7px 16px rgba(174, 174, 192, 0.28), -5px -5px 13px rgba(255, 255, 255, 0.94), 0 0 15px rgba(183, 124, 255, 0.16), inset 1px 1px 0 rgba(255, 255, 255, 0.9)",
-};
-
-const authHeaderStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 11,
-};
-
-const authAccentRailStyle: React.CSSProperties = {
-  height: 5,
-  borderRadius: 999,
-  background: "var(--mango-brand-gradient)",
-  boxShadow: "0 9px 20px rgba(255, 136, 32, 0.22), inset 1px 1px 0 rgba(255, 255, 255, 0.42)",
-};
-
 const authFormStyle: React.CSSProperties = {
   display: "grid",
-  gap: 12,
+  gap: 10,
 };
 
 const authFieldStyle: React.CSSProperties = {
@@ -307,7 +234,7 @@ const authFieldStyle: React.CSSProperties = {
 };
 
 const authFieldLabelStyle: React.CSSProperties = {
-  color: "rgba(15, 23, 42, 0.68)",
+  color: "#334155",
   fontSize: 11,
   fontWeight: 760,
   letterSpacing: 0,
@@ -464,7 +391,7 @@ export default function AuthGate() {
       </React.Suspense>
     );
   }
-  if (loading) return <AuthPanel title="MangoRTS" error={error}><div>Loading</div></AuthPanel>;
+  if (loading) return <AuthPanel title="Signing in" onNavigate={navigate} error={error}><div role="status">Loading</div></AuthPanel>;
 
   if (!me || isAuthPath(normalizedPath)) {
     if (normalizedPath === "/accept-invite") {
@@ -834,7 +761,7 @@ function AuthTextField({ label, id, ...inputProps }: AuthTextFieldProps) {
   return (
     <label style={authFieldStyle} htmlFor={inputID}>
       <span style={authFieldLabelStyle}>{label}</span>
-      <input id={inputID} className="mango-auth-input" style={inputStyle} {...inputProps} />
+      <input id={inputID} className="mango-auth-input" {...inputProps} />
     </label>
   );
 }
@@ -843,7 +770,7 @@ type AuthButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "clas
 
 function AuthPrimaryButton({ children, ...buttonProps }: AuthButtonProps) {
   return (
-    <button className="mango-auth-primary" style={buttonStyle} {...buttonProps}>
+    <button className="mango-auth-primary" {...buttonProps}>
       {children}
     </button>
   );
@@ -851,7 +778,7 @@ function AuthPrimaryButton({ children, ...buttonProps }: AuthButtonProps) {
 
 function AuthSecondaryButton({ children, ...buttonProps }: AuthButtonProps) {
   return (
-    <button className="mango-auth-secondary" style={linkButtonStyle} {...buttonProps}>
+    <button className="mango-auth-secondary" {...buttonProps}>
       {children}
     </button>
   );
@@ -878,7 +805,7 @@ function LoginPage({ onChallenge, onAuthenticated, onNavigate, loadError }: { on
     await onAuthenticated();
   };
   return (
-    <AuthPanel title="MangoRTS" error={error || loadError} wide actions={
+    <AuthPanel title="Sign In / Login" onNavigate={onNavigate} error={error || loadError} wide actions={
       <>
         <AuthSecondaryButton type="button" disabled={busy !== null} onClick={() => onNavigate("/accept-invite")}>Accept invite</AuthSecondaryButton>
         <AuthSecondaryButton type="button" disabled={busy !== null} onClick={() => onNavigate("/forgot-password")}>Forgot password</AuthSecondaryButton>
@@ -968,7 +895,7 @@ function CompleteAccountPage({ pendingChallenge, onChallenge, onAuthenticated, o
 
   if (!pendingChallenge) {
     return (
-      <AuthPanel title="Complete Account" error={error}>
+      <AuthPanel title="Complete Account" onNavigate={onNavigate} error={error}>
         <div style={authInfoMessageStyle}>Sign in first to complete account setup.</div>
         <AuthSecondaryButton type="button" onClick={() => onNavigate("/login")}>Back to login</AuthSecondaryButton>
       </AuthPanel>
@@ -976,7 +903,7 @@ function CompleteAccountPage({ pendingChallenge, onChallenge, onAuthenticated, o
   }
 
   return (
-    <AuthPanel title="Complete Account" error={error}>
+    <AuthPanel title="Complete Account" onNavigate={onNavigate} error={error}>
       <form style={authFormStyle} onSubmit={async (event) => {
         event.preventDefault();
         setBusy(true);
@@ -1028,8 +955,7 @@ function AcceptInvitePage({ me, onAuthenticated, onNavigate }: { me: CurrentUser
   }, [token]);
   const wrongAccount = Boolean(me && invitation && normalizeEmailInput(me.user.email) !== normalizeEmailInput(invitation.email));
   return (
-    <AuthPanel title="Accept Invite" error={error}>
-      <h1 className="mango-auth-section-title">Join {invitation?.company_name || "a company"}</h1>
+    <AuthPanel title={`Join ${invitation?.company_name || "a company"}`} onNavigate={onNavigate} error={error}>
       {!token && <div style={authInfoMessageStyle}>Open the invitation link in your email to join a company.</div>}
       {token && !invitation && !error && <div role="status">Loading invitation…</div>}
       {invitation && <form aria-label="Accept invitation" style={authFormStyle} onSubmit={async (event) => {
@@ -1105,7 +1031,7 @@ function ForgotPasswordPage({ onNavigate, initialCodeEntryOpen = false }: { onNa
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   return (
-    <AuthPanel title="Forgot Password" error={error}>
+    <AuthPanel title="Forgot Password" onNavigate={onNavigate} error={error}>
       <form style={authFormStyle} onSubmit={async (event) => {
         event.preventDefault();
         setError("");
@@ -1201,7 +1127,7 @@ function ConnectGooglePage({ onNavigate, onLogout }: { onNavigate: (path: string
   const unavailable = status && !status.configured;
   const configurationRequired = status?.status === "configuration_required";
   return (
-    <AuthPanel title="Connect Google" error={error}>
+    <AuthPanel title="Connect Google" onNavigate={onNavigate} error={error}>
       <div style={authFormStyle}>
         <div style={authInfoMessageStyle}>
           {googleConnected
@@ -1611,19 +1537,31 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
   );
 }
 
-function AuthPanel({ error, children, wide = false, actions }: { title: string; error?: string; children: React.ReactNode; wide?: boolean; actions?: React.ReactNode }) {
+function AuthPanel({ title, error, children, wide = false, actions, onNavigate }: { title: string; error?: string; children: React.ReactNode; wide?: boolean; actions?: React.ReactNode; onNavigate: (path: string) => void }) {
+  const [showOffer, setShowOffer] = useState(false);
   return (
-    <div style={panelStyle}>
-      <div style={wide ? { ...formStyle, maxWidth: 800 } : formStyle}>
-        <div style={authHeaderStyle}>
-          <div className="mango-auth-header-row">
-            <MangoWordmark size={28} weight={680} />
-            {actions && <div className="mango-auth-header-actions">{actions}</div>}
-          </div>
-          <div style={authAccentRailStyle} />
-        </div>
-        {error && <div role="alert" style={authErrorStyle}>{error}</div>}
-        {children}
+    <div className="mango-auth-landing">
+      <AuthWallpaper />
+      <div className="mango-auth-scroll">
+        <nav className="mango-auth-nav" aria-label="Landing navigation">
+          <button type="button" aria-pressed={!showOffer} onClick={() => {
+            setShowOffer(false);
+            if (!wide) onNavigate("/login");
+          }}>Sign In / Login</button>
+          <button type="button" aria-pressed={showOffer} onClick={() => setShowOffer(true)}>What We Offer</button>
+        </nav>
+        <main className="mango-auth-content">
+          <section className={`mango-auth-panel${wide ? " mango-auth-panel-wide" : ""}`} aria-label={title} hidden={showOffer}>
+            {!wide && <h1 className="mango-auth-section-title">{title}</h1>}
+            {error && <div role="alert" style={authErrorStyle}>{error}</div>}
+            {children}
+            {actions && <div className="mango-auth-actions">{actions}</div>}
+          </section>
+          <section className="mango-auth-panel mango-auth-offer" aria-labelledby="mango-auth-offer-title" hidden={!showOffer}>
+            <h1 className="mango-auth-section-title" id="mango-auth-offer-title">What We Offer</h1>
+            <p>More details coming soon.</p>
+          </section>
+        </main>
       </div>
     </div>
   );
@@ -1693,24 +1631,6 @@ const SETTINGS_SOFT_SHADOW = "7px 7px 16px rgba(174, 174, 192, 0.22), -7px -7px 
 const SETTINGS_RAISED_SHADOW = "12px 12px 28px rgba(174, 174, 192, 0.28), -10px -10px 24px rgba(255, 255, 255, 0.95), inset 1px 1px 0 rgba(255, 255, 255, 0.9)";
 const SETTINGS_SELECTED_SHADOW = "0 0 0 1px rgba(120, 224, 255, 0.18), 0 0 18px rgba(183, 124, 255, 0.24), inset 1px 1px 0 rgba(255, 255, 255, 0.88)";
 const SETTINGS_INSET_SHADOW = "inset 3px 3px 7px rgba(174, 174, 192, 0.18), inset -3px -3px 7px rgba(255, 255, 255, 0.9), 0 0 0 1px rgba(100, 116, 139, 0.08)";
-
-const linkButtonStyle: React.CSSProperties = {
-  minHeight: 34,
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  border: "1px solid rgba(255, 255, 255, 0.78)",
-  borderRadius: 8,
-  background: "linear-gradient(145deg, rgba(255, 255, 255, 0.88) 0%, rgba(246, 247, 251, 0.82) 100%)",
-  color: "#334155",
-  cursor: "pointer",
-  font: "inherit",
-  fontSize: 12,
-  fontWeight: 720,
-  letterSpacing: 0,
-  padding: "0 12px",
-  boxShadow: "5px 5px 12px rgba(174, 174, 192, 0.22), -5px -5px 12px rgba(255, 255, 255, 0.9), inset 1px 1px 0 rgba(255, 255, 255, 0.82)",
-};
 
 const smallButtonStyle: React.CSSProperties = {
   minHeight: 34,

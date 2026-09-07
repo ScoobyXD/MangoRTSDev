@@ -71,6 +71,43 @@ test("password signup and invitation browser flow", async (t) => {
   const authenticated = () => response({ AuthenticationResult: { AccessToken: "test-access", IdToken: "test-id", RefreshToken: "test-refresh", ExpiresIn: 3600 } });
   const unconfirmed = () => response({ __type: "UserNotConfirmedException", message: "User is not confirmed." }, 400);
   try {
+    await t.test("landing navigation preserves the mounted signup and sign-in forms", async () => {
+      await mount();
+      const nav = container.querySelector('nav[aria-label="Landing navigation"]')!;
+      assert.ok(nav);
+      const buttons = Array.from(nav.querySelectorAll("button"));
+      assert.deepEqual(buttons.map((button) => button.textContent), ["Sign In / Login", "What We Offer"]);
+      const signup = container.querySelector<HTMLFormElement>('form[aria-label="Sign Up"]')!;
+      const signin = container.querySelector<HTMLFormElement>('form[aria-label="Sign In"]')!;
+      assert.ok(signup && signin);
+      assert.equal(signin.closest("[hidden]"), null);
+      const signupEmail = signup.querySelector<HTMLInputElement>('input[type="email"]')!;
+      const signupPassword = signup.querySelector<HTMLInputElement>('input[type="password"]')!;
+      const signinEmail = signin.querySelector<HTMLInputElement>('input[type="email"]')!;
+      const signinPassword = signin.querySelector<HTMLInputElement>('input[type="password"]')!;
+      await type(signupEmail, "new@example.com");
+      await type(signupPassword, "new-password");
+      await type(signinEmail, "existing@example.com");
+      await type(signinPassword, "existing-password");
+
+      await act(async () => buttons[1].click());
+      assert.ok(signup.closest("[hidden]"));
+      assert.ok(signin.closest("[hidden]"));
+      const offersHeading = Array.from(container.querySelectorAll("h1, h2")).find((heading) => heading.textContent === "What We Offer");
+      assert.ok(offersHeading);
+      assert.equal(offersHeading.closest("[hidden]"), null);
+
+      await act(async () => buttons[0].click());
+      assert.equal(container.querySelector('form[aria-label="Sign Up"]'), signup);
+      assert.equal(container.querySelector('form[aria-label="Sign In"]'), signin);
+      assert.equal(signup.closest("[hidden]"), null);
+      assert.equal(signin.closest("[hidden]"), null);
+      assert.deepEqual([signupEmail.value, signupPassword.value, signinEmail.value, signinPassword.value], ["new@example.com", "new-password", "existing@example.com", "existing-password"]);
+      assert.equal(window.location.pathname, "/login");
+      assert.equal(requests.length, 0);
+      await reset();
+    });
+
     await t.test("native signup forms collect only email/password and wait without storing the password", async () => {
       handle = (request) => request.action === "InitiateAuth" ? unconfirmed() : response({ UserConfirmed: false });
       await mount();
