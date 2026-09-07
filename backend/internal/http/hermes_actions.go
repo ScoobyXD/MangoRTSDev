@@ -76,6 +76,12 @@ func (s *Server) handleHermesAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch body.Action {
+	case "mango_search":
+		s.handleHermesSearch(w, r, route.CompanyID, body.Arguments)
+	case "mango_create_process", "mango_update_process", "mango_move_process", "mango_create_step":
+		s.handleHermesProcessAction(w, r, run, body.Action, body.Arguments)
+	case "mango_create_node_chat":
+		s.handleHermesCreateNodeChat(w, r, run, body.Arguments)
 	case "mango_list_nodes":
 		var args struct{}
 		if !decodeHermesArguments(body.Arguments, &args) {

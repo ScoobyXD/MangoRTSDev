@@ -857,6 +857,10 @@ func (r *MemoryRepo) CreateLogicGateWithWorkspaceEvent(companyID, header, actorU
 func (r *MemoryRepo) UpdateLogicGateHeaderWithWorkspaceEvent(companyID, logicGateID, header string) (domain.LogicGate, domain.DomainEvent, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.updateLogicGateHeaderWithWorkspaceEventLocked(companyID, logicGateID, header)
+}
+
+func (r *MemoryRepo) updateLogicGateHeaderWithWorkspaceEventLocked(companyID, logicGateID, header string) (domain.LogicGate, domain.DomainEvent, error) {
 	beforeGates := maps.Clone(r.logicGates)
 	beforeRACIProjection := maps.Clone(r.RACIMatrixProjectionRows)
 	beforeTimelineItems := maps.Clone(r.projectTimelineItems)

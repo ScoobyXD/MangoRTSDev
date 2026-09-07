@@ -8,6 +8,8 @@ import (
 	"math/big"
 	"strings"
 	"time"
+
+	"miraeopus/backend/internal/domain"
 )
 
 type AIChat struct {
@@ -64,6 +66,11 @@ type AIRepository interface {
 	AIMoveNode(context.Context, AIRun, string, LogicGateNodeAssignmentMoveInput) (LogicGateNodeAssignmentResult, error)
 	AICommitEditor(context.Context, AIRun, string, EditorJSONCommitInput) (EditorJSONCommit, error)
 	AICreateEditor(context.Context, AIRun, string, EditorJSONCommitInput) (AIEditorCreateResult, error)
+	AICreateNodeChat(context.Context, AIRun, string, AINodeChatCreateInput) (domain.NodeInformation, error)
+	AICreateProcess(context.Context, AIRun, string, string, string) (WorkspaceEntityBatchResult, error)
+	AIUpdateProcess(context.Context, AIRun, string, string, string) (AIProcessUpdateResult, error)
+	AIMoveProcess(context.Context, AIRun, string, string, string) (CompanyExplorerV2Row, error)
+	AICreateProcessStep(context.Context, AIRun, string, ProcessStepCreateInput) (ProcessStepMutationResult, error)
 	UpsertAIChat(context.Context, AIChat) (AIChat, error)
 	GetAIChat(context.Context, string, string, string) (AIChat, error)
 	ListAIChats(context.Context, string, string, int, int) ([]AIChat, error)

@@ -72,6 +72,8 @@
 70. Each repair capture must use fresh event identities and queue `history.recovered` only after its complete snapshot succeeds; missing sessions and previously rejected runs must not claim repaired history or replay rejected events.
 71. Mango must accept a recovery marker only for the exact admitted terminal run, and explicit Resume must reload its saved messages without synthesizing original execution events or submitting another run.
 72. Every saved private integration must specify a boolean `enabled`; a missing flag must never inherit native default-on behavior or bypass exact tool selection.
+73. Internal Mango tools must resolve typed or transcribed partial resource names through the existing universal picker search and keep its exact canonical IDs inside tool calls.
+74. Process creation, naming, folder placement, Step creation, Node chat creation and editor work must reuse canonical business commands and the existing atomic AI receipt contract.
 73. Integration setup must use native `oauth.redirect_port` so the native callback listener matches the configured redirect URI.
 74. Early local container exits must report the Docker exit code and the last 30 log lines from that launch's verified container before removing it.
 75. After successful local startup, stopping Go must leave Hermes running and preserve its connection environment in the same PowerShell terminal for subsequent `go run` commands.

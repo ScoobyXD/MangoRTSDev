@@ -368,6 +368,10 @@ func (r *MemoryRepo) AddNodeInformationWithActor(input NodeInformationInput) (do
 func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.NodeInformation, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.addNodeInformationLocked(input)
+}
+
+func (r *MemoryRepo) addNodeInformationLocked(input NodeInformationInput) (domain.NodeInformation, error) {
 	companyID := strings.TrimSpace(input.CompanyID)
 	nodeID := strings.TrimSpace(input.NodeID)
 	infoType := strings.TrimSpace(input.Type)

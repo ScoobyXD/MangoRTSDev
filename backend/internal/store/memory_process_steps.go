@@ -55,6 +55,12 @@ func (r *MemoryRepo) processStepRelationshipsLocked(companyID, logicGateID strin
 }
 
 func (r *MemoryRepo) CreateProcessStep(input ProcessStepCreateInput) (ProcessStepMutationResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.createProcessStepLocked(input)
+}
+
+func (r *MemoryRepo) createProcessStepLocked(input ProcessStepCreateInput) (ProcessStepMutationResult, error) {
 	body, err := normalizeProcessStepBody(input.BodyJSON)
 	if err != nil {
 		return ProcessStepMutationResult{}, err
@@ -63,8 +69,7 @@ func (r *MemoryRepo) CreateProcessStep(input ProcessStepCreateInput) (ProcessSte
 	if input.CompanyID == "" || input.LogicGateID == "" || !validProcessStepName(input.Name) {
 		return ProcessStepMutationResult{}, ErrInvalid
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
+
 	if _, ok := r.logicGates[key(input.CompanyID, input.LogicGateID)]; !ok {
 		return ProcessStepMutationResult{}, ErrNotFound
 	}

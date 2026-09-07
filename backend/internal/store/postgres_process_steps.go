@@ -93,6 +93,23 @@ func (r *PostgresRepo) commitProcessStepMutation(ctx context.Context, tx *sql.Tx
 	return result, nil
 }
 func (r *PostgresRepo) CreateProcessStep(input ProcessStepCreateInput) (ProcessStepMutationResult, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return ProcessStepMutationResult{}, err
+	}
+	defer tx.Rollback()
+	result, err := r.createProcessStepTx(ctx, tx, input)
+	if err != nil {
+		return ProcessStepMutationResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ProcessStepMutationResult{}, err
+	}
+	return result, nil
+}
+
+func (r *PostgresRepo) createProcessStepTx(ctx context.Context, tx *sql.Tx, input ProcessStepCreateInput) (ProcessStepMutationResult, error) {
 	body, err := normalizeProcessStepBody(input.BodyJSON)
 	if err != nil {
 		return ProcessStepMutationResult{}, err
@@ -101,12 +118,6 @@ func (r *PostgresRepo) CreateProcessStep(input ProcessStepCreateInput) (ProcessS
 	if !validProcessStepName(input.Name) {
 		return ProcessStepMutationResult{}, ErrInvalid
 	}
-	ctx := context.Background()
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return ProcessStepMutationResult{}, err
-	}
-	defer tx.Rollback()
 	if err = lockProcessStepsTx(ctx, tx, input.CompanyID, input.LogicGateID); err != nil {
 		return ProcessStepMutationResult{}, err
 	}
@@ -138,7 +149,8 @@ func (r *PostgresRepo) CreateProcessStep(input ProcessStepCreateInput) (ProcessS
 		}
 		result.Relationship = &edge
 	}
-	return r.commitProcessStepMutation(ctx, tx, input.CompanyID, input.LogicGateID, input.ActorUserID, result)
+	result.Events, err = r.appendDomainEventsTx(ctx, tx, []DomainEventInput{processWorkChangedEvent(input.CompanyID, input.LogicGateID, input.ActorUserID)})
+	return result, err
 }
 func (r *PostgresRepo) UpdateProcessStep(input ProcessStepUpdateInput) (ProcessStepMutationResult, error) {
 	if input.Name != nil && !validProcessStepName(*input.Name) || input.Position != nil && *input.Position < 0 || cleanUUIDText(input.ProcessStepID) == "" {

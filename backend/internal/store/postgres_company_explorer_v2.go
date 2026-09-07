@@ -284,6 +284,10 @@ func (r *PostgresRepo) ListCompanyExplorerV2ChildRows(query CompanyExplorerV2Row
 }
 
 func (r *PostgresRepo) GetCompanyExplorerV2Entity(companyID, entityID, permissionUserID string) (CompanyExplorerV2Row, error) {
+	return getCompanyExplorerV2EntitySQL(context.Background(), r.db, companyID, entityID, permissionUserID)
+}
+
+func getCompanyExplorerV2EntitySQL(ctx context.Context, q postgresResourceAccessQueryer, companyID, entityID, permissionUserID string) (CompanyExplorerV2Row, error) {
 	companyID = cleanUUIDText(companyID)
 	entityID = cleanUUIDText(entityID)
 	permissionUserID = cleanUUIDText(permissionUserID)
@@ -291,8 +295,7 @@ func (r *PostgresRepo) GetCompanyExplorerV2Entity(companyID, entityID, permissio
 		return CompanyExplorerV2Row{}, ErrInvalid
 	}
 	query := CompanyExplorerV2RowsQuery{CompanyID: companyID, ParentEntityID: entityID, PermissionUserID: permissionUserID}
-	ctx := context.Background()
-	row, err := scanCompanyExplorerV2Row(r.db.QueryRowContext(ctx, `
+	row, err := scanCompanyExplorerV2Row(q.QueryRowContext(ctx, `
 with candidate as (
   select company.company_id,
          company.company_id as entity_id,
@@ -608,6 +611,23 @@ insert into company_explorer_folders (
 }
 
 func (r *PostgresRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInput) (CompanyExplorerV2Row, error) {
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return CompanyExplorerV2Row{}, err
+	}
+	defer tx.Rollback()
+	row, err := r.upsertCompanyExplorerV2EdgeTx(ctx, tx, input)
+	if err != nil {
+		return CompanyExplorerV2Row{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return CompanyExplorerV2Row{}, err
+	}
+	return row, nil
+}
+
+func (r *PostgresRepo) upsertCompanyExplorerV2EdgeTx(ctx context.Context, tx *sql.Tx, input CompanyExplorerV2EdgeInput) (CompanyExplorerV2Row, error) {
 	input, err := normalizeCompanyExplorerV2EdgeInput(input)
 	if err != nil {
 		return CompanyExplorerV2Row{}, err
@@ -621,7 +641,6 @@ func (r *PostgresRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeIn
 	if input.CompanyID == "" || input.ParentEntityID == "" || (input.ActorUserID == "") != (input.PermissionUserID == "") || (input.ActorUserID != "" && input.ActorUserID != input.PermissionUserID) {
 		return CompanyExplorerV2Row{}, ErrInvalid
 	}
-	ctx := context.Background()
 	targetType := input.ChildEntityType
 	targetID := input.ChildResourceID
 	if input.ChildEntityID != "" && targetID == "" {
@@ -630,11 +649,6 @@ func (r *PostgresRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeIn
 	if targetID == "" {
 		return CompanyExplorerV2Row{}, ErrInvalid
 	}
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return CompanyExplorerV2Row{}, err
-	}
-	defer tx.Rollback()
 	if err := lockPostgresCompanyExplorerMutationTx(ctx, tx, input.CompanyID, input.PermissionUserID, true); err != nil {
 		return CompanyExplorerV2Row{}, err
 	}
@@ -744,12 +758,21 @@ returning item_id::text, created_timestamp, updated_timestamp`,
 			return CompanyExplorerV2Row{}, err
 		}
 	}
-	if err := tx.Commit(); err != nil {
+	row, err := getCompanyExplorerV2EntitySQL(ctx, tx, input.CompanyID, targetID, input.PermissionUserID)
+	if err != nil {
 		return CompanyExplorerV2Row{}, err
 	}
-	_ = createdTimestamp
-	_ = updatedTimestamp
-	return r.GetCompanyExplorerV2EntityWithParent(input.CompanyID, targetID, parentEntityID, itemID, input.PermissionUserID)
+	if parentEntityID != input.CompanyID {
+		row.ParentEntityID = parentEntityID
+	}
+	row.EdgeID, row.Position = itemID, position
+	if createdTimestamp.Valid {
+		row.CreatedTimestamp = createdTimestamp.Time
+	}
+	if updatedTimestamp.Valid {
+		row.UpdatedTimestamp = updatedTimestamp.Time
+	}
+	return row, nil
 }
 
 func (r *PostgresRepo) MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeInput) (CompanyExplorerV2Row, error) {
