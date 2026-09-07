@@ -77,6 +77,18 @@ function ProcessMapCompanyPage({ apiBase, companyID, onOpenLogicGate, active = t
     }
     else openWorkspace(next);
   }, [busy, companyID, detailsBusy, exiting, openWorkspace, workspace]);
+  const openBoard = async () => {
+    if (workspace?.kind !== "saved" || busy || detailsBusy || exiting) return;
+    setBusy(true);
+    try {
+      await flushMangoTiptapResource({ companyID, resourceType: "logic_gate", resourceID: workspace.processID });
+      onOpenLogicGate(workspace.processID, workspace.name);
+    } catch {
+      setNotice("The SOP could not be saved. Please try opening the Board again.");
+    } finally {
+      setBusy(false);
+    }
+  };
   const createProcess = (parentID?: string, firstStep = false) => changeWorkspace({ kind: "new", processID: crypto.randomUUID(), folderID: parentID ?? "", firstStep });
   const createFolder = (parentID?: string) => { if (!busy && !exiting) setFolderDialog({ parentID }); };
   const saved = (process: SavedMapProcess, response?: CompanyExplorerWorkspaceEntityBatchResponse) => {
@@ -93,18 +105,19 @@ function ProcessMapCompanyPage({ apiBase, companyID, onOpenLogicGate, active = t
       </div>
       {!workspace && <ProcessMapActions onCreateFolder={() => createFolder()} onCreateProcess={() => createProcess()} onCreateStep={() => createProcess(undefined, true)} hoverModeEnabled={hoverModeEnabled} onHoverModeChange={setHoverModeEnabled} />}
       {workspace && <div className={`process-map-focus${exiting ? " is-exiting" : ""}`} aria-hidden={exiting ? true : undefined} ref={(element) => element?.toggleAttribute("inert", exiting)} onAnimationEnd={(event) => { if (exiting && event.target === event.currentTarget && event.animationName === "process-map-exit") finishExit(); }}>
-      {workspace?.kind === "new" && <ProcessMapCreateProcess key={workspace.processID} apiBase={apiBase} companyID={companyID} processID={workspace.processID} firstStep={workspace.firstStep} initialFolderID={workspace.folderID} folders={folders} foldersLoading={foldersLoading || !!folderError} active={active} onSaved={saved} onBack={() => changeWorkspace(null)} onBusyChange={setBusy} hoverModeEnabled={hoverModeEnabled} onHoverModeChange={setHoverModeEnabled} />}
+      {workspace?.kind === "new" && <ProcessMapCreateProcess key={workspace.processID} apiBase={apiBase} companyID={companyID} processID={workspace.processID} firstStep={workspace.firstStep} initialFolderID={workspace.folderID} folders={folders} foldersLoading={foldersLoading || !!folderError} active={active} onSaved={saved} onBack={() => changeWorkspace(null)} onBusyChange={setBusy} hoverModeEnabled={hoverModeEnabled} />}
       {workspace?.kind === "saved" && <section key={workspace.processID} className="process-map-workspace" aria-label="Saved Process map">
         <div className="process-map-workspace__path" aria-label="Process location">
           <button type="button" disabled={busy || detailsBusy} onClick={() => changeWorkspace(null)}>← Company map</button><span aria-hidden="true">/</span>
           <ProcessMapDestinationPath folders={folders} folderID={workspace.folderID} onChange={() => {}} disabled /><span aria-hidden="true">/</span><strong className="process-map-workspace__saved-name">{workspace.name}</strong>
+          <div className="process-map-workspace__save">
+            <span className="process-map-workspace__status">Saved · Changes save automatically</span>
+            <button type="button" disabled={busy || detailsBusy} onClick={() => { void openBoard(); }}>Open Board / SOP</button>
+          </div>
         </div>
         <ProcessMapSavedProcess apiBase={apiBase} companyID={companyID} processID={workspace.processID} onBusyChange={setBusy} hoverModeEnabled={hoverModeEnabled}
-          renderDetails={(canEdit, refreshVersion) => <ProcessMapDetails apiBase={apiBase} companyID={companyID} processID={workspace.processID} canEdit={canEdit} refreshVersion={refreshVersion} disabled={busy} onBusyChange={setDetailsBusy} />}
-          renderActions={({ createStep, disabled, busy: mapBusy }) => <ProcessMapActions onCreateStep={createStep} disabled={busy || mapBusy} stepDisabled={disabled} hoverModeEnabled={hoverModeEnabled} onHoverModeChange={setHoverModeEnabled}>
-            <span className="process-map-workspace__status">Saved · Changes save automatically</span>
-            <button type="button" disabled={busy} onClick={() => onOpenLogicGate(workspace.processID, workspace.name)}>Open Board / SOP</button>
-          </ProcessMapActions>} />
+          renderDetails={(canEdit, refreshVersion, focusStepID) => <ProcessMapDetails apiBase={apiBase} companyID={companyID} processID={workspace.processID} canEdit={canEdit} refreshVersion={refreshVersion} disabled={busy} onBusyChange={setDetailsBusy} focusStepID={focusStepID} />}
+          renderActions={({ createStep, disabled }) => <button type="button" className="process-map-workspace__add-step" aria-label="+ Create Step" title="Create Step" disabled={disabled} onClick={createStep}>+</button>} />
       </section>}
       </div>}
       {folderDialog && foldersLoading && <div role="status" className="process-map-authoring-notice">Loading Folders… <button type="button" onClick={() => setFolderDialog(null)}>Cancel</button></div>}

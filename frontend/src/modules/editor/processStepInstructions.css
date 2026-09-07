@@ -9,6 +9,8 @@
   padding: 16px 10px 28px;
 }
 
+.mango-process-instructions__steps[hidden] { display: none; }
+
 .mango-process-instructions__step {
   min-width: 0;
   border: 1px solid var(--mango-process-step-border, rgba(148, 163, 184, 0.25));

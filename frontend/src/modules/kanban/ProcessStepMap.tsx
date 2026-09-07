@@ -33,6 +33,8 @@ export type ProcessStepMapEditorProps = {
   commands: ProcessStepMapCommands;
   onChanged?: () => void;
   onBusyChange?: (busy: boolean) => void;
+  onStepCreated?: (stepID: string) => void;
+  authoring?: boolean;
   saveMode?: "saved" | "new";
   processName?: string;
   initialEditingStepID?: string;
@@ -98,7 +100,7 @@ export function ProcessStepMap(props: ProcessStepMapProps) {
   return <ProcessStepMapEditor key={`${apiBase}:${companyID}:${processID}`} {...editorProps} commands={commands} />;
 }
 
-export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, onChanged, onBusyChange, saveMode = "saved", processName = "", initialEditingStepID, hoverModeEnabled = false, renderActions }: ProcessStepMapEditorProps) {
+export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, onChanged, onBusyChange, onStepCreated, authoring = false, saveMode = "saved", processName = "", initialEditingStepID, hoverModeEnabled = false, renderActions }: ProcessStepMapEditorProps) {
   const [layout, setLayout] = useState<ProcessStepMapLayout | null>(null);
   const [preview, setPreview] = useState<ProcessStepMapLayout | null>(null);
   const [connectionPreview, setConnectionPreview] = useState<ConnectionGesture | null>(null);
@@ -112,6 +114,7 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
   const [busy, setBusy] = useState(false);
   const [gestureActive, setGestureActive] = useState(false);
   const [contextMenu, setContextMenu] = useState<StepMapPoint | null>(null);
+  const contextMenuContent = useRef<HTMLDivElement>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [conflict, setConflict] = useState(false);
@@ -125,11 +128,12 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
   const readController = useRef<AbortController | null>(null);
   const refreshPending = useRef(false);
   const layoutRef = useRef(layout);
-  const current = useRef({ steps, relationships, canEdit, onChanged, commands, onBusyChange });
-  current.current = { steps, relationships, canEdit, onChanged, commands, onBusyChange };
+  const current = useRef({ steps, relationships, canEdit, onChanged, commands, onBusyChange, onStepCreated });
+  current.current = { steps, relationships, canEdit, onChanged, commands, onBusyChange, onStepCreated };
   layoutRef.current = layout;
   const traceGradientID = `step-map-trace-${useId().replace(/:/g, "")}`;
   useAppFloatingMenuDismissal(deleteRequested, deleteConfirm, () => { setDeleteRequested(false); viewport.current?.focus({ preventScroll: true }); });
+  useAppFloatingMenuDismissal(contextMenu !== null, contextMenuContent, () => setContextMenu(null));
 
   const load = useCallback(async () => {
     if (busyRef.current || gesture.current) { refreshPending.current = true; return; }
@@ -184,8 +188,15 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
     return [{ edge, source, target, points }];
   }), [relationships, boxes, display.routes]);
   const currentBounds = useMemo(() => stepMapBounds({ ...display, routes: routes.map(({ edge, points }) => ({ resource_operational_relationship_id: edge.resource_operational_relationship_id, points })) }), [display, routes]);
-  const bounds = gesture.current?.bounds ?? currentBounds;
-  const camera = useProcessStepMapCamera(viewport, () => gesture.current !== null, loading ? null : bounds);
+  const camera = useProcessStepMapCamera(viewport, () => gesture.current !== null, loading ? null : currentBounds, authoring);
+  const frame = camera.initialFrame;
+  const frameBounds = frame ? {
+    x: Math.min(currentBounds.x, frame.x),
+    y: Math.min(currentBounds.y, frame.y),
+    width: Math.max(currentBounds.x + currentBounds.width, frame.x + frame.width) - Math.min(currentBounds.x, frame.x),
+    height: Math.max(currentBounds.y + currentBounds.height, frame.y + frame.height) - Math.min(currentBounds.y, frame.y),
+  } : currentBounds;
+  const bounds = gesture.current?.bounds ?? frameBounds;
   const zoom = camera.zoom;
   const selectedStep = selection?.kind === "step" ? stepByID.get(selection.id) : undefined;
   const selectedRoute = selection?.kind === "route" ? routes.find(({ edge }) => edge.resource_operational_relationship_id === selection.id) : undefined;
@@ -339,6 +350,7 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
       setName(result.step.name);
       editingRef.current = result.step.process_step_id;
       setEditingStepID(result.step.process_step_id);
+      current.current.onStepCreated?.(result.step.process_step_id);
     }
   }, "Step created. Select its name to rename it.");
   const startRename = (step: ProcessStep) => {
@@ -422,7 +434,7 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
     return { source, target, path: stepMapPath(source, target, defaultStepMapRoute(source, target)) };
   })();
 
-  return <section className="process-step-map process-step-map--canvas" aria-label="Process Step map">
+  return <section className={`process-step-map process-step-map--canvas${authoring ? " process-step-map--authoring" : ""}`} aria-label="Process Step map">
     {renderActions?.({ createStep: () => void createStep(), disabled, busy: busy || loading || gestureActive })}
     {error && <div className="process-step-map__error" role="alert">{error} <button type="button" disabled={busy} onClick={() => void load()}>Reload map</button></div>}
     <div className={`process-step-map__status${!loading && !conflict ? " is-hidden" : ""}`} role="status" aria-live="polite">{loading ? "Loading map…" : notice}</div>
@@ -446,7 +458,7 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
       setSelection(stepID ? { kind: "step", id: stepID } : routeID ? { kind: "route", id: routeID } : null);
       setContextMenu({ x: event.clientX, y: event.clientY });
     }}>
-      <div className="process-step-map__extent" style={{ width: bounds.width, height: bounds.height, minWidth: `calc(100% - ${bounds.x}px)`, minHeight: `calc(100% - ${bounds.y}px)` }}>
+      <div className="process-step-map__extent" style={{ width: bounds.width, height: bounds.height, minWidth: authoring ? undefined : `calc(100% - ${bounds.x}px)`, minHeight: authoring ? undefined : `calc(100% - ${bounds.y}px)` }}>
         <div className="process-step-map__canvas" style={{ width: "100%", height: "100%", transform: `translate(${camera.x + bounds.x * zoom}px, ${camera.y + bounds.y * zoom}px) scale(${zoom})` }}>
           <div className="process-step-map__process-outline" role="img" aria-label={`Process outline: ${processName.trim() || "Untitled Process"}`}><span aria-hidden="true">Process · {processName.trim() || "Untitled Process"}</span></div>
           {layout && <>
@@ -488,7 +500,7 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
             const points = delta ? selectedRoute.points.map((item, i) => i === index ? { x: snapStepMapCoordinate(item.x + delta.x), y: snapStepMapCoordinate(item.y + delta.y) } : item) : selectedRoute.points.filter((_, i) => i !== index);
             void saveLayout(withRoutePoints(display, selectedRoute.edge.resource_operational_relationship_id, points));
           }} />)}
-          {steps.length === 0 && saveMode === "new" && <p className="process-step-map__empty">Create your first Step to start this Process.</p>}
+          {steps.length === 0 && saveMode === "new" && <p className="process-step-map__empty">{authoring ? "Start this process with a right-click or by pressing the plus button." : "Create your first Step to start this Process."}</p>}
           </>}
         </div>
       </div>
@@ -499,6 +511,7 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
       <button type="button" autoFocus onClick={() => { setDeleteRequested(false); viewport.current?.focus({ preventScroll: true }); }}>Cancel</button>
     </div>}
     {contextMenu && <FrameRightClickMenu x={contextMenu.x} y={contextMenu.y} ariaLabel={selectedStep ? "Step actions" : selectedRoute ? "Connection actions" : "Process map creation"} onClose={() => setContextMenu(null)}>
+      <div ref={contextMenuContent}>
       {selectedStep ? <>
         <button className="process-step-map__context-action" type="button" role="menuitem" disabled={disabled} onClick={() => { setContextMenu(null); startRename(selectedStep); }}>Rename Step</button>
         <button className="process-step-map__context-action process-step-map__danger" type="button" role="menuitem" disabled={disabled} onClick={() => { setContextMenu(null); setDeleteRequested(true); }}>Delete Step</button>
@@ -511,6 +524,7 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
         <button className="process-step-map__context-action" type="button" role="menuitem" disabled={disabled} onClick={() => { setContextMenu(null); void saveLayout(withRoutePoints(display, selectedRoute.edge.resource_operational_relationship_id, defaultStepMapRoute(selectedRoute.source, selectedRoute.target))); }}>Reset route</button>
         <button className="process-step-map__context-action process-step-map__danger" type="button" role="menuitem" disabled={disabled} onClick={() => { setContextMenu(null); void changeDefinition(() => current.current.commands.disconnectSteps(selectedRoute.edge.resource_operational_relationship_id), "Connection deleted. Both Steps are preserved."); }}>Delete connection</button>
       </> : <button className="process-step-map__context-action" type="button" role="menuitem" disabled={disabled} onClick={() => { setContextMenu(null); void createStep(); }}>Create Step</button>}
+      </div>
     </FrameRightClickMenu>}
   </section>;
 }

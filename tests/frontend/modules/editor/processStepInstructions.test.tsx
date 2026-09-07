@@ -59,10 +59,11 @@ test("Process instructions share one toolbar and scroll while step bodies follow
   const requestJSON = async <T,>(): Promise<T> => { assert.fail("unsaved Process instructions must not write to a server"); };
   let boldActive = false;
   let fontSize = 0;
+  let section: "overview" | "steps" | undefined;
   const render = (key = "process-a") => root.render(<React.Suspense fallback={<div>Loading editor</div>}>
     <button onMouseDown={(event) => event.preventDefault()} onClick={() => controllerRef.current?.insertTable()}>Insert table</button>
     <LogicGateTiptapEditorSurface key={key} apiBase="" companyID="company-local" resourceID="process-a" documentID="logic-gate-overview"
-      saveMode="local" value={JSON.stringify(overview)} steps={steps} requestJSON={requestJSON} formattingControllerRef={controllerRef}
+      saveMode="local" value={JSON.stringify(overview)} steps={steps} section={section} requestJSON={requestJSON} formattingControllerRef={controllerRef}
       leadingContent={<div>Process metadata</div>} onSelectionInlineFormatChange={(format) => { boldActive = format.bold; }}
       onSelectionFontSizeChange={(next) => { fontSize = next; }}
       onDocumentSnapshotChange={(document) => { overview = document; }}
@@ -124,6 +125,19 @@ test("Process instructions share one toolbar and scroll while step bodies follow
     await act(async () => { controllerRef.current!.applyTextAlignment("center"); });
     assert.match(JSON.stringify(overview), /"textAlign":"center"/);
     assert.match(JSON.stringify(steps.find((step) => step.process_step_id === "step-b")!.body_json), /"textAlign":"right"/);
+    const overviewEditor = editorRoot();
+    section = "steps";
+    await act(async () => render());
+    assert.equal(overviewEditor.parentElement?.hidden, true, "Steps hides the overview without unmounting it");
+    assert.equal(editorRoot("step-b"), shipEditor);
+    await activate("step-b");
+    section = "overview";
+    await act(async () => render());
+    assert.equal(dom.window.getComputedStyle(container.querySelector(".mango-process-instructions__steps")!).display, "none");
+    assert.equal(editorRoot(), overviewEditor, "changing sections keeps the live overview and its pending edits");
+    await act(async () => { controllerRef.current!.applyTextAlignment("left"); });
+    assert.match(JSON.stringify(overview), /"textAlign":"left"/, "the toolbar targets the visible overview after a tab change");
+    assert.match(JSON.stringify(steps.find((step) => step.process_step_id === "step-b")!.body_json), /"textAlign":"right"/, "the toolbar must not edit a hidden step");
     await act(async () => render("reopened"));
     await waitFor(() => Boolean(stepCard("step-b")), "the saved local step did not reopen");
     assert.match(stepCard("step-b").textContent ?? "", /Ship instructions/);

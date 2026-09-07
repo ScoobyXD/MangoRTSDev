@@ -13,7 +13,7 @@ export type ProcessMapSavedProcessProps = {
   onBusyChange?: (busy: boolean) => void;
   hoverModeEnabled?: boolean;
   renderActions?: ProcessStepMapEditorProps["renderActions"];
-  renderDetails?: (canEdit: boolean, refreshVersion: number) => ReactNode;
+  renderDetails?: (canEdit: boolean, refreshVersion: number, focusStepID?: string) => ReactNode;
 };
 
 export function ProcessMapSavedProcess(props: ProcessMapSavedProcessProps) {
@@ -27,6 +27,7 @@ function SavedProcess({ apiBase, companyID, processID, onBusyChange, hoverModeEn
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
   const [refreshVersion, setRefreshVersion] = useState(0);
+  const [focusStepID, setFocusStepID] = useState<string>();
   const refreshRef = useRef<() => void>(() => undefined);
   const busyCallback = useRef(onBusyChange);
   busyCallback.current = onBusyChange;
@@ -90,12 +91,12 @@ function SavedProcess({ apiBase, companyID, processID, onBusyChange, hoverModeEn
   }, [apiBase, companyID, processID, retry]);
 
   return <section aria-label="Saved Process map" className="process-map-saved-process">
-    {snapshot && renderDetails?.(!loading && !error && snapshot.permissions.can_edit, refreshVersion)}
+    {snapshot && renderDetails?.(!loading && !error && snapshot.permissions.can_edit, refreshVersion, focusStepID)}
     {loading && <div role="status" className="process-map-authoring-notice">Loading Process…</div>}
     {error && <div role="alert" className="process-map-authoring-error">{error} <button type="button" onClick={() => setRetry((value) => value + 1)}>Retry</button></div>}
     {!snapshot && renderActions?.({ createStep: () => {}, disabled: true, busy: loading })}
     {snapshot && <ProcessStepMap apiBase={apiBase} companyID={companyID} processID={processID}
       steps={snapshot.steps} relationships={snapshot.relationships} canEdit={!loading && !error && snapshot.permissions.can_edit} processName={snapshot.logic_gate.header}
-      onChanged={() => refreshRef.current()} onBusyChange={setMapBusy} hoverModeEnabled={hoverModeEnabled} renderActions={renderActions} />}
+      onChanged={() => refreshRef.current()} onBusyChange={setMapBusy} hoverModeEnabled={hoverModeEnabled} authoring onStepCreated={setFocusStepID} renderActions={renderActions} />}
   </section>;
 }

@@ -196,24 +196,24 @@
 194. Every successful mutation acknowledgement in the current protected generation MUST request canonical validation even when a newer object operation prevents applying its overlay.
 195. Canonical coverage MUST NOT retire mutation masks until it reaches every acknowledged read version; after replacement coverage completes, later pans MUST NOT render older cached moved or deleted objects.
 196. Ordinary local and remote refresh requests MUST coalesce while preserving a queued refresh for changes arriving during an active read.
-197. One elevated translucent card inside the map's top-right corner MUST retain vertically stacked Create Folder, Create Process, and Create Step actions in that order during company browsing, Process creation, and Step creation.
+197. The company map MUST retain its top-right creation card with vertically stacked Create Folder, Create Process, and Create Step actions.
 198. A context creation action on an accessible Folder MUST carry that exact Folder as its proposed destination.
 199. Create Process opens an unsaved new Process in the shared map pane without creating a saved draft.
 200. Create Step without an open Process starts a new Process containing one Step.
-201. Save Process atomically creates the Process, chosen Explorer placement, Steps, connections, geometry, chosen RACI, and SOP through the existing workspace batch command.
+201. Save Process atomically creates the Process, chosen Explorer placement, Steps, connections, geometry, inherited RACI, and SOP through the existing workspace batch command.
 202. Create Folder MUST use the canonical Explorer Folder command with the chosen parent and MUST create no separate map resource.
 203. Returning from the focused Process canvas MUST preserve the mounted company canvas and its camera.
 204. An initially empty scene MUST remain eligible to fit the first nonempty company bounds; ordinary later refreshes MUST preserve the camera.
 205. An empty company scene MUST show an explanatory status with read-only Retry inside the map and MUST NOT silently reset or backfill saved map geometry.
 206. Create Step in a focused new or saved Process adds to that exact Process.
-207. A focused Process shows its Folder path and compact filename at the top, with editable naming for a new Process.
+207. A focused Process shows its Folder path and compact filename near the top edge, aligned with the top of its right-hand editor.
 208. Folder selection and Folder creation MUST use compact elevated surfaces inside the shared map pane.
-209. Save Process and its save status MUST appear in the common top-right card instead of a separate header or button row.
+209. Save Process and its save status MUST appear in the focused Process breadcrumb row.
 210. The company map's blank-canvas context menu MUST offer Create Folder, Create Process, and Create Step.
 211. Hover mode MUST retain its checked state when entering or leaving a focused Process.
-212. Opening a new Process animates its work area while the creation card and breadcrumb stay fixed.
+212. Opening a new Process animates its work area while its editor and breadcrumb stay fixed.
 213. A focused Process MUST immediately show a labeled rectangular outline around its Step canvas, including when it has no Steps.
-214. A focused Process starts at at most 85% zoom with space around its outline and its initial map viewport below the RACI controls and left of the action card.
+214. A focused Process starts with equal margins around its outline within the available canvas to the left of its editor.
 215. A reduced-motion preference MUST skip Process entrance and exit animations.
 216. The Process outline MUST expand as needed to contain all authored Step and route geometry.
 217. Process outline sizing MUST remain local presentation without rewriting authored geometry or creating another resource or layout record.
@@ -226,10 +226,10 @@
 224. The focused Process camera MUST remain fixed during a Step, route, or connection editing gesture.
 225. Deferred breadcrumb focus restoration MUST preserve any newer focus choice made by the user.
 226. New and saved Process maps omit Step and connection inspectors.
-227. Create Folder and Create Process remain visible and disabled inside focused Processes.
+227. Focused Processes omit the company creation card and provide a plus button for creating a Step in the current Process.
 228. Focused Step title editing MUST show borderless text with the entire name selected when editing begins.
 229. Folder breadcrumb controls and Folder picker choices MUST use an orange gradient.
-230. The creation card MUST sit 56 pixels below the map's top edge, or 52 pixels on viewports at most 700 pixels wide.
+230. The company creation card MUST sit 56 pixels below the map's top edge, or 52 pixels on viewports at most 700 pixels wide.
 231. Each focused Step MUST have a left input port and right output port separate from its six corner and top or bottom resize handles.
 232. Dragging between distinct Steps' opposite ports MUST connect the output Step to the input Step regardless of the drag's starting end.
 233. A valid completed connection MUST use the existing same-Process Step connection command with exact canonical Step IDs.
@@ -246,7 +246,7 @@
 244. Reduced motion or hiding the page immediately finishes a pending Process exit.
 245. Step traces and connection previews MUST use the Node icon's light cyan-to-blue gradient without arrowheads.
 246. Hovering or selecting a Step trace MUST preserve its gradient while making the trace more visible.
-247. The Process editor's right-hand Map pane MUST use the same white Process canvas, green outline, and pan-and-zoom interactions as the company Process Map's focused Process.
+247. The Process editor's right-hand Map pane MUST reuse the existing Process canvas and pan-and-zoom interactions.
 248. Create Step and Board / Map controls in the Process editor's Map pane MUST float inside the canvas without reducing its layout area.
 249. Process Step canvases MUST omit scrollbars, dots, separate toolbars, persistent help text, zoom buttons, and Fit.
 250. Tile reads MUST skip inherited Responsible and Accountable assignment resolution for restricted placements, Folders, and Processes below the tile's editing-detail threshold.
@@ -255,8 +255,8 @@
 253. A 200 tile ETag MUST use the role, versions, and Los Angeles business date returned by its complete read; score-card selection MUST use that same business date.
 254. Spatial candidate filtering MUST include both real placement bounds and the restricted 4-by-3 footprint before resolving and reusing placement and parent permissions.
 255. A complete tile read MUST keep placements and traces independent while preserving endpoint authorization, crossing traces, clipping, and detail eligibility.
-256. The focused map shows the shared RACI role cards immediately below its path.
-257. The Editor disclosure below RACI opens the existing SOP editor at the same width and a bounded height.
+256. The focused map omits RACI role cards without changing existing assignments or permissions.
+257. The focused map keeps its existing SOP editor open in a right-hand column without an Editor disclosure or QCD scorecard.
 258. Changing a new Process destination expands its exact Folder path in Company Explorer.
 259. Successful creation refreshes the existing map and selects the exact committed Process without moving an established camera.
 260. Successful creation reveals and selects the Process in its expanded Explorer Folder without opening the Board.
@@ -270,11 +270,19 @@
 268. Tile readers MUST share immutable normalized geometry, and editing MUST own any mutable copies.
 269. Batched tile publication MUST publish current coverage before retiring mutation masks, and protected purges MUST cancel pending publication.
 270. Validation requests that exceed 512 candidates MUST prioritize current visible detail before other visible coverage and offscreen history.
-Last updated: 2026-09-05
+271. The right-hand editor provides bottom Editor and Steps tabs while retaining the mounted overview and Step editors across tab changes.
+272. Creating a Step opens the Steps tab and reveals that exact Step's existing instruction card.
+273. The focused map's context menu closes when a left click occurs outside the menu.
+274. An empty focused Process displays “Start this process with a right-click or by pressing the plus button.”
+275. The focused Process outline uses a blue rim.
+276. Confirmed editor save recovery releases the focused Process's busy state.
+277. Formatting controls affect only the currently visible editor section.
+278. Leaving a saved focused Process or opening its Board waits for the existing overview and Step save flush to succeed.
+Last updated: 2026-09-07
 
 # Process Story: One company canvas moves from overview to Process work
 
-An authorized user opens the company map. Each fresh tile returns its authorized content and ETag metadata from one snapshot; cached tiles first recheck current access and versions. The user creates a Process, chooses its Folder, assigns RACI, writes its SOP, and arranges Steps on the same map. Save commits those records together and returns through the existing animation to the previous company view, with the Process selected and its Explorer Folder expanded. Going back before Save asks for confirmation and discards the unfinished Process only when confirmed. Opening an existing Process uses those same RACI, SOP, and Step records, with Board / SOP available in its existing popup.
+An authorized user opens the company map. Each fresh tile returns its authorized content and ETag metadata from one snapshot; cached tiles first recheck current access and versions. The user creates a Process, chooses its Folder, writes its SOP in the right-hand editor, and arranges Steps on the same map. Creating a Step opens its instruction card under Steps. Save commits those records together with inherited RACI and returns through the existing animation to the previous company view, with the Process selected and its Explorer Folder expanded. Going back before Save asks for confirmation and discards the unfinished Process only when confirmed. Opening an existing Process uses those same SOP and Step records without changing its assignments, with Board / SOP available in its existing popup.
 
 ## Scenario: Fit nested Folders within the existing world
 
