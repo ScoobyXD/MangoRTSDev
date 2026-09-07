@@ -2,7 +2,7 @@
 
 This directory packages the upstream Hermes HTTP gateway and one supported tools plugin. It does not wrap `AIAgent` in a new server. Reviewed upstream: **0.21.0**, commit **693641aa8b4359c602283bdbbc14041e03bc47bc**. The image installs that revision's frozen `uv.lock`.
 
-One private container serves one exact Mango **company + user**. The Go backend owns the route mapping, authenticates the user, checks company membership, and refuses an unconfigured scope. Enabling routes requires PostgreSQL and the repository assistant migration; the production application refuses the in-memory repository for this feature. Provision a different private URL, API credential, callback credential, and persistent `/data` volume for every pair. Do not mount another tenant's home, host files, AWS writer credentials, or Docker socket into this container. Only Go may reach port 8642; browser clients use Mango's existing API.
+One private container serves one exact Mango **company + user**. The Go backend owns the route mapping, authenticates the user, checks company membership, and refuses an unconfigured scope. Enabling routes requires PostgreSQL and the repository AI receipt migration; the production application refuses the in-memory repository for this feature. Provision a different private URL, API credential, callback credential, and persistent `/data` volume for every pair. Do not mount another tenant's home, host files, AWS writer credentials, or Docker socket into this container. Only Go may reach port 8642; browser clients use Mango's existing API.
 
 ## Runtime configuration
 
@@ -82,18 +82,20 @@ The September 2026 verification passed both native smoke modes with the installe
 
 One earlier native-Go smoke returned an unexplained empty-response failure; both final smoke modes passed, and no cause is claimed for the earlier failure. The Docker image build and live provider calls remain unverified. The local app's reconnect dialog prevented a live microphone check, and the development AWS SSO session had expired; see [STT setup](../docs/setup/stt.md).
 
-Before enabling routes, a human operator must apply [20260907_hermes_action_receipts.sql](../backend/db/migrations/20260907_hermes_action_receipts.sql). It adds `assistant_runs` and `assistant_node_actions`; it does not alter native Hermes storage or existing resource relationships. The SQL supports PostgreSQL 17.x (the dev database is 17.7); isolated tests also use PostgreSQL 18. Run this read-only preflight directly in DBeaver and proceed only after READY:
+Before enabling routes, a human operator must apply [20260907_hermes_action_receipts.sql](../backend/db/migrations/20260907_hermes_action_receipts.sql). It adds `ai_runs` for scoped submissions and one shared `ai_actions` table for all AI mutations. Each action stores a JSON outcome under `(company_id, user_id, request_id, action_name, action_key)`; new commands use another `action_name`, not another table. It does not alter native Hermes storage or existing resource relationships. The SQL supports PostgreSQL 17.x (the dev database is 17.7); isolated tests also use PostgreSQL 18. Run this read-only preflight directly in DBeaver and proceed only after READY:
 
 ```sql
 SELECT current_setting('server_version') AS postgres_version,
        CASE WHEN current_setting('server_version_num')::integer >= 170000
                   AND current_setting('server_version_num')::integer < 190000
-                  AND to_regclass('public.assistant_runs') IS NULL
-                  AND to_regclass('public.assistant_node_actions') IS NULL
-            THEN 'READY: apply the assistant receipt migration'
+                  AND to_regclass('public.ai_runs') IS NULL
+                  AND to_regclass('public.ai_actions') IS NULL
+            THEN 'READY: apply the AI receipt migration'
             ELSE 'STOP: unsupported server version or receipt tables already exist; inspect before applying'
        END AS migration_preflight;
 ```
+
+Some older deployments may retain the removed AI inspection archive under `public.ai_runs`. Any existing table with that name must stop this migration for human inspection. This migration neither reuses nor converts the archive, and any live removal requires separate approval.
 
 Deploying this image, provisioning per-pair storage and credentials, setting backend routes, and applying the repository migration are separate human rollout actions. This worktree does not deploy or apply them. Scheduled verified exports, private S3 backups, searchable PostgreSQL imports, shared memory, and scheduled workflow execution remain later work.
 

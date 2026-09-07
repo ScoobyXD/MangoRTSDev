@@ -248,7 +248,7 @@ func TestPostgresAssistantMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	if err := db.QueryRow(`select count(*) from information_schema.tables where table_schema='public' and table_name in ('assistant_runs','assistant_node_actions')`).Scan(&count); err != nil || count != 2 {
+	if err := db.QueryRow(`select count(*) from information_schema.tables where table_schema='public' and table_name in ('ai_runs','ai_actions')`).Scan(&count); err != nil || count != 2 {
 		t.Fatalf("assistant receipt schema: %d %v", count, err)
 	}
 }

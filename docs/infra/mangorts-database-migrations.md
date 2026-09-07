@@ -32,7 +32,7 @@ Default mode is `migrate`. This is intentionally conservative for existing produ
 
 ### Removed AI inspection storage
 
-The legacy assistant no longer reads or writes `public.ai_runs`. Its table definition, creation migration, and reset script have been removed from the repository. New databases do not create the archive. This source cleanup performs no live database change and supplies no destructive cleanup migration. An existing archive table and its migration ledger remain as deployed; removing those live objects requires a separately approved human database operation. No database migration is required to run the app with the assistant removed.
+The legacy AI inspection archive remains removed from the application and repository schema. The Hermes integration now defines `public.ai_runs` for scoped submission admission and one shared `public.ai_actions` table for committed AI command outcomes; it does not restore the inspection archive. Apply `20260907_hermes_action_receipts.sql` only through the reviewed human rollout described in [Hermes setup](../../hermes/README.md). If an older deployment still has the legacy `public.ai_runs` archive, the preflight must stop for human inspection. The migration does not reuse, convert or drop that archive; removing any live legacy objects requires a separately approved human database operation.
 
 ### 20260718 Tiptap JSON foundation
 

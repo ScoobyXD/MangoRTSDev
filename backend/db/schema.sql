@@ -9516,7 +9516,7 @@ CREATE TRIGGER trg_process_step_map_prune_route AFTER DELETE ON public.resource_
 FOR EACH ROW EXECUTE FUNCTION public.trg_process_step_map_prune_route();
 
 
-CREATE TABLE public.assistant_runs (
+CREATE TABLE public.ai_runs (
     company_id uuid NOT NULL,
     user_id uuid NOT NULL,
     request_id text NOT NULL,
@@ -9532,17 +9532,18 @@ CREATE TABLE public.assistant_runs (
     FOREIGN KEY (user_id) REFERENCES public.users(user_id) ON DELETE CASCADE
 );
 
-CREATE UNIQUE INDEX assistant_runs_one_active ON public.assistant_runs(company_id, user_id) WHERE NOT settled;
-CREATE UNIQUE INDEX assistant_runs_native_id ON public.assistant_runs(company_id, user_id, run_id) WHERE run_id <> '';
+CREATE UNIQUE INDEX ai_runs_one_active ON public.ai_runs(company_id, user_id) WHERE NOT settled;
+CREATE UNIQUE INDEX ai_runs_native_id ON public.ai_runs(company_id, user_id, run_id) WHERE run_id <> '';
 
 -- A receipt records a committed command, not a live resource relationship.
--- Keep it after Node deletion so retries cannot recreate deleted work.
-CREATE TABLE public.assistant_node_actions (
+-- All AI mutations share this table; retain outcomes after resource deletion.
+CREATE TABLE public.ai_actions (
     company_id uuid NOT NULL,
     user_id uuid NOT NULL,
     request_id text NOT NULL,
+    action_name text NOT NULL,
     action_key text NOT NULL,
     outcome jsonb NOT NULL,
-    PRIMARY KEY (company_id, user_id, request_id, action_key),
-    FOREIGN KEY (company_id, user_id, request_id) REFERENCES public.assistant_runs(company_id, user_id, request_id) ON DELETE CASCADE
+    PRIMARY KEY (company_id, user_id, request_id, action_name, action_key),
+    FOREIGN KEY (company_id, user_id, request_id) REFERENCES public.ai_runs(company_id, user_id, request_id) ON DELETE CASCADE
 );

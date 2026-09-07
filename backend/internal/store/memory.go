@@ -9,7 +9,7 @@ import (
 type MemoryRepo struct {
 	assistantRuns                    map[string]AssistantRun
 	assistantStreams                 map[string]bool
-	assistantNodeActions             map[string]map[string]LogicGateNodeAssignmentResult
+	aiActions                        map[string]map[aiActionKey][]byte
 	attachmentStorageMu              sync.Mutex
 	mu                               sync.RWMutex
 	nodes                            map[string]domain.Node
@@ -132,7 +132,7 @@ func NewMemoryRepo() *MemoryRepo {
 	return &MemoryRepo{
 		assistantRuns:                    map[string]AssistantRun{},
 		assistantStreams:                 map[string]bool{},
-		assistantNodeActions:             map[string]map[string]LogicGateNodeAssignmentResult{},
+		aiActions:                        map[string]map[aiActionKey][]byte{},
 		nodes:                            map[string]domain.Node{},
 		nodeInfo:                         map[string][]domain.NodeInformation{},
 		nodeText:                         map[string]map[string]domain.NodeProjection{},

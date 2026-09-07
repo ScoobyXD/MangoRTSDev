@@ -25,12 +25,14 @@ Status: first HTTP integration implemented in source. Service provisioning, runt
 21. Native memory curation and skill learning must remain enabled within the scoped home; shell, general filesystem, network, delegation and scheduled execution tools must remain unavailable in this first integration.
 22. Missing Hermes configuration must show a useful error while preserving ordinary Mango behavior, typed drafts and independent Deepgram dictation.
 23. The application runtime must require PostgreSQL receipt storage before enabling Hermes; the in-memory repository is only a test fixture for this integration.
+24. `ai_actions` must be the single shared receipt table for all AI mutations, with no receipt table per operation.
+25. An action receipt must be keyed by company, user, request ID, command `action_name` and `action_key`, with its command result stored as JSON.
 
 ## Process story
 
 The user explicitly sends a message. Mango verifies the account and company, reserves one durable request and sends it to that pair's private Hermes service. Hermes streams the reply and keeps native history and memory. If the user requests work, the supported Mango plugin calls Go with runtime run/session metadata. Go checks the stored admission and current access, then uses the existing Process/Step/Node command and saves its action receipt in the same transaction. Closing the panel or losing the connection does not resubmit work; reopening reads saved state. Stop blocks new Mango actions before asking Hermes to stop.
 
-Mango's `assistant_runs` and `assistant_node_actions` tables hold admission and committed-action receipts only. The pending message is cleared when the native run ID is bound. These tables do not replace native memory, session history, response storage or cron data and do not create a resource registry or another relationship authority. A Node receipt is historical command evidence, not a live ownership link.
+Mango's `ai_runs` and shared `ai_actions` tables hold admission and committed-action receipts only. `action_name` distinguishes commands within the same submission; every AI mutation uses this receipt table and its JSON outcome. The pending message is cleared when the native run ID is bound. These tables do not replace native memory, session history, response storage or cron data and do not create a resource registry or another relationship authority. An action receipt is historical command evidence, not a live ownership link.
 
 Runtime routing is explicit provisioning in `MANGORTS_HERMES_ROUTES`; there is no automatic container scheduler or profile multiplexing. One route must point to one independently bound persistent home. Unprovisioned accounts receive an unavailable error. A native home is retained privately after membership removal; operations must retire user/company volumes according to their retention policy after permanent deletion, and must never reassign them to another identity. The deleted `ai/` and `docs/tests/AI&MCP.md` remain removed.
 

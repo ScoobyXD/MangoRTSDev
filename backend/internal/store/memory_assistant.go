@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 )
 
@@ -179,9 +180,11 @@ func (r *MemoryRepo) AssistantCreateNode(ctx context.Context, requested Assistan
 	if !r.userHasEffectiveAccessLocked(run.CompanyID, run.UserID, EntityTypeLogicGate, input.LogicGateID, EntityPermissionEdit) {
 		return LogicGateNodeAssignmentResult{}, ErrNotFound
 	}
-	id := assistantRunKey(run.CompanyID, run.UserID, run.RequestID)
-	if saved, ok := r.assistantNodeActions[id][actionKey]; ok {
-		saved.Events = nil
+	action := aiActionKey{Name: aiCreateNodeAction, Key: actionKey}
+	var saved LogicGateNodeAssignmentResult
+	if found, err := r.loadAIActionLocked(run, action, &saved); err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	} else if found {
 		return saved, nil
 	}
 	if _, exists := r.nodes[key(run.CompanyID, input.NodeID)]; exists {
@@ -193,18 +196,42 @@ func (r *MemoryRepo) AssistantCreateNode(ctx context.Context, requested Assistan
 		r.restoreWorkItemAssignmentEventStateLocked(snapshot)
 		return LogicGateNodeAssignmentResult{}, err
 	}
-	if r.assistantNodeActions[id] == nil {
-		r.assistantNodeActions[id] = map[string]LogicGateNodeAssignmentResult{}
+	if err := r.saveAIActionLocked(run, action, result); err != nil {
+		r.restoreWorkItemAssignmentEventStateLocked(snapshot)
+		return LogicGateNodeAssignmentResult{}, err
 	}
-	r.assistantNodeActions[id][actionKey] = result
 	return result, nil
+}
+
+func (r *MemoryRepo) loadAIActionLocked(run AssistantRun, action aiActionKey, outcome any) (bool, error) {
+	receipt, found := r.aiActions[assistantRunKey(run.CompanyID, run.UserID, run.RequestID)][action]
+	if !found {
+		return false, nil
+	}
+	return true, json.Unmarshal(receipt, outcome)
+}
+
+func (r *MemoryRepo) saveAIActionLocked(run AssistantRun, action aiActionKey, outcome any) error {
+	id := assistantRunKey(run.CompanyID, run.UserID, run.RequestID)
+	if _, exists := r.aiActions[id][action]; exists {
+		return ErrConflict
+	}
+	receipt, err := json.Marshal(outcome)
+	if err != nil {
+		return err
+	}
+	if r.aiActions[id] == nil {
+		r.aiActions[id] = map[aiActionKey][]byte{}
+	}
+	r.aiActions[id][action] = receipt
+	return nil
 }
 
 func (r *MemoryRepo) deleteAssistantMemberDataLocked(companyID, userID string) {
 	for id, run := range r.assistantRuns {
 		if run.UserID == userID && (companyID == "" || run.CompanyID == companyID) {
 			delete(r.assistantRuns, id)
-			delete(r.assistantNodeActions, id)
+			delete(r.aiActions, id)
 		}
 	}
 }

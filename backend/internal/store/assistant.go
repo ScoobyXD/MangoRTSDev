@@ -24,6 +24,15 @@ type AssistantRun struct {
 	PayloadHash    string    `json:"-"`
 }
 
+const aiCreateNodeAction = "mango_create_node"
+
+// Action names separate command receipts even when their argument hashes match.
+// Outcomes are historical JSON, not resource relationships or live resource state.
+type aiActionKey struct {
+	Name string
+	Key  string
+}
+
 type AssistantRepository interface {
 	ReserveAssistantRun(context.Context, AssistantRun) (AssistantRun, error)
 	GetAssistantRun(context.Context, string, string, string) (AssistantRun, error)
@@ -58,7 +67,7 @@ func assistantNodeInput(run AssistantRun, actionKey string, input LogicGateNodeA
 		return LogicGateNodeAssignmentInput{}, ErrInvalid
 	}
 	input.CompanyID, input.ActorUserID = run.CompanyID, run.UserID
-	input.IdempotencyKey = "assistant:" + run.RequestID + ":" + actionKey
+	input.IdempotencyKey = "ai:" + run.RequestID + ":" + aiCreateNodeAction + ":" + actionKey
 	return NormalizeLogicGateNodeAssignmentInput(input)
 }
 
