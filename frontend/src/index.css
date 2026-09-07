@@ -217,13 +217,7 @@ button, input, textarea, select {
   flex-shrink: 0;
   display: flex;
   max-width: 100%;
-  padding: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.55);
-  border-radius: 12px;
-  background: rgba(245, 250, 252, 0.76);
-  box-shadow: 0 4px 20px rgba(13, 36, 50, 0.08);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  gap: 6px;
 }
 .mango-auth-nav button {
   min-height: 40px;
@@ -231,13 +225,13 @@ button, input, textarea, select {
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: #334155;
+  color: #fff;
   font-size: 12px;
   font-weight: 650;
   cursor: pointer;
 }
 .mango-auth-nav button[aria-pressed="true"] { background: #233e50; color: #fff; }
-.mango-auth-nav button[aria-pressed="false"]:hover { background: rgba(255, 255, 255, 0.65); }
+.mango-auth-nav button[aria-pressed="false"]:hover { background: rgba(35, 62, 80, 0.7); }
 .mango-auth-content {
   flex: 1 0 auto;
   display: flex;
@@ -263,6 +257,7 @@ button, input, textarea, select {
   -webkit-backdrop-filter: blur(18px);
 }
 .mango-auth-panel-wide { max-width: 480px; }
+.mango-auth-nav button[aria-pressed="false"],
 .mango-auth-panel-wide .mango-auth-section-title,
 .mango-auth-panel-wide .mango-auth-field-label {
   color: #fff;
@@ -308,12 +303,13 @@ button, input, textarea, select {
 .mango-auth-split-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
 }
 .mango-auth-split-actions > button { min-width: 0; padding: 4px 6px; line-height: 16px; }
-.mango-auth-split-actions > button:first-child { border-radius: 7px 0 0 7px; }
-.mango-auth-split-actions > button:last-child { border-radius: 0 7px 7px 0; background: #f8fafc; }
+.mango-auth-split-actions > button:last-child { background: #f8fafc; }
 .mango-auth-input:focus,
 .mango-auth-landing button:focus-visible { outline: 2px solid #245f85; outline-offset: 3px; }
+.mango-auth-nav button:focus-visible { box-shadow: 0 0 0 5px #f8fafc; }
 .mango-auth-primary:disabled,
 .mango-auth-secondary:disabled { cursor: not-allowed; opacity: 0.58; }
 @media (max-width: 580px) {

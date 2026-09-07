@@ -36,9 +36,10 @@
 33. Wallpaper rotation must wait about one minute between scenes, run only with multiple scenes, pause while the page is hidden, and stop for reduced motion.
 34. Wallpaper loading must request only the current scene and the next scene when needed, and remove timers and listeners when unmounted.
 
-35. Each login form's bottom action row must split into equal halves: Sign Up then Accept Invite in the left form, and Sign In then Forgot Password in the right form.
+35. Each login form's bottom action row must contain equal-width buttons with a small gap: Sign Up then Accept Invite in the left form, and Sign In then Forgot Password in the right form.
 36. Auth controls must remain reachable on small or short screens without overlapping the landing navigation.
 37. Sign Up and Sign In fields must use opaque light backgrounds with dark text, and their exposed headings and labels must stay legible over varied scenery.
+38. Landing navigation must have no shared background rectangle.
 
 ## Wallpaper setup
 
