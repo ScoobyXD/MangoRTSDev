@@ -6,6 +6,8 @@ One private container serves one exact Mango **company + user**. The Go backend 
 
 ## Runtime configuration
 
+For this Windows laptop, follow [local startup](../docs/setup/hermes-local.md). The existing Cognito launcher can start the pinned container and Go together after the one-time Docker image, scope configuration and operator-run SQL setup.
+
 Build from the repository root:
 
 ```sh
@@ -25,7 +27,7 @@ Supply these environment variables through the deployment runtime:
 
 `HERMES_HOME=/data` is set in the image. Mount a new empty persistent volume there, owned by UID/GID 10001. Startup records the pair in `mango-scope.json`, rejects a volume already bound to another pair, and rejects existing unbound contents. It also rejects alternate `gateway.json`, `.env`, `.op.env`, and nondefault or linked `active_profile` files, forces the documented supervised gateway mode, and disables profile multiplexing so native startup cannot switch away from the verified home or overwrite injected credentials. Managed overlays (HERMES_MANAGED_DIR or /etc/hermes) are unsupported and rejected. Reuse the same pair and volume across restarts. Run with a read-only image filesystem, a private writable `/tmp`, dropped capabilities, and no-new-privileges. Use persistent local/block storage suitable for SQLite WAL; network filesystem assumptions require separate verification.
 
-Startup resolves only the authorized development OpenAI secret `arn:aws:secretsmanager:us-west-1:686458136219:secret:mangorts/dev/openai-api-key-EaABNe`. It accepts a raw `SecretString` or the existing named JSON properties `api_key`, `openai_api_key`, or `OPENAI_API_KEY`, and rejects unknown JSON objects. It pins the provider destination to https://api.openai.com/v1, keeps the result in process environment for the native provider, and never writes it into configuration. Use `mangorts-dev` SSO for a local application process, or an infrastructure-provisioned task role limited to this ARN. Do not copy keys into `.env` files. The container also needs the two runtime credentials above; this source change does not create secrets, roles, service routes, or cloud resources.
+Startup resolves only the authorized development OpenAI secret `arn:aws:secretsmanager:us-west-1:686458136219:secret:mangorts/dev/openai-api-key-EaABNe`. It accepts a raw `SecretString` or the existing named JSON properties `api_key`, `openai_api_key`, or `OPENAI_API_KEY`, and rejects unknown JSON objects. It pins the provider destination to https://api.openai.com/v1, keeps the result in process environment for the native provider, and never writes it into configuration. The local launcher uses `mangorts-dev` SSO outside the container; cloud startup requires an infrastructure-provisioned task role limited to this ARN. Do not copy keys into `.env` files. The local launcher generates the two service credentials and Go route for that launch. Cloud secrets, roles, routes, and services still require separate provisioning.
 
 The generated native config selects `openai-api`, whose pinned upstream transport is OpenAI Responses. It enables only native `memory`, `skills`, `session_search`, and the `mango` toolset. The documented `tools.tool_search.enabled=off` setting keeps this small tool catalog directly available. Native Markdown memory curation and learning stay enabled. Shell, general file access, browser, external search, delegation, MCP, and cron tools are absent from the selected model toolset. Learned skill text can guide these allowed tools; it cannot grant new tools or Mango authority. Native cron storage remains in the home, but scheduled work is a later layer and Mango exposes no job routes.
 
@@ -44,6 +46,8 @@ Configure the Go API's `MANGORTS_HERMES_ROUTES` with this JSON shape. Use the ac
 ```
 
 Inject the same service credential into the Go environment name and that service's `API_SERVER_KEY`; do the same for the separate callback credential. Go rejects reused scopes, URLs and credentials. The route URL, container scope variables and volume binding must describe the same pair. An empty route list leaves the rest of Mango available. HTTP URLs require a private service network; use TLS when crossing a network boundary. Service and callback requests ignore process proxy settings and reject redirects. No raw Hermes endpoint is exposed through Mango beyond the listed chat operations.
+
+The local launcher runs this same image with `--runtime-stdin`. It supplies one bounded JSON line containing `OPENAI_API_KEY`, `API_SERVER_KEY`, and `MANGO_CALLBACK_KEY` through a private pipe. This mode does not load AWS credentials or call Secrets Manager inside Hermes. The human-run launcher resolves the authorized dev provider secret and keeps the matching service credentials in Go's process environment. No credential values enter Docker arguments, Docker configuration environment values, or local files. Cloud startup without this argument retains the runtime-role Secrets Manager lookup.
 
 ## Verified upstream boundaries
 
@@ -106,6 +110,8 @@ SELECT current_setting('server_version') AS postgres_version,
 
 Some older deployments may retain the removed AI inspection archive under `public.ai_runs`. Any existing table with that name must stop this migration for human inspection. This migration neither reuses nor converts the archive, and any live removal requires separate approval.
 
-Deploying this image, provisioning per-pair storage and credentials, setting backend routes, and applying the repository migration are separate human rollout actions. This worktree does not deploy or apply them. Verified exports, private S3 backups, full native archive imports, shared memory and scheduled workflow execution remain later work. Scheduled jobs and runs are not implemented.
+The local launcher received ad-hoc verification in Windows PowerShell 5.1 and PowerShell 7 using a fake Docker process and the actual runtime credential reader. These checks covered private stdin, matching route credentials, authenticated readiness and cleanup. PowerShell prerequisite probes and 14 runtime/plugin unit tests passed. Docker Desktop is not installed on the inspected laptop, so a real container build/start and live provider call remain unverified.
+
+Cloud deployment and the live database migration remain separate human rollout actions. Local container startup is available through the documented Cognito launcher once Docker, the image, the exact account scope and SQL are prepared. Verified exports, private S3 backups, full native archive imports, shared memory and scheduled workflow execution remain later work. Scheduled jobs and runs are not implemented.
 
 Sources: [native HTTP API](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server/), [plugin API](https://hermes-agent.nousresearch.com/docs/developer-guide/plugins/), [native memory](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory/), [reviewed source revision](https://github.com/NousResearch/hermes-agent/tree/693641aa8b4359c602283bdbbc14041e03bc47bc).
