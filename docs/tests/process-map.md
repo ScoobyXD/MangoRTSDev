@@ -256,7 +256,7 @@
 254. Spatial candidate filtering MUST include both real placement bounds and the restricted 4-by-3 footprint before resolving and reusing placement and parent permissions.
 255. A complete tile read MUST keep placements and traces independent while preserving endpoint authorization, crossing traces, clipping, and detail eligibility.
 256. The focused map omits RACI role cards without changing existing assignments or permissions.
-257. The focused map keeps its existing SOP editor open in a floating right-hand column with a visible gap to the workspace edge, without reducing the full workspace canvas or adding an Editor disclosure or QCD scorecard.
+257. The focused map provides its existing SOP editor in a collapsible floating right-hand column with a visible gap to the workspace edge, without reducing the full workspace canvas or adding a QCD scorecard.
 258. Changing a new Process destination expands its exact Folder path in Company Explorer.
 259. Successful creation refreshes the existing map and selects the exact committed Process without moving an established camera.
 260. Successful creation reveals and selects the Process in its expanded Explorer Folder without opening the Board.
@@ -281,6 +281,10 @@
 279. The right-hand editor's left edge supports pointer and keyboard width adjustment without resetting the camera or mounted documents.
 280. A canceled editor resize restores its starting width.
 281. A new Step appears as a wide neutral rectangle showing its title and a preview of its current instruction text without a person or agent icon.
+282. The expanded right-hand editor shows an accessible right-pointing collapse arrow to the left of its tabs.
+283. Collapsing the editor preserves its mounted documents, selected tab, chosen expanded width, pending text, and save state.
+284. A Step editor placed on the map remains usable while the right-hand editor is collapsed.
+285. The collapsed right-hand editor shows only its accessible left-pointing expand arrow at the workspace's right edge.
 Last updated: 2026-09-07
 
 # Process Story: One company canvas moves from overview to Process work

@@ -364,6 +364,15 @@ test("new and saved Process pages move the exact Step editor into its card and c
     const localInstance = local.live.editor;
     const card = await moveBodyToMap(stepID, local.editor);
     assert.equal(local.live.editor, localInstance);
+    await h.click("Collapse Process editor");
+    assert.ok(h.container.querySelector(".process-map-details.is-collapsed"));
+    assert.ok(card.contains(local.editor), "collapsing the island does not pull the active Step editor off the map");
+    assert.equal(local.editor.closest("[hidden]"), null, "the map editor remains visible outside the collapsed island");
+    assert.equal(local.live.editor, localInstance);
+    assert.equal(local.live.editor!.isEditable, true);
+    assert.match(local.editor.textContent ?? "", /Record delivery\./);
+    await h.click("Expand Process editor");
+    assert.ok(card.contains(local.editor), "expanding preserves the active map editor's placement");
     assert.equal(h.mutations().length, 0, "draft map editing stays local until Save Process");
     await h.key(local.live, "Escape");
     assert.ok(h.container.querySelector(`[data-process-step-id="${stepID}"]`)?.contains(local.editor), "Escape returns the same editor to its sidebar card");

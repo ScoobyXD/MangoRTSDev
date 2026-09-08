@@ -44,6 +44,7 @@ export function ProcessMapDetails({ apiBase, companyID, processID, isNew = false
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
   const [section, setSection] = useState<"overview" | "steps">(focusStepID ? "steps" : "overview");
+  const [collapsed, setCollapsed] = useState(false);
   const panelID = useId();
   const panelRef = useRef<HTMLElement>(null);
   const resize = useRef<{ pointerID: number; startX: number; width: number } | null>(null);
@@ -115,8 +116,8 @@ export function ProcessMapDetails({ apiBase, companyID, processID, isNew = false
     setError("");
     setRetry((value) => value + 1);
   };
-  return <aside ref={panelRef} className="process-map-details" aria-label="Process editor panel">
-    <div className="process-map-details__resize" role="separator" aria-label="Resize Process editor" aria-orientation="vertical" aria-valuemin={240} aria-valuemax={clampWidth(Infinity)} aria-valuenow={clampWidth(editorWidth)} tabIndex={0}
+  return <aside ref={panelRef} className={`process-map-details${collapsed ? " is-collapsed" : ""}`} aria-label="Process editor panel">
+    <div hidden={collapsed} className="process-map-details__resize" role="separator" aria-label="Resize Process editor" aria-orientation="vertical" aria-valuemin={240} aria-valuemax={clampWidth(Infinity)} aria-valuenow={clampWidth(editorWidth)} tabIndex={0}
       onPointerDown={(event) => {
         if (event.button !== 0) return;
         event.preventDefault();
@@ -147,14 +148,17 @@ export function ProcessMapDetails({ apiBase, companyID, processID, isNew = false
         onEditorWidthChange(clampWidth(next));
       }} />
     <header className="process-map-details__heading">
-      <nav className="process-map-details__tabs" aria-label="Process editor sections">
+      <button type="button" className="process-map-details__collapse" aria-label={collapsed ? "Expand Process editor" : "Collapse Process editor"} title={collapsed ? "Expand Process editor" : "Collapse Process editor"} aria-expanded={!collapsed} aria-controls={panelID} onClick={() => setCollapsed((value) => !value)}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={collapsed ? "M19 12H5m7-7-7 7 7 7" : "M5 12h14m-7-7 7 7-7 7"} /></svg>
+      </button>
+      <nav hidden={collapsed} className="process-map-details__tabs" aria-label="Process editor sections">
         <button type="button" aria-controls={panelID} aria-pressed={section === "overview"} onClick={() => setSection("overview")}>Editor</button>
         <button type="button" aria-controls={panelID} aria-pressed={section === "steps"} onClick={() => setSection("steps")}>Steps</button>
       </nav>
-      <span>{isNew ? "Draft" : canEdit && resourceCanEdit ? "Autosave" : "Read only"}</span>
+      <span hidden={collapsed}>{isNew ? "Draft" : canEdit && resourceCanEdit ? "Autosave" : "Read only"}</span>
     </header>
-    {error && <div role="alert" className="process-map-details__error">{error} <button type="button" disabled={retrying || loading} onClick={() => { void retryFailedOperation(); }}>Retry</button></div>}
-    <section id={panelID} className="process-map-details__editor" aria-label="Process SOP editor">
+    {error && <div hidden={collapsed} role="alert" className="process-map-details__error">{error} <button type="button" disabled={retrying || loading} onClick={() => { void retryFailedOperation(); }}>Retry</button></div>}
+    <section hidden={collapsed} id={panelID} className="process-map-details__editor" aria-label="Process SOP editor">
       {loading && !documentID && <div role="status" className="process-map-details__loading">Loading editor…</div>}
       {documentID && <Suspense fallback={<div role="status" className="process-map-details__loading">Loading editor…</div>}>
         <LogicGateTiptapEditorSurface key={`${processID}:${documentID}`} apiBase={apiBase} companyID={companyID} resourceID={processID} documentID={documentID}

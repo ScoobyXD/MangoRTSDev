@@ -10,6 +10,7 @@
 .process-map-page button.process-map-primary { color: #fff; border-color: #6550b7; background: #6550b7; font-weight: 650; }
 .process-map-workspace, .process-map-saved-process { position: absolute; inset: 0; min-height: 0; background: #fff; overflow: hidden; }
 .process-map-workspace { --process-editor-panel-width: min(var(--process-editor-width, 380px), max(240px, calc(100% - 336px))); }
+.process-map-workspace:has(.process-map-details.is-collapsed) { --process-editor-panel-width: 38px; }
 .process-map-workspace .process-step-map { position: absolute; inset: 0; }
 .process-map-workspace .process-step-map--authoring .process-step-map__viewport { padding: 64px; outline: none; }
 .process-map-workspace__save { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-left: auto; }
