@@ -86,7 +86,7 @@ func run(ctx context.Context, args []string, getenv envLookup) error {
 	if err != nil {
 		return err
 	}
-	dbCfg, err := parseDBConfig(getenv, cfg.Mode == "audit")
+	dbCfg, err := parseDBConfig(getenv, cfg.Mode == "audit" || cfg.Mode == "plan")
 	if err != nil {
 		return err
 	}
@@ -107,7 +107,7 @@ func run(ctx context.Context, args []string, getenv envLookup) error {
 	}
 	defer conn.Close()
 
-	if cfg.Mode != "audit" {
+	if cfg.Mode != "audit" && cfg.Mode != "plan" {
 		if err := acquireMigrationLock(ctx, conn); err != nil {
 			return err
 		}
@@ -123,8 +123,8 @@ func run(ctx context.Context, args []string, getenv envLookup) error {
 	}
 
 	switch cfg.Mode {
-	case "audit":
-		return runAuditMode(ctx, conn, cfg)
+	case "audit", "plan":
+		return runAuditMode(ctx, conn, cfg, os.Stdout)
 	case "schema":
 		return runSchemaMode(ctx, conn, cfg)
 	case "migrate":
@@ -135,7 +135,7 @@ func run(ctx context.Context, args []string, getenv envLookup) error {
 		}
 		return runMigrateMode(ctx, conn, cfg)
 	default:
-		return fmt.Errorf("invalid -mode %q; expected audit, schema, migrate, or all", cfg.Mode)
+		return fmt.Errorf("invalid -mode %q; expected audit, plan, schema, migrate, or all", cfg.Mode)
 	}
 }
 
@@ -147,7 +147,7 @@ func parseCommandConfig(args []string, getenv envLookup) (commandConfig, error) 
 	flags.StringVar(&cfg.SchemaPath, "schema", defaultSchemaPath, "path to schema.sql")
 	flags.StringVar(&cfg.InventoryPath, "inventory", defaultInventoryPath, "path to schema_inventory.sql")
 	flags.StringVar(&cfg.MigrationsDir, "migrations", defaultMigrationsDir, "directory containing .sql migration files")
-	flags.StringVar(&cfg.Mode, "mode", defaultMode, "audit, schema, migrate, or all")
+	flags.StringVar(&cfg.Mode, "mode", defaultMode, "audit, plan, schema, migrate, or all")
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "print planned work without applying changes")
 	flags.BoolVar(&cfg.BaselineMigrations, "baseline-migrations", false, "with -mode schema, record current migration filenames after applying the schema snapshot")
 	flags.BoolVar(&cfg.RequireEmptyDB, "require-empty-database", false, "with -mode schema, atomically refuse bootstrap when application schema objects already exist")
@@ -181,19 +181,19 @@ func parseCommandConfig(args []string, getenv envLookup) (commandConfig, error) 
 		return commandConfig{}, errors.New("-start-at and -start-after are mutually exclusive")
 	}
 	switch cfg.Mode {
-	case "audit", "schema", "migrate", "all":
+	case "audit", "plan", "schema", "migrate", "all":
 		if cfg.BaselineMigrations && cfg.Mode != "schema" {
 			return commandConfig{}, errors.New("-baseline-migrations requires -mode schema")
 		}
-		if cfg.Mode == "audit" && (cfg.StartAt != "" || cfg.StartAfter != "") {
-			return commandConfig{}, errors.New("-start-at and -start-after are not valid with -mode audit")
+		if (cfg.Mode == "audit" || cfg.Mode == "plan") && (cfg.StartAt != "" || cfg.StartAfter != "") {
+			return commandConfig{}, fmt.Errorf("-start-at and -start-after are not valid with -mode %s", cfg.Mode)
 		}
 		if cfg.RequireEmptyDB && cfg.Mode != "schema" {
 			return commandConfig{}, errors.New("-require-empty-database requires -mode schema")
 		}
 		return cfg, nil
 	default:
-		return commandConfig{}, fmt.Errorf("invalid -mode %q; expected audit, schema, migrate, or all", cfg.Mode)
+		return commandConfig{}, fmt.Errorf("invalid -mode %q; expected audit, plan, schema, migrate, or all", cfg.Mode)
 	}
 }
 
@@ -454,14 +454,10 @@ func repositorySchemaFingerprint(schemaPath, inventoryPath, migrationsDir string
 
 	digest := sha256.New()
 	for _, file := range files {
-		raw, readErr := os.ReadFile(file.Path)
+		fileDigest, readErr := normalizedFileDigest(file.Path)
 		if readErr != nil {
-			return "", fmt.Errorf("read repository schema file %s: %w", file.Path, readErr)
+			return "", readErr
 		}
-		raw = bytes.TrimPrefix(raw, []byte{0xef, 0xbb, 0xbf})
-		raw = bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n"))
-		raw = bytes.ReplaceAll(raw, []byte("\r"), []byte("\n"))
-		fileDigest := sha256.Sum256(raw)
 		if _, writeErr := fmt.Fprintf(digest, "%s\x00%x\n", file.Label, fileDigest); writeErr != nil {
 			return "", writeErr
 		}
@@ -469,7 +465,18 @@ func repositorySchemaFingerprint(schemaPath, inventoryPath, migrationsDir string
 	return fmt.Sprintf("%x", digest.Sum(nil)), nil
 }
 
-func runAuditMode(ctx context.Context, conn *sql.Conn, cfg commandConfig) error {
+func normalizedFileDigest(path string) ([sha256.Size]byte, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return [sha256.Size]byte{}, fmt.Errorf("read repository schema file %s: %w", path, err)
+	}
+	raw = bytes.TrimPrefix(raw, []byte{0xef, 0xbb, 0xbf})
+	raw = bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n"))
+	raw = bytes.ReplaceAll(raw, []byte("\r"), []byte("\n"))
+	return sha256.Sum256(raw), nil
+}
+
+func runAuditMode(ctx context.Context, conn *sql.Conn, cfg commandConfig, output io.Writer) error {
 	files, err := listMigrationFiles(cfg.MigrationsDir)
 	if err != nil {
 		return err
@@ -524,9 +531,22 @@ func runAuditMode(ctx context.Context, conn *sql.Conn, cfg commandConfig) error 
 				applied[version] = true
 			}
 		}
+		if rowsErr := rows.Err(); rowsErr != nil {
+			rows.Close()
+			return rowsErr
+		}
 		if rowsErr := rows.Close(); rowsErr != nil {
 			return rowsErr
 		}
+	}
+	if cfg.Mode == "plan" {
+		plan, err := buildMigrationPlan(files, applied, ledgerExists, serverVersionNum, []byte(inventoryJSON))
+		if err != nil {
+			return err
+		}
+		plan.RepositorySchemaSHA256 = repositoryDigest
+		plan.SchemaInventorySHA256 = inventoryDigest
+		return writeMigrationPlan(output, plan)
 	}
 	audit := classifyMigrationLedger(files, applied)
 	log.Printf("read-only migration audit user=%s server_version=%q server_version_num=%d transaction_read_only=%t public_tables=%d repository_migrations=%d ledger_exists=%t ledger_rows=%d missing_from_ledger=%d unknown_to_repository=%d schema_inventory_objects=%d schema_inventory_sha256=%s repository_schema_sha256=%s", currentUser, serverVersion, serverVersionNum, readOnly, applicationTables, len(files), ledgerExists, len(applied), len(audit.MissingFromLedger), len(audit.UnknownToRepo), inventoryCount, inventoryDigest, repositoryDigest)

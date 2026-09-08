@@ -43,4 +43,17 @@ resource "aws_s3_bucket_lifecycle_configuration" "attachments" {
       days_after_initiation = var.attachment_multipart_abort_days
     }
   }
+
+  dynamic "rule" {
+    for_each = var.attachment_recovery_retention_days > 0 ? [1] : []
+
+    content {
+      id     = "expire-qa-attachment-recovery-versions"
+      status = "Enabled"
+      filter {}
+      noncurrent_version_expiration {
+        noncurrent_days = var.attachment_recovery_retention_days
+      }
+    }
+  }
 }

@@ -304,12 +304,14 @@ resource "aws_ecs_task_definition" "email_worker" {
 resource "aws_ecs_service" "email_worker" {
   count = local.email_worker_service_enabled ? 1 : 0
 
-  name                  = "${local.name_prefix}-email-worker"
-  cluster               = aws_ecs_cluster.main.id
-  task_definition       = aws_ecs_task_definition.email_worker[0].arn
-  desired_count         = 1
-  launch_type           = "FARGATE"
-  wait_for_steady_state = true
+  name                               = "${local.name_prefix}-email-worker"
+  cluster                            = aws_ecs_cluster.main.id
+  task_definition                    = aws_ecs_task_definition.email_worker[0].arn
+  desired_count                      = var.deployment_maintenance_mode ? 0 : 1
+  launch_type                        = "FARGATE"
+  wait_for_steady_state              = true
+  deployment_minimum_healthy_percent = var.environment == "qa" ? 0 : 100
+  deployment_maximum_percent         = var.environment == "qa" ? 100 : 200
 
   network_configuration {
     subnets          = local.ecs_subnet_ids
@@ -402,7 +404,7 @@ resource "aws_scheduler_schedule" "email_reconciliation" {
   group_name                   = aws_scheduler_schedule_group.email_reconciliation[0].name
   schedule_expression          = "rate(10 minutes)"
   schedule_expression_timezone = "UTC"
-  state                        = "ENABLED"
+  state                        = var.deployment_maintenance_mode ? "DISABLED" : "ENABLED"
 
   flexible_time_window {
     mode = "OFF"

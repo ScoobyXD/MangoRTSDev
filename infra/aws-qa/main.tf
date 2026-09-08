@@ -24,19 +24,21 @@ module "platform" {
 
   database_connection_mode = "managed"
 
-  managed_db_host                     = aws_db_instance.qa.address
-  managed_db_port                     = aws_db_instance.qa.port
+  managed_db_host                     = data.aws_db_instance.active.address
+  managed_db_port                     = data.aws_db_instance.active.port
   managed_db_name                     = var.database_name
   managed_db_user                     = var.database_user
   managed_db_password_secret_arn      = var.database_managed_password_bootstrap ? aws_db_instance.qa.master_user_secret[0].secret_arn : trimspace(var.database_password_secret_arn)
   managed_db_password_secret_json_key = var.database_managed_password_bootstrap ? "password" : ""
   managed_db_security_group_id        = aws_security_group.database.id
 
-  backend_image_uri     = var.backend_image_uri
-  deploy_revision       = var.deploy_revision
-  backend_cpu           = var.backend_cpu
-  backend_memory        = var.backend_memory
-  backend_desired_count = var.backend_desired_count
+  backend_image_uri           = var.backend_image_uri
+  deploy_revision             = var.deploy_revision
+  backend_cpu                 = var.backend_cpu
+  backend_memory              = var.backend_memory
+  backend_desired_count       = var.backend_desired_count
+  deployment_maintenance_mode = var.qa_maintenance_mode
+  qa_release_probe            = var.qa_release_probe
 
   cloudwatch_log_retention_days  = var.cloudwatch_log_retention_days
   ecs_container_insights_enabled = var.ecs_container_insights_enabled
@@ -66,6 +68,7 @@ module "platform" {
   attachment_single_put_url_ttl_seconds     = var.attachment_single_put_url_ttl_seconds
   attachment_multipart_part_url_ttl_seconds = var.attachment_multipart_part_url_ttl_seconds
   attachment_multipart_abort_days           = var.attachment_multipart_abort_days
+  attachment_recovery_retention_days        = var.database_backup_retention_days + 1
 
   default_company_id     = var.default_company_id
   email_from_address     = var.email_from_address

@@ -6,6 +6,8 @@ Last updated: 2026-07-15.
 
 Agents may read MangoRTS databases. Agents must not write to MangoRTS databases or access unrelated sensitive secrets.
 
+The narrowly authorized QA release exception is the reviewed `Deploy MangoRTS QA` workflow: approval of its exact main commit includes running that commit's pending migrations through the existing QA ECS migration task and its coordinated recovery path. An agent may dispatch and monitor that approved workflow. ECS obtains the migration credential inside AWS; the agent must never receive it. This exception permits no direct SQL, schema bootstrap, reset, reseed, database copy, DEV or production deployment, or unrelated data changes. See [QA release and recovery](../infra/qa-release-recovery.md). All ordinary agent database inspection still requires a database-enforced read-only login.
+
 Database read access must use a designated database-enforced read-only credential. The safety boundary comes from that database user''s permissions, not from asking an agent to avoid writes while giving it a writer credential.
 
 An agent-specific AWS profile is not required for ordinary read-only database access.

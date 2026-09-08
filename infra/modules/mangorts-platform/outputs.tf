@@ -146,12 +146,34 @@ output "attachment_maintenance" {
   description = "Daily attachment recovery task and failure reporting; null when no non-production attachment backend is configured."
   value = local.attachment_maintenance_enabled ? {
     task_definition_arn = aws_ecs_task_definition.attachment_maintenance[0].arn
-    rule_name           = aws_cloudwatch_event_rule.attachment_maintenance[0].name
-    failure_log_group   = aws_cloudwatch_log_group.attachment_maintenance_failures[0].name
+    rule_name           = local.attachment_maintenance_name
+    failure_log_group   = "/ecs/${local.name_prefix}/attachment-maintenance-failures"
     alarm_names = [
-      aws_cloudwatch_metric_alarm.attachment_maintenance_delivery_failed[0].alarm_name,
-      aws_cloudwatch_metric_alarm.attachment_maintenance_failed[0].alarm_name,
-      aws_cloudwatch_metric_alarm.attachment_maintenance_overdue[0].alarm_name,
+      "${local.attachment_maintenance_name}-delivery-failed",
+      "${local.attachment_maintenance_name}-failed",
+      "${local.attachment_maintenance_name}-overdue",
     ]
   } : null
+}
+output "backend_task_definition_arn" {
+  value = try(aws_ecs_task_definition.backend[0].arn, "")
+}
+
+output "email_reconciliation" {
+  value = var.email_sqs_enabled && var.email_reconciliation_schedule_enabled ? {
+    name  = aws_scheduler_schedule.email_reconciliation[0].name
+    group = aws_scheduler_schedule_group.email_reconciliation[0].name
+  } : null
+}
+
+output "qa_release_maintenance" {
+  value = var.environment == "qa" ? {
+    listener_arn     = aws_lb_listener.https.arn
+    gate_rule_arn    = aws_lb_listener_rule.qa_maintenance[0].arn
+    probe_rule_arn   = aws_lb_listener_rule.qa_release_probe[0].arn
+    target_group_arn = aws_lb_target_group.backend.arn
+  } : null
+}
+output "attachment_writer_role_arns" {
+  value = concat([aws_iam_role.ecs_task.arn], aws_iam_role.email_worker[*].arn)
 }

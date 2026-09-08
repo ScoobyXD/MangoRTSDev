@@ -103,7 +103,7 @@ resource "aws_cloudwatch_event_rule" "attachment_maintenance" {
   name                = local.attachment_maintenance_name
   description         = "Daily finite recovery of attachment deletions whose local wake was lost."
   schedule_expression = "rate(1 day)"
-  state               = "ENABLED"
+  state               = var.deployment_maintenance_mode ? "DISABLED" : "ENABLED"
   tags                = local.tags
 
   depends_on = [aws_iam_role_policy_attachment.github_deploy_attachment_maintenance]

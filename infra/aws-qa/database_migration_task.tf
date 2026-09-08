@@ -21,14 +21,13 @@ resource "aws_ecs_task_definition" "database_migration" {
       image     = var.migration_image_uri
       essential = true
 
-      # A task started without an explicit reviewed override can only inspect.
-      # Fresh QA initialization must deliberately override this with:
-      # -mode schema -baseline-migrations
+      # Starting the task directly is read-only. The approved QA release
+      # overrides the command only after maintenance and PITR are verified.
       command = ["-mode", "audit"]
 
       environment = [
-        { name = "DB_HOST", value = aws_db_instance.qa.address },
-        { name = "DB_PORT", value = tostring(aws_db_instance.qa.port) },
+        { name = "DB_HOST", value = data.aws_db_instance.active.address },
+        { name = "DB_PORT", value = tostring(data.aws_db_instance.active.port) },
         { name = "DB_NAME", value = var.database_name },
         { name = "DB_USER", value = var.database_user },
         { name = "DB_SSLMODE", value = "require" }

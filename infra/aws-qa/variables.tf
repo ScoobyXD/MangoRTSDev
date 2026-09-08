@@ -111,9 +111,22 @@ variable "database_backup_retention_days" {
   default     = 1
 
   validation {
-    condition     = var.database_backup_retention_days >= 0 && var.database_backup_retention_days <= 35
-    error_message = "database_backup_retention_days must be from 0 through 35."
+    condition     = var.database_backup_retention_days >= 1 && var.database_backup_retention_days <= 7
+    error_message = "QA release recovery requires from 1 through 7 days of automated backups."
   }
+}
+
+variable "qa_maintenance_mode" {
+  description = "Keep QA API, email worker, and writer schedules stopped until the release coordinator verifies the matching code and database."
+  type        = bool
+  default     = true
+}
+
+variable "qa_release_probe" {
+  description = "Ephemeral random header used only by the current QA release to test behind the maintenance gate. Empty disables probes."
+  type        = string
+  default     = ""
+  sensitive   = true
 }
 
 variable "database_deletion_protection" {
@@ -129,7 +142,7 @@ variable "backend_image_uri" {
 }
 
 variable "migration_image_uri" {
-  description = "Immutable image built from backend/Dockerfile.migrations for the human-triggered one-off schema task."
+  description = "Immutable image built from backend/Dockerfile.migrations for the approved QA release's audit and migration task."
   type        = string
   default     = ""
 }

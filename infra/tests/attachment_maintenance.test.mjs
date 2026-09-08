@@ -10,11 +10,11 @@ const main = read("backend/cmd/miraeopus-api/main.go");
 const role = read("backend/cmd/miraeopus-api/attachment_maintenance.go");
 const block = (type, name) => maintenance.match(new RegExp(`${type} "${name}"[\\s\\S]*?\n\\}`))?.[0] ?? "";
 
-test("dev and QA share an enabled daily attachment task independent of email services", () => {
+test("dev and QA share a daily attachment task paused during QA maintenance", () => {
   assert.match(maintenance, /attachment_maintenance_enabled\s*=\s*local\.nonproduction_services_environment && local\.backend_service_enabled && local\.attachment_storage_enabled/);
   const schedule = block('resource "aws_cloudwatch_event_rule"', "attachment_maintenance");
   assert.match(schedule, /schedule_expression\s*=\s*"rate\(1 day\)"/);
-  assert.match(schedule, /state\s*=\s*"ENABLED"/);
+  assert.match(schedule, /state\s*=\s*var\.deployment_maintenance_mode \? "DISABLED" : "ENABLED"/);
   assert.doesNotMatch(maintenance, /email_worker|email_sqs|aws_sqs_queue|aws_ecs_service|schedule_enabled/);
   for (const env of ["dev", "qa"]) {
     assert.match(read(`infra/aws-${env}/main.tf`), /source\s*=\s*"\.\.\/modules\/mangorts-platform"/);
@@ -95,7 +95,7 @@ test("API release depends on recovery and runbook requires successful bootstrap 
     assert.ok(service.includes(target));
   }
   const runbook = read("docs/infra/attachment-deletion-recovery.md");
-  assert.match(runbook, /not deployed recovery/);
+  assert.match(runbook, /QA uses the coordinated \[QA release and recovery workflow\]/);
   assert.match(runbook, /Keep both services stopped through recovery bootstrap and validation/);
   assert.match(runbook, /require container exit code `0`/);
   assert.match(runbook, /QA email worker may remain disabled/);
