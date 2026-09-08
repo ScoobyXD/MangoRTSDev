@@ -150,8 +150,19 @@ func TestPostgresMappedSourceMutationsAppendBeforeCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	explorer := string(explorerRaw)
+	upsert := processMapFunctionBodyForContractTest(t, explorer,
+		"func (r *PostgresRepo) UpsertCompanyExplorerV2Edge", "func (r *PostgresRepo) upsertCompanyExplorerV2EdgeTx")
+	upsertIndex := strings.Index(upsert, "r.upsertCompanyExplorerV2EdgeTx(ctx, tx, input)")
+	commitIndex = strings.Index(upsert, "tx.Commit")
+	if upsertIndex < 0 || commitIndex < 0 || upsertIndex > commitIndex {
+		t.Fatal("Explorer upsert must call its mutation helper with the same transaction before commit")
+	}
+	upsertTx := processMapFunctionBodyForContractTest(t, explorer,
+		"func (r *PostgresRepo) upsertCompanyExplorerV2EdgeTx", "func (r *PostgresRepo) MoveCompanyExplorerV2Edge")
+	if !strings.Contains(upsertTx, "company_explorer_item_placed") || !strings.Contains(upsertTx, "r.appendDomainEventTx(ctx, tx, eventInput)") || strings.Contains(upsertTx, "tx.Commit") {
+		t.Fatal("Explorer upsert helper must append its invalidation in the caller's transaction without committing")
+	}
 	for _, signature := range []string{
-		"func (r *PostgresRepo) UpsertCompanyExplorerV2Edge",
 		"func (r *PostgresRepo) MoveCompanyExplorerV2Edge",
 		"func (r *PostgresRepo) DeleteCompanyExplorerV2Edges",
 	} {
@@ -209,7 +220,7 @@ func TestPostgresCompanyExplorerMutationAuthorizationContract(t *testing.T) {
 	}
 
 	upsert := processMapFunctionBodyForContractTest(t, v2,
-		"func (r *PostgresRepo) UpsertCompanyExplorerV2Edge", "func (r *PostgresRepo) MoveCompanyExplorerV2Edge")
+		"func (r *PostgresRepo) upsertCompanyExplorerV2EdgeTx", "func (r *PostgresRepo) MoveCompanyExplorerV2Edge")
 	move := processMapFunctionBodyForContractTest(t, v2,
 		"func (r *PostgresRepo) MoveCompanyExplorerV2Edge", "func (r *PostgresRepo) DeleteCompanyExplorerV2Edge")
 	remove := processMapFunctionBodyForContractTest(t, v2,
