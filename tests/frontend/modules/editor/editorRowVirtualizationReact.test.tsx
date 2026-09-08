@@ -2072,6 +2072,13 @@ test("real Node, Project, and Logic Gate page hosts load JSON editors and preser
       return current;
     }
     if (pathname === `/v1/projects/${hostProjectID}`) return projectView([projectProjection, projectChatProjection]);
+    if (pathname === `/v2/logic-gates/${hostLogicGateID}/work`) return {
+      logic_gate: { logic_gate_id: hostLogicGateID, header: "JSON Logic Gate" },
+      permissions: { can_edit: true, can_resolve_requests: true },
+      steps: [],
+      relationships: [],
+      nodes: [],
+    };
     if (pathname === `/v2/logic-gates/${hostLogicGateID}/view`) return {
       company_id: hostCompanyID,
       logic_gate_id: hostLogicGateID,

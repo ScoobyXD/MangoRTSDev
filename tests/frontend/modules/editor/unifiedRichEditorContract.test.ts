@@ -355,7 +355,8 @@ test("Node and Project text bodies use permanent revisioned JSON without the ret
   assert.match(projectSummary, /`\/v1\/editor-json\/project\/\$\{projectID\}\/documents\/\$\{blockID\}/);
   assert.doesNotMatch(nodeSurface, /editor-collaboration|legacy_html/);
   assert.doesNotMatch(projectSummary, /editor-collaboration|legacy_html/);
-  assert.match(tiptapEditor, /data-mango-editor-sync-mode="revisioned-json"/);
+  assert.match(tiptapEditor, /saveMode = "server"/);
+  assert.match(tiptapEditor, /data-mango-editor-sync-mode=\{saveMode === "local" \? "local" : "revisioned-json"\}/);
   assert.match(tiptapSync, /indexedDB\.open/);
   assert.equal(existsSync(resolve(process.cwd(), "frontend/src/modules/editor/editorTextboxSync.ts")), false);
   assert.equal(existsSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorTextboxSync.ts")), false);
@@ -790,6 +791,7 @@ test("editor header keeps primary controls visible and preserves all secondary o
   const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
   const linkedDocumentPanels = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorLinkedDocumentPanels.tsx"), "utf8");
   const raciPresentation = readFileSync(resolve(process.cwd(), "frontend/src/modules/logic-gates/raciPresentation.ts"), "utf8");
+  const resourceRACI = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/resourceRACI.ts"), "utf8");
   const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
 
   assert.match(editorTabBar, /const primaryTabs = visibleTabs\.filter\(\(tab\) => EDITOR_PRIMARY_HEADER_TAB_IDS\.includes\(tab\.id\)\)/);
@@ -822,8 +824,9 @@ test("editor header keeps primary controls visible and preserves all secondary o
   assert.doesNotMatch(linkedDocumentPanels, /Apply RACI to assigned nodes|Current RACI|Apply RACI to all descendants/);
   assert.doesNotMatch(linkedDocumentPanels, />Policy mode<|Effective source:/);
   assert.match(editorContent, /<EntityPermissionsPanel[\s\S]*readOnly=\{!linkedEntityCanEdit\}/);
-  assert.match(editorContent, /descendant_action: descendantAction/);
-  assert.equal(editorContent.includes("invalidateResourcePolicyDependentCaches(apiBase, companyID);"), true);
+  assert.match(editorContent, /saveEditorResourceRACI\(\{[\s\S]*assignmentMode, revision: gvicPolicyRevision, descendantAction, requestJSON/);
+  assert.match(resourceRACI, /descendant_action: descendantAction/);
+  assert.equal(resourceRACI.includes("invalidateResourcePolicyDependentCaches(apiBase, companyID);"), true);
   assert.match(projectSummary, /visibleTabIDs=\{EDITOR_PRIMARY_HEADER_TAB_IDS\}/);
   for (const projectAction of ["assignments", "open-project-tab", "minimize-project"]) {
     assert.match(projectSummary, new RegExp(`id: "${projectAction}"`));
@@ -1623,6 +1626,7 @@ test("failed saves pulse the complete Node, Project, and Logic Gate editor frame
   const nodeSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
   const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
   const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
+  const processSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/LogicGateTiptapEditorSurface.tsx"), "utf8");
   const saveStatus = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorSaveStatusIcon.tsx"), "utf8");
   const saveStatusStore = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/editorSaveStatusStore.ts"), "utf8");
   const editorStyles = readFileSync(resolve(process.cwd(), "frontend/src/index.css"), "utf8");
@@ -1636,8 +1640,10 @@ test("failed saves pulse the complete Node, Project, and Logic Gate editor frame
   assert.match(projectSummary, /EditorSavedTimestamp storageKey=\{blockSaveStorageKey\}/);
   assert.match(nodeSurface, /mango-fixed-editor-row\$\{blockSaveNeedsFailureAttention \? " mango-editor-save-failed-frame"/);
   assert.match(projectSummary, /mango-fixed-editor-row\$\{blockSaveNeedsFailureAttention \? " mango-editor-save-failed-frame"/);
-  assert.match(editorContent, /className=\{logicGateSaveFailed \? "mango-editor-save-failed-frame"/);
-  assert.match(editorContent, /setLogicGateSaveFailed\(\(current\) => \{ const failed = editorSaveNeedsFailureAttention\(state\)/);
+  assert.match(editorContent, /className=\{editorSaveNeedsFailureAttention\(logicGateSaveState\) \? "mango-editor-save-failed-frame"/);
+  assert.match(editorContent, /onSaveStateChange=\{setLogicGateSaveState\}/);
+  assert.match(processSurface, /const combined = states\.find\(editorSaveNeedsFailureAttention\)/);
+  assert.match(processSurface, /if \(!editorSaveNeedsFailureAttention\(saveStates\.current\.get\(id\)\)\) saveStates\.current\.set\(id, state\)/);
   assert.match(editorStyles, /mango-editor-save-failed-frame-pulse 2s ease-in-out infinite/);
   assert.match(editorStyles, /prefers-reduced-motion: reduce/);
 });

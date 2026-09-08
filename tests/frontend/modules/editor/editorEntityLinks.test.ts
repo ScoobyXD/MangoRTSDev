@@ -260,7 +260,9 @@ test("the shared Tiptap selection toolbar exposes one keyboard-operable yellow/r
   assert.match(source, /aria-label=\{`Create \$\{color\} Action Item from highlighted text\.`\}/);
   assert.match(source, /<ActionItemIcon size=\{16\} \/>/);
   assert.doesNotMatch(source, /label\.slice\(0, 1\)/);
-  assert.match(source, /createActionItemEntityFromSelection\(\{[\s\S]*source: \{ resourceType, resourceID \}[\s\S]*\}, action\.quote, color\)/);
+  assert.match(source, /const source = resourceType === "process_step"\s*\? processContext\?\.resourceType === "logic_gate"\s*\? \{ resourceType: "logic_gate" as const, resourceID: processContext\.resourceID \}\s*: null\s*: \{ resourceType, resourceID \};/);
+  assert.match(source, /if \(!source\) throw new Error\("The owning Process is unavailable\."\);/);
+  assert.match(source, /createActionItemEntityFromSelection\(\{\s*companyID,\s*requestJSON,\s*source,\s*\}, action\.quote, color\)/);
   assert.match(previewHost, /<KPIEditorPopup[\s\S]*item=\{kpiSource\}[\s\S]*canEdit/);
   assert.match(previewHost, /kpi_id: source\.resource_id,[\s\S]*logic_gate_id: source\.parent_resource_id/);
   assert.match(css, /\.mango-editor-action-item--yellow[\s\S]*animation: mango-editor-action-item-pulse 2s/);
