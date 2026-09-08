@@ -15,3 +15,14 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "attachments" {
     }
   }
 }
+
+# Preserve bytes removed by cleanup for the same period as release recovery.
+# The release coordinator waits for first-time versioning propagation before
+# taking its recovery boundary; it never grants DeleteObjectVersion to tasks.
+resource "aws_s3_bucket_versioning" "attachments" {
+  bucket = aws_s3_bucket.attachments.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}

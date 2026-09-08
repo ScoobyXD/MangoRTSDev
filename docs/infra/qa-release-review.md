@@ -1,0 +1,26 @@
+# Unify QA application deployment, SQL and recovery
+
+Deploy MangoRTS QA now coordinates the application and pending SQL from one approved main commit. It prepares artifacts and checks migration readiness before maintenance, stops QA writers, verifies an actual RDS recovery window before SQL, then deploys and checks the matching frontend and backend. The existing Go migration runner remains the only migration engine.
+
+Recovery retains the previous frontend files, backend image digest, task and schedule configuration, database identity and migration state. Dedicated recovery tags protect the required images in the existing QA repository; pruning preserves the current recovery tags and ordinary commit tags. If migration or application code has started writing, recovery pairs a point-in-time database restore with the corresponding S3 attachment versions and previous code. The active database selection persists outside the original database's Terraform ownership. A successful normal deployment creates no database clone or manual snapshot.
+
+## QA context
+
+- **User-visible change:** QA has a deliberate maintenance window during deployment. A failed or cancelled release must leave QA in maintenance or complete recovery to the previous release; a healthy old version cannot pass as the requested new release.
+- **Affected pages/components:** GitHub Actions **Deploy MangoRTS QA**, the QA frontend and API, background email work, and attachment cleanup. This change also corrects a stale routing test to match the existing rule that leaving Process Map retains no resumable draft; it adds no Process Map product behavior.
+- **How to reach it:** Run **Deploy MangoRTS QA** on `main`, choose `deploy`, and supply the exact approved 40-character commit. Use the same workflow's `recover` stage with the exact retained `recovery_release` ID to recover the current release. `bootstrap-images` remains a separate setup stage without a GitHub deployment record. The application is at <https://qa.mangorts.com>.
+- **Required setup/state:** The private QA resources in AWS account `686458136219`, `us-west-1`, must have the reviewed deployment permissions, automated RDS backups, retained frontend artifacts, and attachment versioning past its initial propagation period. Migration readiness requires PostgreSQL 17, consistent migration history, and the expected current or absent Hermes identities. Existing ECS tasks receive database credentials inside AWS; release records contain secret references only.
+- **Behavioral variants:** Pending SQL waits for AWS's restore window to cover the stopped-writer boundary. A release with no pending SQL skips migration and creates no extra backup. Once new application code starts, recovery still restores matching database and attachment state. A blocked preflight changes no application or database state. Cancellation keeps maintenance in place. Recovery rejects a release superseded by a later deployment.
+- **E2E considerations:** Validate maintenance and writer shutdown through migration failure, successful rollout, and cancellation; verify the expected frontend/backend revision, real authenticated route boundaries, and completed attachment cleanup; exercise recovery of overwritten, deleted and newly created attachment keys, the previous cleanup target, and a later deployment after database recovery. Recovery retries must preserve the database/object boundary. Database and S3 recovery cannot undo external email effects.
+
+## Validation
+
+Verified in the worktree:
+
+- `node --test --test-isolation=none infra/tests/qa_release_storage.test.mjs`: 18 tests passed. Fixtures use the real automated-backup `RestoreWindow` shape and cover source identity, expiry, timeout, S3 history pagination, null versions, ambiguous timestamps, large objects and failure handling.
+- `node --test --test-isolation=none infra/tests/qa_release_aws.test.mjs`: 28 tests passed. These cover exact image manifests and digests, recovery-tag pruning, recovery routing despite stale Terraform outputs, the recorded migration image, cancellation, strict database metadata checks, cleanup launch permissions, fresh recovery instances after application writes, rejection of repeated completed recovery, and the restricted recovery Terraform plan. They use injected AWS/command responses and make no live cloud or database writes.
+- The focused frontend routing test: 14 tests passed after removing its obsolete draft-retention expectation.
+
+**Live deployment is blocked before maintenance.** The [read-only QA migration audit](qa-migration-readiness.md) found 97 ledger rows, 156 repository migration filenames absent from the ledger, and two historical operator markers outside the normal migration filename set. The guard remains in place. These results do not authorize replaying all missing SQL, inferring a baseline, translating ledger markers, or resetting QA; the historical discrepancies require reviewed catalog and data evidence first.
+
+Hosted deployment, authenticated application checks, live recovery and final deployed revision verification remain **pending**. These local results do not claim that QA has been deployed or that an actual RDS recovery has completed. Update this section with the completed release evidence before presenting this description as a deployment result.

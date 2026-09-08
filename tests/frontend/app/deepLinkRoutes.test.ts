@@ -38,18 +38,12 @@ describe("deepLinkRoutes", () => {
     assert.doesNotMatch(page, /pushState|replaceState|popstate|buildProcessMapRoute\([^)]/);
   });
 
-  it("keeps one lazy company-scoped Process Map draft mounted outside primary page switching", () => {
+  it("mounts one company-scoped Process Map only while visible without retaining a draft", () => {
     const appLayout = readFileSync(resolve(process.cwd(), "frontend/src/app/applayout.tsx"), "utf8");
     assert.equal((appLayout.match(/<LazyProcessMapPage\b/g) ?? []).length, 1);
-    assert.match(appLayout, /processMapDraftCompanyID === activeCompanyID/);
-    assert.match(appLayout, /useEffect\(\(\) => setProcessMapDraftCompanyID\(null\), \[activeCompanyID\]\)/);
+    assert.doesNotMatch(appLayout, /processMapDraftCompanyID|processMapHasDraft|onDraftStateChange/);
     assert.match(appLayout, /isProcessMapView \? null : isAccountManagerView/);
-    const retainedSurface = appLayout.slice(appLayout.indexOf("{(processMapVisible || processMapHasDraft)"));
-    assert.match(retainedSurface, /data-process-map-retained="true"/);
-    assert.match(retainedSurface, /aria-hidden=\{!processMapVisible\}/);
-    assert.match(retainedSurface, /toggleAttribute\("inert", !processMapVisible\)/);
-    assert.match(retainedSurface, /<LazyProcessMapPage\s+key=\{activeCompanyID\}/);
-    assert.match(retainedSurface, /onDraftStateChange=\{setProcessMapHasDraft\}/);
+    assert.match(appLayout, /\{processMapVisible && <div[\s\S]*?<LazyProcessMapPage\s+key=\{activeCompanyID\}/);
   });
 
   it("round-trips canonical Logic Gate routes", () => {

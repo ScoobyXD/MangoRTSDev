@@ -60,6 +60,8 @@ resource "aws_db_instance" "qa" {
   })
 
   lifecycle {
+    prevent_destroy = true
+
     # The human credential transition supplies the hidden password directly to
     # RDS. Terraform must not replay that transition without the password.
     ignore_changes = [manage_master_user_password]

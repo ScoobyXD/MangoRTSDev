@@ -1,6 +1,6 @@
 # Attachment deletion recovery rollout
 
-Repository wiring is **not deployed recovery**. This change has not applied a database migration, changed AWS, or enabled a live schedule. Dev and QA each need the following human rollout before their API loses the minute timer. Production infrastructure is outside this change.
+QA uses the coordinated [QA release and recovery workflow](qa-release-recovery.md), including pending SQL, an exclusive maintenance window, versioned attachment recovery, and proof that the new cleanup task finishes. The manual rollout below applies to Dev. Production infrastructure is outside this change. Source wiring alone is not evidence of deployment; use the workflow record and actual runtime checks.
 
 Recovery handles attachments already marked deleted. The existing full-user-deletion path in `postgres_auth.go` can remove personal email messages without retiring their attachment links; personal draft/signature cleanup also needs a separate auth change. Those attachments remain unmarked, so neither the old timer nor this recovery task repairs that preexisting defect. This focused change leaves auth untouched.
 

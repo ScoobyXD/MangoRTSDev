@@ -39,3 +39,9 @@ tmp/node-history-compaction-*.json
 tmp/s3-encryption.json
 tmp/schema-audit-*-fresh.json
 tmp/schema-audit-*-report.md
+
+# Ephemeral QA release runner files
+.qa-release/
+.qa-release.json
+.qa-release-result.json
+infra/aws-qa/qa-release*.tfplan

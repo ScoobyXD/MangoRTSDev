@@ -145,12 +145,12 @@ output "default_company_id" {
 
 output "database_endpoint" {
   description = "Private QA PostgreSQL endpoint."
-  value       = aws_db_instance.qa.address
+  value       = data.aws_db_instance.active.address
 }
 
 output "database_instance_identifier" {
   description = "QA RDS instance identifier used by guarded operator scripts."
-  value       = aws_db_instance.qa.identifier
+  value       = data.aws_db_instance.active.db_instance_identifier
 }
 
 output "database_name" {

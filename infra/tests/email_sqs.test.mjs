@@ -28,7 +28,7 @@ test("DEV email work queue and work DLQ are encrypted FIFO with fixed SQS delive
 });
 
 test("worker is one private task with independent health and bounded concurrency", () => {
-  assert.match(sqs, /resource "aws_ecs_service" "email_worker"[\s\S]*?desired_count\s*=\s*1/);
+  assert.match(sqs, /resource "aws_ecs_service" "email_worker"[\s\S]*?desired_count\s*=\s*var\.deployment_maintenance_mode \? 0 : 1/);
   assert.match(sqs, /resource "aws_ecs_service" "email_worker"[\s\S]*?wait_for_steady_state\s*=\s*true/);
   assert.match(sqs, /assign_public_ip\s*=\s*false/);
   assert.doesNotMatch(sqs, /load_balancer\s*\{/);

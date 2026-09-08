@@ -14,6 +14,8 @@ const qaMigration = read("infra/aws-qa/database_migration_task.tf");
 const qaMonitoring = read("infra/aws-qa/monitoring.tf");
 const qaChecks = read("infra/aws-qa/checks.tf");
 const qaIAM = read("infra/aws-qa/iam.tf");
+const qaReleaseIAM = read("infra/aws-qa/release_iam.tf");
+const qaRelease = read("infra/aws-qa/release.tf");
 const qaLocals = read("infra/aws-qa/locals.tf");
 const qaVariables = read("infra/aws-qa/variables.tf");
 const qaVersions = read("infra/aws-qa/versions.tf");
@@ -133,7 +135,7 @@ test("QA state and deployment identities are isolated", () => {
   assert.match(qaWorkflow, /key\s*=\s*"mangorts\/qa\/terraform\.tfstate"/);
   assert.match(qaWorkflow, /use_lockfile\s*=\s*true/);
   assert.doesNotMatch(qaWorkflow, /TF_STATE_KEY/);
-  assert.match(qaWorkflow, /environment:\s*\n\s*name:\s*qa\s*\n\s*deployment:\s*\$\{\{ inputs\.stage == 'deploy' \}\}/);
+  assert.match(qaWorkflow, /environment:\s*\n\s*name:\s*qa\s*\n\s*deployment:\s*\$\{\{ inputs\.stage != 'bootstrap-images' \}\}/);
   assert.match(qaWorkflow, /AWS_QA_DEPLOY_ROLE_ARN/);
   assert.doesNotMatch(qaWorkflow, /AWS_DEV_DEPLOY_ROLE_ARN/);
   assert.match(qaMain, /github_oidc_subjects\s*=\s*\["repo:\$\{var\.github_owner\}\/\$\{var\.github_repository\}:environment:qa"\]/);
@@ -233,11 +235,9 @@ test("the shared edge uses the exact AWS-managed CloudFront policy IDs", () => {
   assert.match(moduleSecurity, /prefix_list_ids\s*=\s*\[one\(data\.aws_ec2_managed_prefix_lists\.cloudfront_origin_facing\.ids\)\]/);
 });
 
-test("QA registers immutable migration images before schema bootstrap without starting the app", () => {
-  assert.match(
-    qaWorkflow,
-    /workflow_dispatch:[\s\S]*?stage:[\s\S]*?type: choice[\s\S]*?- bootstrap-images[\s\S]*?- deploy/,
-  );
+test("one QA action coordinates deploy and recovery while bootstrap only registers images", () => {
+  assert.match(qaWorkflow, /workflow_dispatch:[\s\S]*?stage:[\s\S]*?type: choice/);
+  for (const stage of ["deploy", "recover", "bootstrap-images"]) assert.ok(qaWorkflow.includes(`- ${stage}`));
   assert.match(qaWorkflow, /expected_git_commit:[\s\S]*?required:\s*true[\s\S]*?type:\s*string/);
   assert.match(qaWorkflow, /GITHUB_SHA" != "\$EXPECTED_GIT_COMMIT/);
   assert.match(
@@ -246,22 +246,26 @@ test("QA registers immutable migration images before schema bootstrap without st
   );
   assert.match(
     qaWorkflow,
-    /deploy\)[\s\S]*?TF_EMAIL_SCHEMA_MIGRATED" != "true"[\s\S]*?EFFECTIVE_BACKEND_DESIRED_COUNT=1[\s\S]*?EFFECTIVE_EMAIL_SCHEMA_MIGRATED=true/,
+    /deploy\|recover\)[\s\S]*?EFFECTIVE_BACKEND_DESIRED_COUNT=1[\s\S]*?EFFECTIVE_EMAIL_SCHEMA_MIGRATED=true/,
   );
+  assert.doesNotMatch(qaWorkflow, /TF_EMAIL_SCHEMA_MIGRATED" != "true"/);
   assert.match(qaWorkflow, /backend_desired_count = \$EFFECTIVE_BACKEND_DESIRED_COUNT/);
   assert.match(qaWorkflow, /email_sqs_database_migration_complete = \$EFFECTIVE_EMAIL_SCHEMA_MIGRATED/);
   assert.match(qaWorkflow, /email_worker_enabled = \$EFFECTIVE_EMAIL_WORKER_ENABLED/);
   assert.match(qaWorkflow, /The reviewed QA foundation must exist before either image workflow stage runs/);
   assert.match(qaWorkflow, /- name: Build frontend\s+if: inputs\.stage == 'deploy'/);
-  assert.match(qaWorkflow, /- name: Publish frontend\s+if: inputs\.stage == 'deploy'/);
-  assert.match(qaWorkflow, /- name: Post-deploy smoke tests\s+if: inputs\.stage == 'deploy'/);
+  assert.match(qaWorkflow, /node scripts\/qa_release\.mjs "\$\{\{ inputs\.stage \}\}"/);
+  assert.match(qaWorkflow, /if \[\[ "\$\{\{ inputs\.stage \}\}" == "bootstrap-images" \]\]; then\s+push_if_missing backend\/Dockerfile\.qa-copy/);
   assert.match(qaWorkflow, /- name: Bootstrap image summary\s+if: inputs\.stage == 'bootstrap-images'/);
   assert.match(qaWorkflow, /API desired count: 0/);
   assert.match(qaWorkflow, /Email worker: disabled/);
   assert.match(qaWorkflow, /Revision: \$\{GITHUB_SHA\}/);
   assert.match(qaWorkflow, /API image: \$\{IMAGE_URI\}/);
   assert.match(qaWorkflow, /Migration image: \$\{MIGRATION_IMAGE_URI\}/);
-  assert.match(qaWorkflow, /terraform plan -refresh=false -out=tfplan/);
+  assert.doesNotMatch(qaWorkflow, /terraform (?:apply|plan)\b/);
+  const coordinator = read("scripts/qa_release_aws.mjs");
+  assert.match(coordinator, /release_terraform_targets/);
+  assert.match(coordinator, /Release plan would mutate foundation resource/);
 });
 
 test("QA exposes exact non-secret operator targets for the one-time copy", () => {
@@ -302,12 +306,60 @@ test("hosted schema exports use a noninteractive read-only libpq credential and 
   assert.match("origin.qa-prodcluster.example.com", prodHostMarker);
 });
 
-test("QA Actions has no RDS access", () => {
+test("QA Actions limits database writes to tagged private PITR recovery instances", () => {
   assert.doesNotMatch(qaIAM, /rds:/);
   assert.doesNotMatch(qaDeployPolicy, /rds:/);
   assert.doesNotMatch(moduleIAM, /"rds:\*"/);
-  assert.doesNotMatch(qaWorkflow, /\baws\s+rds\b/);
+  assert.match(qaReleaseIAM, /"rds:RestoreDBInstanceToPointInTime"/);
+  assert.match(qaReleaseIAM, /db:\$\{local\.name_prefix\}-recovery-\*/);
+  assert.match(qaReleaseIAM, /aws:RequestTag\/managed_by[\s\S]*?qa-release-recovery/);
+  assert.match(qaReleaseIAM, /rds:PubliclyAccessible[\s\S]*?values\s*=\s*\["false"\]/);
+  assert.doesNotMatch(qaReleaseIAM, /rds:(?:Delete|Modify|CreateDBSnapshot|CreateDBInstance)|secretsmanager:GetSecretValue|"kms:Decrypt"/);
   assert.doesNotMatch(sharedDeployPolicy, /secretsmanager:GetSecretValue/);
+});
+
+test("QA database recovery remains selected through later Terraform plans", () => {
+  assert.match(qaDatabase, /prevent_destroy\s*=\s*true/);
+  assert.match(qaRelease, /resource "aws_ssm_parameter" "active_database"[\s\S]*?ignore_changes\s*=\s*\[insecure_value\][\s\S]*?prevent_destroy\s*=\s*true/);
+  assert.match(qaRelease, /data "aws_ssm_parameter" "active_database"[\s\S]*?with_decryption\s*=\s*false/);
+  assert.match(qaRelease, /db_instance_identifier\s*=\s*nonsensitive\(data\.aws_ssm_parameter\.active_database\.value\)/);
+  assert.match(qaMain, /managed_db_host\s*=\s*data\.aws_db_instance\.active\.address/);
+  assert.match(qaMigration, /DB_HOST", value = data\.aws_db_instance\.active\.address/);
+  assert.doesNotMatch(qaRelease, /resource "aws_db_instance"|restore_to_point_in_time|aws_db_snapshot/);
+});
+
+test("QA maintenance stops all declared writer services and schedules without deleting them", () => {
+  assert.match(qaVariables, /variable "qa_maintenance_mode"[\s\S]*?default\s*=\s*true/);
+  assert.match(moduleECS, /desired_count\s*=\s*var\.deployment_maintenance_mode \? 0 : var\.backend_desired_count/);
+  assert.match(moduleEmail, /desired_count\s*=\s*var\.deployment_maintenance_mode \? 0 : 1/);
+  assert.match(moduleEmail, /state\s*=\s*var\.deployment_maintenance_mode \? "DISABLED" : "ENABLED"/);
+  assert.match(read("infra/modules/mangorts-platform/attachment_maintenance.tf"), /state\s*=\s*var\.deployment_maintenance_mode \? "DISABLED" : "ENABLED"/);
+  assert.match(moduleECS, /deployment_maximum_percent\s*=\s*var\.environment == "qa" \? 100 : 200/);
+  const gate = read("infra/modules/mangorts-platform/qa_release.tf");
+  assert.match(gate, /priority\s*=\s*50[\s\S]*?X-Mangorts-QA-Release-Probe/);
+  assert.match(gate, /priority\s*=\s*60[\s\S]*?status_code\s*=\s*"503"/);
+  assert.match(gate, /var\.deployment_maintenance_mode \? \["\/\*"\] : \["\/\.qa-maintenance-disabled"\]/);
+});
+
+test("QA recovery retains attachment bytes and private release archives within bounded storage", () => {
+  assert.match(qaVariables, /var\.database_backup_retention_days >= 1 && var\.database_backup_retention_days <= 7/);
+  assert.match(read("infra/aws-qa/attachments_s3.tf"), /resource "aws_s3_bucket_versioning" "attachments"[\s\S]*?status\s*=\s*"Enabled"/);
+  assert.match(qaMain, /attachment_recovery_retention_days\s*=\s*var\.database_backup_retention_days \+ 1/);
+  assert.match(read("infra/modules/mangorts-platform/attachments_s3.tf"), /noncurrent_days\s*=\s*var\.attachment_recovery_retention_days/);
+  assert.match(qaRelease, /release_bucket\s*=\s*var\.terraform_state_bucket_name/);
+  assert.match(qaRelease, /release_prefix\s*=\s*"mangorts\/qa\/releases\/"/);
+  const attachmentRestorePolicy = qaReleaseIAM.slice(qaReleaseIAM.indexOf('sid       = "RestoreQAAttachmentBytesWithoutDeletingVersions"'));
+  assert.match(attachmentRestorePolicy, /s3:GetObjectVersion/);
+  assert.doesNotMatch(attachmentRestorePolicy, /s3:DeleteObjectVersion/);
+});
+
+test("current QA recovery images remain protected when ordinary image history exceeds 50", () => {
+  const lifecycle = read("infra/modules/mangorts-platform/ecr.tf");
+  assert.match(lifecycle, /concat\(var\.environment == "qa" \? \[[\s\S]*?rulePriority = 1[\s\S]*?tagStatus\s*=\s*"tagged"[\s\S]*?tagPrefixList\s*=\s*\["qa-recovery-"\][\s\S]*?countNumber\s*=\s*100/);
+  assert.match(lifecycle, /rulePriority = var\.environment == "qa" \? 2 : 1[\s\S]*?tagStatus\s*=\s*"any"[\s\S]*?countNumber\s*=\s*50/);
+  assert.match(qaRelease, /"module\.platform\.aws_ecr_lifecycle_policy\.backend"/);
+  assert.match(qaReleaseIAM, /RetainOnlyQARecoveryImages[\s\S]*?"ecr:PutLifecyclePolicy", "ecr:BatchDeleteImage"[\s\S]*?repository\/\$\{local\.name_prefix\}-backend/);
+  assert.match(qaEcrPolicy, /"ecr:PutImage"/);
 });
 
 test("QA deploy permissions exclude account-wide IAM, Route53, S3, and WAF mutation", () => {
@@ -354,10 +406,11 @@ test("QA deploy permissions exclude account-wide IAM, Route53, S3, and WAF mutat
   assert.doesNotMatch(qaDeployPolicy, /route53:(?:Change|Create|Delete)|wafv2:(?:Create|Delete|Update)/);
 });
 
-test("the migration task is defined but never run automatically", () => {
+test("direct migration tasks inspect by default and approved releases deliberately run migrations", () => {
   assert.match(qaMigration, /resource "aws_ecs_task_definition" "database_migration"/);
   assert.match(qaMigration, /command\s*=\s*\["-mode", "audit"\]/);
   assert.match(qaMigration, /valueFrom\s*=\s*var\.database_managed_password_bootstrap \?/);
   assert.match(qaWorkflow, /Dockerfile\.migrations/);
   assert.doesNotMatch(qaWorkflow, /aws ecs run-task|-mode schema|-baseline-migrations/);
+  assert.match(read("scripts/qa_release_aws.mjs"), /\['-mode', 'migrate'\]/);
 });
