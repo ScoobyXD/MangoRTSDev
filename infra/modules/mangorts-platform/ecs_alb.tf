@@ -72,6 +72,16 @@ resource "aws_ecs_cluster" "main" {
 
   lifecycle {
     precondition {
+      condition     = !var.deployment_maintenance_mode || var.environment == "qa"
+      error_message = "deployment_maintenance_mode is supported only by the QA release coordinator."
+    }
+
+    precondition {
+      condition     = var.attachment_recovery_retention_days == 0 || (var.environment == "qa" && var.attachment_recovery_retention_days >= 2 && var.attachment_recovery_retention_days <= 8)
+      error_message = "Only QA may retain attachment versions for release recovery, for 2 through 8 days."
+    }
+
+    precondition {
       condition     = trimspace(var.deepgram_api_key_secret_arn) == "" || var.environment == "dev"
       error_message = "Speech-to-text dictation may be enabled only in dev; leave deepgram_api_key_secret_arn empty elsewhere."
     }

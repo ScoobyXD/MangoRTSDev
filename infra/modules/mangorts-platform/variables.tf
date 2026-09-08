@@ -587,11 +587,6 @@ variable "deployment_maintenance_mode" {
   description = "Stop QA writer services and schedules while its release coordinator changes code or schema."
   type        = bool
   default     = false
-
-  validation {
-    condition     = !var.deployment_maintenance_mode || var.environment == "qa"
-    error_message = "deployment_maintenance_mode is supported only by the QA release coordinator."
-  }
 }
 
 variable "qa_release_probe" {
@@ -605,9 +600,4 @@ variable "attachment_recovery_retention_days" {
   description = "QA noncurrent attachment retention; zero leaves other environments' existing lifecycle unchanged."
   type        = number
   default     = 0
-
-  validation {
-    condition     = var.attachment_recovery_retention_days == 0 || (var.environment == "qa" && var.attachment_recovery_retention_days >= 2 && var.attachment_recovery_retention_days <= 8)
-    error_message = "Only QA may retain attachment versions for release recovery, for 2 through 8 days."
-  }
 }
