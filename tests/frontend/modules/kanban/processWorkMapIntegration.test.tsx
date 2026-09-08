@@ -11,6 +11,10 @@ const processA = "22222222-2222-2222-2222-222222222222";
 const processB = "33333333-3333-3333-3333-333333333333";
 const stepA = "44444444-4444-4444-4444-444444444444";
 const stepB = "55555555-5555-5555-5555-555555555555";
+const boardCreatedStep = "77777777-7777-7777-7777-777777777777";
+const unassignedFirst = "88888888-8888-8888-8888-888888888881";
+const unassignedSecond = "88888888-8888-8888-8888-888888888882";
+const assignedNode = "88888888-8888-8888-8888-888888888883";
 const apiBase = "http://localhost:8080";
 
 async function settle(condition: () => boolean, description: string) {
@@ -39,7 +43,11 @@ test("Board and the named Process canvas share inline Step edits, block switchin
   dom.window.sessionStorage.setItem("mangorts:active-company-id-v1", companyID);
 
   const snapshots = new Map<string, ProcessWorkSnapshot>([
-    [processA, { logic_gate: { logic_gate_id: processA, header: "Order Process" }, permissions: { can_edit: true, can_resolve_requests: false }, steps: [{ process_step_id: stepA, logic_gate_id: processA, name: "Receive purchase order", position: 1000 }], relationships: [], nodes: [] }],
+    [processA, { logic_gate: { logic_gate_id: processA, header: "Order Process" }, permissions: { can_edit: true, can_resolve_requests: false }, steps: [{ process_step_id: stepA, logic_gate_id: processA, name: "Receive purchase order", position: 1000 }], relationships: [], nodes: [
+      { node_id: unassignedFirst, node_title: "Prepare first order", status: "In Progress", process_step_id: null, is_issue: false, position: 1000, created_timestamp: "2026-09-05T00:00:00Z" },
+      { node_id: unassignedSecond, node_title: "Prepare second order", status: "Review", process_step_id: null, is_issue: false, position: 2000, created_timestamp: "2026-09-05T00:00:00Z" },
+      { node_id: assignedNode, node_title: "Receive order", status: "In Progress", process_step_id: stepA, is_issue: false, position: 3000, created_timestamp: "2026-09-05T00:00:00Z" },
+    ] }],
     [processB, { logic_gate: { logic_gate_id: processB, header: "Finance Process" }, permissions: { can_edit: true, can_resolve_requests: false }, steps: [{ process_step_id: stepB, logic_gate_id: processB, name: "Review invoice", position: 1000 }], relationships: [], nodes: [] }],
   ]);
   const layouts = new Map<string, ProcessStepMapLayout>([
@@ -82,7 +90,7 @@ test("Board and the named Process canvas share inline Step edits, block switchin
     assert.equal(method, "POST");
     creates.push(body);
     await new Promise<void>((resolve) => { releaseCreate = resolve; });
-    const step = { process_step_id: "66666666-6666-6666-6666-666666666666", logic_gate_id: id, name: body.name, position: 2000 };
+    const step = { process_step_id: creates.length === 1 ? boardCreatedStep : "66666666-6666-6666-6666-666666666666", logic_gate_id: id, name: body.name, position: (snapshots.get(id)!.steps.length + 1) * 1000 };
     snapshots.get(id)!.steps.push(step);
     return reply({ step });
   });
@@ -104,6 +112,27 @@ test("Board and the named Process canvas share inline Step edits, block switchin
     await click("Steps board");
     await settle(() => Boolean(document.querySelector(".process-work__step-title")), "Board did not load the original Step");
     updateRealtimeHealth(realtimeHealthKey(apiBase, companyID), { status: "connected" });
+    const columnIDs = () => [...document.querySelectorAll<HTMLElement>("[data-process-step]")].map((item) => item.dataset.processStep);
+    const unassignedColumn = document.querySelector<HTMLElement>('[data-process-step="unassigned"]')!;
+    const unassignedCards = [...unassignedColumn.querySelectorAll<HTMLElement>("[data-process-node]")];
+    const nodesBeforeCreate = structuredClone(snapshots.get(processA)!.nodes);
+    assert.deepEqual(columnIDs(), ["unassigned", stepA], "No step assigned must be the leftmost column");
+    assert.deepEqual(unassignedCards.map((item) => item.dataset.processNode), [unassignedFirst, unassignedSecond]);
+    await click("+ Add next step");
+    await settle(() => Boolean(releaseCreate), "Board Step creation did not start");
+    await act(async () => releaseCreate!());
+    await settle(() => Boolean(document.querySelector(`[data-process-step="${boardCreatedStep}"]`)) && !button("Map").disabled, "Board did not append the new Step");
+    releaseCreate = undefined;
+    assert.deepEqual(columnIDs(), ["unassigned", stepA, boardCreatedStep], "Adding a Step must append to the right without moving No step assigned");
+    assert.equal(document.querySelector('[data-process-step="unassigned"]'), unassignedColumn, "Adding a Step must keep the unassigned column mounted");
+    const cardsAfterCreate = [...unassignedColumn.querySelectorAll("[data-process-node]")];
+    assert.equal(cardsAfterCreate.length, unassignedCards.length);
+    assert.ok(cardsAfterCreate.every((card, index) => card === unassignedCards[index]), "Adding a Step must preserve each unassigned card and its order");
+    assert.deepEqual(snapshots.get(processA)!.nodes, nodesBeforeCreate, "Adding a Step must preserve Node placement and state");
+    assert.deepEqual(creates[0], { company_id: companyID, name: "New step", after_process_step_id: stepA });
+    await act(async () => unassignedCards[0].click());
+    await act(async () => Simulate.click(document.querySelector(`[data-process-node="${assignedNode}"]`)!, { shiftKey: true }));
+    assert.deepEqual([...document.querySelectorAll<HTMLElement>(".process-work__node.is-selected")].map((item) => item.dataset.processNode), [unassignedFirst, unassignedSecond, assignedNode], "Shift selection must follow the left-to-right column order");
     await click("Map");
     await settle(() => Boolean(document.querySelector(`[data-step-map-id="${stepA}"]`)), "Map did not load the same Step");
     await settle(() => !button("+ Create Step").disabled, "Map never became editable");
@@ -131,7 +160,7 @@ test("Board and the named Process canvas share inline Step edits, block switchin
     assert.deepEqual(renames, [{ processID: processA, stepID: "66666666-6666-6666-6666-666666666666", body: { company_id: companyID, name: "Confirm purchase order" } }]);
     await click("Board");
     await settle(() => [...document.querySelectorAll(".process-work__step-title")].some((item) => item.textContent === "Confirm purchase order"), "Board did not receive the Step named in Map");
-    assert.equal(creates.length, 1);
+    assert.equal(creates.length, 2);
     await click("Map");
     await settle(() => Boolean(document.querySelector(`[data-step-map-id="${stepA}"]`)), "Map did not reopen");
     await settle(() => !button("+ Create Step").disabled, "Map controls are not ready");

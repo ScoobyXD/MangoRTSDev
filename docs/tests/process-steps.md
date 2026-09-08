@@ -14,7 +14,7 @@
 12. Requested, Pending, Backlog, and Done are separate status lists in Steps mode and are never steps or stored board columns.
 13. The Steps tab shows In Progress and Review Nodes; its separate status tabs show only Nodes with their matching status.
 14. In Steps mode, a Node belongs to exactly one status-selected work tab.
-15. An active Node without a step appears in No step assigned while keeping its Process membership and status.
+15. An active Node without a step appears in the leftmost No step assigned column while keeping its Process membership and status.
 16. Pending means accepted work waiting to start or resume and is independent of whether a step is already assigned.
 17. Accepting a request changes its status to Pending; declining or cancelling follows the existing Backlog behavior and request authorization.
 18. The Steps-mode Start work action chooses one step and changes the Node to In Progress in one operation.

@@ -265,7 +265,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
     const ordered = groupings.length ? flatten(groupedNodes(nodes, "selection")) : sortNodes(nodes);
     return [...new Map(ordered.map((node) => [node.node_id, node])).values()];
   };
-  const orderedVisible = () => steps.flatMap((step) => renderedOrder(visible.filter((node) => node.process_step_id === step.process_step_id))).concat(renderedOrder(visible.filter((node) => !node.process_step_id)));
+  const orderedVisible = () => renderedOrder(visible.filter((node) => !node.process_step_id)).concat(steps.flatMap((step) => renderedOrder(visible.filter((node) => node.process_step_id === step.process_step_id))));
   const updateSelection = (node: ProcessWorkNode, next: Set<string>) => {
     setSelected(next);
     try {
@@ -440,8 +440,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
       </div> : groupingControl}
       {displayToggle()}
     </div>}
-    {surface === "board" && selected.size > 0 && canEdit && <div className="process-work__selection"><span>{selected.size} selected</span>
-      <select aria-label="Set selected Nodes status" value="" disabled={busy} onChange={(event) => { const status = event.target.value as ProcessStatus; if (!status) return; if (boardMode === "kanban") void moveStatusNodes(selectedIDs, status); else if (status === "In Progress") startWork((snapshot?.nodes ?? []).filter((node) => selected.has(node.node_id))); else void changeNodes(selectedIDs, { status }); }}><option value="">Set status…</option>{PROCESS_STATUSES.map((status) => <option key={status} value={status}>{status === "Backlogs" ? "Backlog" : status}</option>)}</select>
+    {surface === "board" && boardMode === "steps" && selected.size > 0 && canEdit && <div className="process-work__selection"><span>{selected.size} selected</span>
+      <select aria-label="Set selected Nodes status" value="" disabled={busy} onChange={(event) => { const status = event.target.value as ProcessStatus; if (!status) return; if (status === "In Progress") startWork((snapshot?.nodes ?? []).filter((node) => selected.has(node.node_id))); else void changeNodes(selectedIDs, { status }); }}><option value="">Set status…</option>{PROCESS_STATUSES.map((status) => <option key={status} value={status}>{status === "Backlogs" ? "Backlog" : status}</option>)}</select>
       <select aria-label="Assign selected Nodes to step" value="" disabled={busy} onChange={(event) => { if (event.target.value) void changeNodes(selectedIDs, { process_step_id: event.target.value === "none" ? null : event.target.value }); }}><option value="">Assign step…</option><option value="none">No step assigned</option>{steps.map((step) => <option key={step.process_step_id} value={step.process_step_id}>{step.name}</option>)}</select>
       <button type="button" disabled={busy} onClick={() => setDeletion({ nodeIDs: selectedIDs })}>Delete Nodes</button><button type="button" onClick={() => setSelected(new Set())}>Clear</button>
     </div>}
@@ -458,7 +458,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
           query={kanbanQuery} accountIDs={kanbanAccountIDs} onClearFilters={() => { setKanbanQuery(""); setKanbanAccountIDs([]); }}
           onSelection={updateSelection} onClearSelection={() => setSelected(new Set())} onOpen={(node) => { updateSelection(node, new Set([node.node_id])); openNode(node.node_id, node.node_title); }} onMove={(ids, status, before, priority) => void moveStatusNodes(ids, status, before, priority)}
           onTransferEmail={(source, target) => void transferWorkEmail(source, target)} onCreate={createStatusNode} onAssign={(items, status, priority) => void assignItemsToWork(items, status, undefined, priority)} onTriage={(triage, status, priority) => void convertMessagesToWork(triage, status, undefined, priority)} onRename={renameStatusNode}
-          onRemove={(nodeIDs) => setDeletion({ nodeIDs: [...new Set(nodeIDs)], detach: true })} onDelete={(nodeIDs) => setDeletion({ nodeIDs: [...new Set(nodeIDs)] })} /> : view === "Steps" ? <div className="process-work__steps">{steps.map(renderStep)}{renderStep(null, steps.length)}{canEdit && <button type="button" className="process-work__add-step" disabled={busy} onClick={() => addStep(steps[steps.length - 1]?.process_step_id)}>+ Add {steps.length ? "next " : ""}step</button>}</div> :
+          onRemove={(nodeIDs) => setDeletion({ nodeIDs: [...new Set(nodeIDs)], detach: true })} onDelete={(nodeIDs) => setDeletion({ nodeIDs: [...new Set(nodeIDs)] })} /> : view === "Steps" ? <div className="process-work__steps">{renderStep(null, 0)}{steps.map(renderStep)}{canEdit && <button type="button" className="process-work__add-step" disabled={busy} onClick={() => addStep(steps[steps.length - 1]?.process_step_id)}>+ Add {steps.length ? "next " : ""}step</button>}</div> :
         <section className="process-work__list" onDragOver={allowDrop} onDrop={(event) => drop(event, null)}><header><h3>{view}</h3>{canEdit && <button type="button" className="process-work__icon-button" aria-label={`New Node in ${view}`} title="New Node" disabled={busy} onClick={() => newNode(null)}>+</button>}</header>{visible.length ? renderNodes(visible, null) : <p className="process-work__empty-lane">No {view.toLowerCase()} work.</p>}</section>}
     </div>
     {dialog && <AppModalPortal onRequestClose={busy ? undefined : () => setDialog(null)}><div className="process-work__modal-backdrop"><form className={`process-work__dialog${isDark ? " process-work--dark" : ""}`} role="dialog" aria-modal="true" aria-label={dialog.kind === "start" ? "Start work" : "Node"} onSubmit={(event) => { event.preventDefault(); submitDialog(); }}>
