@@ -14,5 +14,5 @@
 .process-work__board-modes button[aria-pressed=true] { border-color:var(--process-accent); box-shadow:inset 2px 2px 5px #8992a43d,inset -2px -2px 5px #fff; }
 .process-work__controls { flex-wrap:nowrap; position:relative; z-index:8; }
 .process-work--kanban { padding:0; }
-.process-work--kanban>.process-work__controls, .process-work--kanban>.process-work__selection { margin:8px 8px 0 4px; }
+.process-work--kanban>.process-work__controls { margin:8px 8px 0 4px; }
 .process-work--kanban>.process-work__panel { padding:0; }

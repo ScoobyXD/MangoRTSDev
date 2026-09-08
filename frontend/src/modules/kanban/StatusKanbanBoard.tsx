@@ -190,7 +190,7 @@ export function StatusKanbanBoard(props: Props) {
       <div className="status-kanban__main">{main.map(renderColumn)}</div>
       <div className="status-kanban__bottom" style={{ gridTemplateColumns: `minmax(180px, ${bottom[0].width}px) minmax(0, 1fr)` }}>{bottom.map(renderColumn)}</div>
     </div>
-    {menu && <FrameRightClickMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
+    {menu && <FrameRightClickMenu x={menu.x} y={menu.y} width={240} minWidth={0} maxWidth="calc(100vw - 16px)" onClose={() => setMenu(null)}>
       {menu.priority ? KANBAN_NODE_PRIORITY_STYLE_OPTIONS.filter((option) => option.value !== "0").map((option) => <button type="button" key={option.value} style={menuButton} disabled={busy || !canEdit} onClick={() => {
         const pending = menu; setMenu(null);
         if (pending.items) props.onAssign(pending.items, pending.status, Number(option.value));

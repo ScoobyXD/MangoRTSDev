@@ -85,6 +85,9 @@
 83. Switching Processes during a work mutation must keep mutation controls disabled until that save finishes, then enable the current Process controls.
 84. Kanban card drags must expose the existing Node batch formats with exact Node IDs and support copy and move targets elsewhere in the app.
 85. Kanban/Steps, Group, board search, account search, and Board/Map controls must share one header row above the scrolling Kanban columns.
+86. Selecting Nodes in Kanban must not show the bulk status, step assignment, deletion, and clear toolbar above the board.
+87. Kanban creation priority and context menus must be at most 240 pixels wide and fit within the viewport.
+88. No step assigned must remain the leftmost Steps column, and adding Steps must keep that column and its Nodes in place while adding columns to its right.
 
 ## Process Story
 

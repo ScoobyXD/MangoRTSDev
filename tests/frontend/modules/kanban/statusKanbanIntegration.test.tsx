@@ -182,7 +182,7 @@ test("Kanban and Steps share work, preserve independent status and step changes,
     assert.equal(savedViewWrites, 0, "A mode switch must not create another preference record");
 
     await act(async () => card(movingID, lane("Pending")!)!.click());
-    assert.match(document.querySelector(".process-work__selection")?.textContent ?? "", /1 selected/);
+    assert.equal(document.querySelector(".process-work__selection"), null, "Selecting a Kanban card must not insert a toolbar above the board");
     const dragged = new Map<string, string>();
     const dragTransfer = {
       setData: (type: string, value: string) => dragged.set(type, value), getData: (type: string) => dragged.get(type) ?? "", setDragImage() {}, effectAllowed: "move",
@@ -203,6 +203,8 @@ test("Kanban and Steps share work, preserve independent status and step changes,
 
     await click("Steps board");
     assert.ok(card(movingID, document.querySelector(`[data-process-step="${stepA}"]`)!));
+    await act(async () => card(movingID)!.click());
+    assert.match(document.querySelector(".process-work__selection")?.textContent ?? "", /1 selected/, "Steps must retain its bulk commands");
     await drop(document.querySelector<HTMLElement>(`[data-process-step="${stepB}"]`)!, [movingID]);
     await settle(() => Boolean(card(movingID, document.querySelector(`[data-process-step="${stepB}"]`)!)), "Step move did not refresh the shared Node");
     assert.equal(stateWrites.length, 2);
@@ -228,6 +230,11 @@ test("Kanban and Steps share work, preserve independent status and step changes,
     assert.ok(card(unassignedID, document.querySelector('[data-process-step="unassigned"]')!), "Status-only active work belongs under No step assigned");
     await click("Kanban board");
 
+    await act(async () => lane("Pending")!.querySelector<HTMLButtonElement>(".status-kanban__create-buffer")!.click());
+    assert.ok(button("2\u00a0\u00a0By end of day"), "Left-clicking blank creation space must still offer priority choices");
+    assert.equal(createWrites.length, 0, "Opening priority choices must not create a Node");
+    await act(async () => document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    assert.equal(button("2\u00a0\u00a0By end of day"), undefined);
     await click("Create node in Pending");
     await click("2\u00a0\u00a0By end of day");
     await settle(() => Boolean(card(createdID)?.querySelector("input")), "Creating a Node must start its inline title editor");
