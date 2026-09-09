@@ -437,18 +437,3 @@ jobs:
             "$TF_DIR/qa-release.tfplan" \
             "$TF_DIR/qa-release-probe.tfplan" \
             "$TF_DIR/qa-release-images.tfplan"
-
-  inspect-migration-failure:
-    if: github.ref == 'refs/heads/qa'
-    runs-on: ubuntu-latest
-    environment:
-      name: qa
-      deployment: false
-    steps:
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_QA_DEPLOY_ROLE_ARN }}
-          aws-region: us-west-1
-      - name: Read existing migration failure report
-        run: |
-          aws logs get-log-events --region us-west-1 --log-group-name /ecs/mangorts-qa/database-migration --log-stream-name ecs/database-migration/7a827361ae60494b8ae6ff44d7762b62 --start-from-head --output json | jq -r '.events[].message | select(startswith("MANGORTS_MIGRATION_PLAN=")) | ltrimstr("MANGORTS_MIGRATION_PLAN=") | fromjson | {ready,blockers,unknown_to_repository,pending,applied}'
