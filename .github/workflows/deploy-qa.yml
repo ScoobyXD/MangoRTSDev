@@ -437,3 +437,31 @@ jobs:
             "$TF_DIR/qa-release.tfplan" \
             "$TF_DIR/qa-release-probe.tfplan" \
             "$TF_DIR/qa-release-images.tfplan"
+
+  export-repair-inventory:
+    if: github.ref == 'refs/heads/qa'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment:
+      name: qa
+      deployment: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_QA_DEPLOY_ROLE_ARN }}
+          aws-region: us-west-1
+      - name: Build read-only diagnostic image
+        run: |
+          REPO=686458136219.dkr.ecr.us-west-1.amazonaws.com/mangorts-qa-backend
+          aws ecr get-login-password --region us-west-1 | docker login --username AWS --password-stdin 686458136219.dkr.ecr.us-west-1.amazonaws.com
+          docker build -t "$REPO:qa-audit-$GITHUB_SHA-migrations" -f backend/Dockerfile.migrations backend
+          docker push "$REPO:qa-audit-$GITHUB_SHA-migrations"
+          echo "MIGRATION_IMAGE_URI=$REPO:qa-audit-$GITHUB_SHA-migrations" >> "$GITHUB_ENV"
+      - name: Export QA catalog in a read-only transaction
+        run: node scripts/qa_export_repair_inventory.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qa-schema-inventory
+          path: qa-schema-inventory.json
+          retention-days: 7
