@@ -455,15 +455,16 @@ jobs:
         run: |
           REPO=686458136219.dkr.ecr.us-west-1.amazonaws.com/mangorts-qa-backend
           aws ecr get-login-password --region us-west-1 | docker login --username AWS --password-stdin 686458136219.dkr.ecr.us-west-1.amazonaws.com
-          docker build -t "$REPO:qa-audit-$GITHUB_SHA-migrations" -f backend/Dockerfile.migrations backend
+          printf 'FROM %s:qa-audit-8c3efa0849511ccea762e3f497a688c9d6f1d42b-migrations\nCOPY backend/db/qa_repair_data_audit.sql /app/db/qa_repair_data_audit.sql\n' "$REPO" > /tmp/qa-data-audit.Dockerfile
+          docker build -t "$REPO:qa-audit-$GITHUB_SHA-migrations" -f /tmp/qa-data-audit.Dockerfile .
           docker push "$REPO:qa-audit-$GITHUB_SHA-migrations"
           echo "MIGRATION_IMAGE_URI=$REPO:qa-audit-$GITHUB_SHA-migrations" >> "$GITHUB_ENV"
       - name: Export QA catalog in a read-only transaction
         run: node scripts/qa_export_repair_inventory.mjs
       - uses: actions/upload-artifact@v4
         with:
-          name: qa-schema-inventory
+          name: qa-data-audit
           path: |
-            qa-schema-inventory.json
+            qa-data-audit.json
             qa-table-counts.json
           retention-days: 7
