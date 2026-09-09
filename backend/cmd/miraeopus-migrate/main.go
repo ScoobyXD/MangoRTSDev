@@ -548,6 +548,27 @@ func runAuditMode(ctx context.Context, conn *sql.Conn, cfg commandConfig, output
 		plan.SchemaInventorySHA256 = inventoryDigest
 		return writeMigrationPlan(output, plan)
 	}
+	// Counts only: no application rows or credentials are exported.
+	catalogItems, err := decodeSchemaInventory([]byte(inventoryJSON))
+	if err != nil {
+		return err
+	}
+	for _, item := range catalogItems {
+		if item.ObjectKind != "table" || !strings.HasPrefix(item.ObjectIdentity, "public.") {
+			continue
+		}
+		name := strings.TrimPrefix(item.ObjectIdentity, "public.")
+		if strings.ContainsAny(name, "\". ") {
+			return errors.New("unexpected public table identifier")
+		}
+		var count int64
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM public."`+name+`"`).Scan(&count); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(output, "MANGORTS_TABLE_COUNT=%s:%d\n", name, count); err != nil {
+			return err
+		}
+	}
 	// QA repair diagnostics: emit catalog definitions from the same read-only transaction.
 	var inventoryItems []json.RawMessage
 	if err := json.Unmarshal([]byte(inventoryJSON), &inventoryItems); err != nil {
