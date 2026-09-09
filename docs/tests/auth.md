@@ -30,9 +30,9 @@
 27. Landing navigation must select Sign In / Login by default and show only a minimal What We Offer placeholder when requested.
 28. Switching landing sections or wallpapers must preserve mounted auth forms, entered values, and pending confirmation work.
 29. Sign-up, sign-in, invitations, password recovery, account challenges, and deep-link return behavior must keep using the existing auth flows.
-30. Wallpapers must use repository scene folders and let the browser select an available crop and resolution for the viewport and pixel density.
-31. Missing wallpapers must leave a usable gradient background without blocking authentication or requesting nonexistent image files.
-32. Wallpaper rotation must decode the next scene before showing it and retain the current scene if the next image fails.
+30. Wallpapers must use repository scene folders and let the browser select an available still-image crop and resolution for the viewport and pixel density.
+31. Missing wallpapers must leave a usable gradient background without blocking authentication or requesting nonexistent media files.
+32. Wallpaper rotation must wait for the next image to decode or video to start playing before showing it, and retain the current scene if the next scene fails.
 33. Wallpaper rotation must wait about one minute between scenes, run only with multiple scenes, pause while the page is hidden, and stop for reduced motion.
 34. Wallpaper loading must request only the current scene and the next scene when needed, and remove timers and listeners when unmounted.
 
@@ -41,10 +41,14 @@
 37. Sign Up and Sign In fields must use opaque light backgrounds with dark text, and their exposed headings and labels must stay legible over varied scenery.
 38. Landing navigation must have no shared background rectangle.
 39. Adjacent landing navigation highlights must touch along a straight edge with no gap.
+40. A scene's optional loop.mp4 or loop.webm must play muted and inline, repeat automatically, and show no player controls; loop.mp4 must take priority when both exist.
+41. Failed or blocked video playback must use the same scene's still image when available and otherwise skip the scene.
+42. Reduced motion must prevent video requests and playback, use a matching still or the gradient, and cancel a pending scene transition when the preference changes.
+43. Wallpaper videos must pause while the page is hidden, resume when visible, and stop when removed.
 
 ## Wallpaper setup
 
-Add scene folders and image variants under `frontend/src/assets/auth-wallpapers/` following its [setup guide](../../frontend/src/assets/auth-wallpapers/README.md). Repository image changes are published by the existing frontend deployment.
+Add scene folders, image variants, and optional video loops under `frontend/src/assets/auth-wallpapers/` following its [setup guide](../../frontend/src/assets/auth-wallpapers/README.md). Repository media changes are published by the existing frontend deployment.
 
 ## Process Story
 

@@ -1,6 +1,6 @@
 type WallpaperVariant = { url: string; width: number; height: number };
 type WallpaperSource = { src: string; srcSet: string; sizes: string };
-export type WallpaperScene = { id: string; portrait?: WallpaperSource; landscape?: WallpaperSource };
+export type WallpaperScene = { id: string; portrait?: WallpaperSource; landscape?: WallpaperSource; video?: string };
 
 function sourceFor(variants: WallpaperVariant[]): WallpaperSource | undefined {
   if (!variants.length) return undefined;
@@ -17,8 +17,16 @@ function sourceFor(variants: WallpaperVariant[]): WallpaperSource | undefined {
 }
 
 export function buildWallpaperScenes(files: Record<string, string>): WallpaperScene[] {
-  const scenes = new Map<string, { portrait: WallpaperVariant[]; landscape: WallpaperVariant[] }>();
+  const scenes = new Map<string, { portrait: WallpaperVariant[]; landscape: WallpaperVariant[]; video?: string }>();
   for (const path of Object.keys(files).sort()) {
+    const video = /\/auth-wallpapers\/([^/]+)\/loop\.(?:mp4|webm)$/.exec(path);
+    if (video) {
+      const scene = scenes.get(video[1]) ?? { portrait: [], landscape: [] };
+      // Alphabetical order prefers MP4 when both formats are supplied.
+      scene.video ??= files[path];
+      scenes.set(video[1], scene);
+      continue;
+    }
     const match = /\/auth-wallpapers\/([^/]+)\/([1-9]\d*)x([1-9]\d*)\.(?:avif|jpe?g|png|webp)$/.exec(path);
     if (!match) continue;
     const [, id, widthText, heightText] = match;
@@ -32,5 +40,6 @@ export function buildWallpaperScenes(files: Record<string, string>): WallpaperSc
     id,
     portrait: sourceFor(variants.portrait),
     landscape: sourceFor(variants.landscape),
+    video: variants.video,
   }));
 }
