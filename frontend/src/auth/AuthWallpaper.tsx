@@ -2,43 +2,94 @@ import { useEffect, useRef, useState } from "react";
 import { buildWallpaperScenes, type WallpaperScene } from "./authWallpaperScenes.js";
 
 const wallpaperScenes = buildWallpaperScenes(import.meta.glob<string>(
-  "../assets/auth-wallpapers/*/*.{jpg,jpeg,png,webp,avif}",
+  "../assets/auth-wallpapers/*/*.{jpg,jpeg,png,webp,avif,mp4,webm}",
   { eager: true, query: "?url&no-inline", import: "default" },
 ));
 const ROTATION_MS = 60_000;
 const FADE_MS = 1_600;
 
-function Scene({ scene, visible, onReady, onError }: {
+function Scene({ scene, visible, active, reducedMotion, onReady, onError }: {
   scene: WallpaperScene;
   visible: boolean;
-  onReady?: () => void;
+  active: boolean;
+  reducedMotion: boolean;
+  onReady?: (ready: boolean) => void;
   onError: () => void;
 }) {
-  const source = scene.landscape ?? scene.portrait!;
+  const source = scene.landscape ?? scene.portrait;
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [videoFailed, setVideoFailed] = useState(false);
+  const playVideo = Boolean(scene.video && !reducedMotion && !videoFailed);
+  const callbacks = useRef({ onReady, onError });
+  callbacks.current = { onReady, onError };
+
+  useEffect(() => {
+    if (!playVideo) {
+      if (!source) {
+        if (reducedMotion) callbacks.current.onReady?.(true);
+        else callbacks.current.onError();
+      }
+      return;
+    }
+    const video = videoRef.current!;
+    if (!active) return;
+    let cancelled = false;
+    void video.play().then(() => {
+      if (!cancelled && !document.hidden) callbacks.current.onReady?.(true);
+    }).catch(() => {
+      if (!cancelled) {
+        callbacks.current.onReady?.(false);
+        setVideoFailed(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+      video.pause();
+    };
+  }, [active, playVideo, reducedMotion, scene.video, source]);
+
   return (
-    <picture className={`auth-wallpaper__scene${visible ? " is-visible" : ""}`}>
-      {scene.portrait && scene.landscape && (
-        <source media="(orientation: portrait)" srcSet={scene.portrait.srcSet} sizes={scene.portrait.sizes} />
-      )}
-      <img
-        src={source.src}
-        srcSet={source.srcSet}
-        sizes={source.sizes}
-        alt=""
-        decoding="async"
-        draggable={false}
-        onLoad={(event) => {
-          const image = event.currentTarget;
-          const loadedSource = image.currentSrc;
-          void image.decode().then(() => {
-            if (image.isConnected && image.currentSrc === loadedSource && !document.hidden) onReady?.();
-          }).catch(() => {
-            if (image.isConnected && image.currentSrc === loadedSource) onError();
-          });
-        }}
-        onError={onError}
-      />
-    </picture>
+    <div className={`auth-wallpaper__scene${visible ? " is-visible" : ""}`}>
+      {playVideo ? (
+        <video
+          ref={videoRef}
+          src={scene.video}
+          muted
+          loop
+          playsInline
+          preload="auto"
+          tabIndex={-1}
+          onError={() => {
+            onReady?.(false);
+            setVideoFailed(true);
+          }}
+        />
+      ) : source ? (
+        <picture>
+          {scene.portrait && scene.landscape && (
+            <source media="(orientation: portrait)" srcSet={scene.portrait.srcSet} sizes={scene.portrait.sizes} />
+          )}
+          <img
+            src={source.src}
+            srcSet={source.srcSet}
+            sizes={source.sizes}
+            alt=""
+            decoding="async"
+            draggable={false}
+            onLoad={(event) => {
+              const image = event.currentTarget;
+              const loadedSource = image.currentSrc;
+              void image.decode().then(() => {
+                if (image.isConnected && image.currentSrc === loadedSource && !document.hidden) onReady?.(true);
+              }).catch(() => {
+                if (image.isConnected && image.currentSrc === loadedSource) onError();
+              });
+            }}
+            onError={onError}
+          />
+        </picture>
+      ) : null}
+    </div>
   );
 }
 
@@ -52,7 +103,11 @@ export function AuthWallpaper({ scenes = wallpaperScenes }: { scenes?: readonly 
 
   useEffect(() => {
     const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const onMotion = () => setReducedMotion(motion.matches);
+    const onMotion = () => {
+      setReducedMotion(motion.matches);
+      setPending(null);
+      setReady(false);
+    };
     const onVisibility = () => {
       setActive(!document.hidden);
       if (document.hidden) { setPending(null); setReady(false); }
@@ -91,13 +146,13 @@ export function AuthWallpaper({ scenes = wallpaperScenes }: { scenes?: readonly 
   return (
     <div className="auth-wallpaper" aria-hidden="true">
       {current !== null && (
-        <Scene key={scenes[current].id} scene={scenes[current]} visible onError={() => {
+        <Scene key={scenes[current].id} scene={scenes[current]} visible active={active} reducedMotion={reducedMotion} onError={() => {
           failed.current.add(current);
           setCurrent(null);
         }} />
       )}
       {pending !== null && (
-        <Scene key={scenes[pending].id} scene={scenes[pending]} visible={ready} onReady={() => setReady(true)} onError={() => {
+        <Scene key={scenes[pending].id} scene={scenes[pending]} visible={ready} active={active} reducedMotion={reducedMotion} onReady={setReady} onError={() => {
           failed.current.add(pending);
           setPending(null);
           setReady(false);
