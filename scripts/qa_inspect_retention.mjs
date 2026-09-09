@@ -1,0 +1,11 @@
+import { execFileSync } from 'node:child_process';
+const tf = args => execFileSync('terraform', args, {cwd:'infra/aws-qa',encoding:'utf8',maxBuffer:32*1024*1024});
+const state = JSON.parse(tf(['state','pull']));
+const policy = state.resources.filter(r=>r.module==='module.platform'&&r.type==='aws_ecr_lifecycle_policy'&&r.name==='backend');
+console.log('State:',JSON.stringify(policy.map(r=>({module:r.module,type:r.type,name:r.name,instances:r.instances.map(i=>({status:i.status,id:i.attributes.id,repository:i.attributes.repository,policy:i.attributes.policy}))}))));
+const live = execFileSync('aws',['ecr','get-lifecycle-policy','--repository-name','mangorts-qa-backend','--region','us-west-1','--output','json'],{encoding:'utf8'});
+console.log('Live policy:',live);
+tf(['plan','-refresh=false','-target=module.platform.aws_ecr_lifecycle_policy.backend','-out=qa-retention.tfplan']);
+const plan=JSON.parse(tf(['show','-json','qa-retention.tfplan']));
+console.log('Policy changes:',JSON.stringify(plan.resource_changes.filter(r=>r.type==='aws_ecr_lifecycle_policy')));
+console.log('Other actions:',JSON.stringify(plan.resource_changes.filter(r=>r.type!=='aws_ecr_lifecycle_policy').map(r=>({address:r.address,actions:r.change.actions,reason:r.action_reason}))));

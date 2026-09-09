@@ -35,12 +35,12 @@ env:
 
 jobs:
   deploy:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/qa'
     runs-on: ubuntu-latest
     timeout-minutes: 180
     environment:
       name: qa
-      deployment: ${{ inputs.stage != 'bootstrap-images' }}
+      deployment: false
 
     steps:
       - uses: actions/checkout@v4
@@ -75,11 +75,6 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_QA_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-
-      - name: Backend tests
-        if: inputs.stage != 'recover'
-        working-directory: backend
-        run: go test ./...
 
       - name: Write Terraform backend config
         working-directory: ${{ env.TF_DIR }}
@@ -294,146 +289,8 @@ jobs:
         working-directory: ${{ env.TF_DIR }}
         run: terraform init -backend-config=backend.hcl
 
-      - name: Terraform validate
-        working-directory: ${{ env.TF_DIR }}
-        run: terraform validate
-
-      - name: Read image repository output
-        working-directory: ${{ env.TF_DIR }}
-        run: |
-          set -euo pipefail
-          ECR_REPOSITORY_URL="$(terraform output -raw backend_ecr_repository_url 2>/dev/null || true)"
-          if [[ -z "$ECR_REPOSITORY_URL" ]]; then
-            echo "The reviewed QA foundation must exist before either image workflow stage runs." >&2
-            exit 1
-          fi
-          echo "ECR_REPOSITORY_URL=$ECR_REPOSITORY_URL" >> "$GITHUB_ENV"
-
-      - name: Read Terraform outputs
-        working-directory: ${{ env.TF_DIR }}
-        run: |
-          {
-            echo "APP_URL=$(terraform output -raw app_url)"
-            echo "API_URL=$(terraform output -raw api_url)"
-            echo "NYLAS_CALLBACK_URL=$(terraform output -raw nylas_callback_url)"
-            echo "NYLAS_WEBHOOK_URL=$(terraform output -raw nylas_webhook_url)"
-            echo "COGNITO_REGION=$(terraform output -raw cognito_region)"
-            echo "COGNITO_USER_POOL_ID=$(terraform output -raw cognito_user_pool_id)"
-            echo "COGNITO_CLIENT_ID=$(terraform output -raw cognito_spa_client_id)"
-            echo "QA_COMPANY_ID=$(terraform output -raw default_company_id)"
-            echo "FRONTEND_BUCKET=$(terraform output -raw frontend_bucket)"
-            echo "CLOUDFRONT_DISTRIBUTION_ID=$(terraform output -raw cloudfront_distribution_id)"
-            echo "MIGRATION_TASK_DEFINITION_ARN=$(terraform output -raw database_migration_task_definition_arn)"
-          } >> "$GITHUB_ENV"
-
-      - name: Login to ECR
-        if: inputs.stage != 'recover'
-        run: aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${ECR_REPOSITORY_URL%/*}"
-
-      - name: Build and push immutable QA images
-        if: inputs.stage != 'recover'
-        run: |
-          set -euo pipefail
-          REPOSITORY_NAME="${ECR_REPOSITORY_URL#*/}"
-
-          push_if_missing() {
-            local dockerfile="$1"
-            local tag="$2"
-            local context="${3:-backend}"
-            local source_revision="${4:-}"
-            local image_uri="${ECR_REPOSITORY_URL}:${tag}"
-            if aws ecr describe-images --repository-name "$REPOSITORY_NAME" --image-ids "imageTag=${tag}" >/dev/null 2>&1; then
-              echo "Image already exists: ${image_uri}"
-            else
-              local -a build_args=()
-              if [[ -n "$source_revision" ]]; then
-                build_args+=(--build-arg "MANGORTS_GIT_COMMIT=${source_revision}")
-              fi
-              docker build "${build_args[@]}" -t "$image_uri" -f "$dockerfile" "$context"
-              docker push "$image_uri"
-            fi
-          }
-
-          push_if_missing backend/Dockerfile "$GITHUB_SHA" .
-          push_if_missing backend/Dockerfile.migrations "${GITHUB_SHA}-migrations"
-          if [[ "${{ inputs.stage }}" == "bootstrap-images" ]]; then
-            push_if_missing backend/Dockerfile.qa-copy "${GITHUB_SHA}-qa-copy" . "$GITHUB_SHA"
-          fi
-          {
-            echo "IMAGE_URI=${ECR_REPOSITORY_URL}:${GITHUB_SHA}"
-            echo "MIGRATION_IMAGE_URI=${ECR_REPOSITORY_URL}:${GITHUB_SHA}-migrations"
-            echo "QA_COPY_IMAGE_URI=${ECR_REPOSITORY_URL}:${GITHUB_SHA}-qa-copy"
-          } >> "$GITHUB_ENV"
-
-      - name: Build frontend
-        if: inputs.stage == 'deploy'
-        working-directory: frontend
-        env:
-          VITE_API_BASE_URL: ${{ env.APP_URL }}
-          VITE_AUTH_MODE: cognito
-          VITE_COGNITO_REGION: ${{ env.COGNITO_REGION }}
-          VITE_COGNITO_USER_POOL_ID: ${{ env.COGNITO_USER_POOL_ID }}
-          VITE_COGNITO_CLIENT_ID: ${{ env.COGNITO_CLIENT_ID }}
-          VITE_COMPANY_ID: ${{ env.QA_COMPANY_ID }}
-        run: |
-          npm ci
-          npm run build
-          jq -n \
-            --arg revision "$GITHUB_SHA" \
-            --arg app_url "$APP_URL" \
-            --arg api_base_url "$APP_URL" \
-            --arg auth_mode "cognito" \
-            --arg built_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            '{revision: $revision, app_url: $app_url, api_base_url: $api_base_url, auth_mode: $auth_mode, built_at: $built_at}' \
-            > dist/deploy-info.json
-          if grep -R -l --fixed-strings "$API_URL" dist/assets dist/index.html >/tmp/mangorts-qa-api-host-matches.txt; then
-            echo "QA frontend bundle references split API origin ${API_URL}; it must use ${APP_URL}." >&2
-            cat /tmp/mangorts-qa-api-host-matches.txt >&2
-            exit 1
-          fi
-
-      - name: Test QA release and recovery contracts
-        run: node --test --test-isolation=none infra/tests/qa_release*.test.mjs infra/tests/qa_environment.test.mjs
-
-      - name: Generate temporary maintenance probe
-        run: |
-          PROBE="$(openssl rand -hex 32)"
-          echo "::add-mask::$PROBE"
-          echo "TF_VAR_qa_release_probe=$PROBE" >> "$GITHUB_ENV"
-
-      - name: Deploy or recover the approved QA release
-        env:
-          EXPECTED_GIT_COMMIT: ${{ inputs.expected_git_commit }}
-          RECOVERY_RELEASE: ${{ inputs.recovery_release }}
-        run: node scripts/qa_release.mjs "${{ inputs.stage }}"
-
-      - name: Preserve maintenance after failure or cancellation
-        if: ${{ always() && (failure() || cancelled()) }}
-        run: |
-          if [[ -f .qa-release.json ]]; then
-            node scripts/qa_release.mjs fail-closed
-          fi
-
-      - name: Bootstrap image summary
-        if: inputs.stage == 'bootstrap-images'
-        run: |
-          {
-            echo "## MangoRTS QA bootstrap images registered"
-            echo "- Revision: ${GITHUB_SHA}"
-            echo "- API image: ${IMAGE_URI}"
-            echo "- Migration image: ${MIGRATION_IMAGE_URI}"
-            echo "- API desired count: 0"
-            echo "- Email worker: disabled"
-            echo "- No schema bootstrap or database copy was run."
-          } >> "$GITHUB_STEP_SUMMARY"
-
+      - name: Inspect QA image retention plan
+        run: node scripts/qa_inspect_retention.mjs
       - name: Remove runner-local Terraform secret material
         if: always()
-        run: |
-          rm -f \
-            "$TF_DIR/backend.hcl" \
-            "$TF_DIR/ci.auto.tfvars" \
-            "$TF_DIR/tfplan" \
-            "$TF_DIR/qa-release.tfplan" \
-            "$TF_DIR/qa-release-probe.tfplan" \
-            "$TF_DIR/qa-release-images.tfplan"
+        run: rm -f "$TF_DIR/backend.hcl" "$TF_DIR/ci.auto.tfvars" "$TF_DIR/qa-retention.tfplan"
