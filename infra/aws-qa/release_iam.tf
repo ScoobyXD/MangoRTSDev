@@ -27,6 +27,13 @@ data "aws_iam_policy_document" "qa_release" {
     actions   = ["rds:DescribeDBInstances", "rds:DescribeDBInstanceAutomatedBackups", "rds:ListTagsForResource"]
     resources = [aws_db_instance.qa.arn, "${local.qa_rds_arn}:db:${local.name_prefix}-recovery-*"]
   }
+  # RDS authorizes backup enumeration against auto-backup ARNs, even when
+  # the request is filtered to the exact QA database resource ID.
+  statement {
+    sid       = "ReadRegionalAutomatedBackupMetadata"
+    actions   = ["rds:DescribeDBInstanceAutomatedBackups"]
+    resources = ["${local.qa_rds_arn}:auto-backup:*"]
+  }
   statement {
     sid       = "RestoreOnlyPrivateTaggedQARecoveryInstances"
     actions   = ["rds:RestoreDBInstanceToPointInTime"]
