@@ -1,3 +1,4 @@
+import { readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 const tf = args => execFileSync('terraform', args, {cwd:'infra/aws-qa',encoding:'utf8',maxBuffer:32*1024*1024});
 const state = JSON.parse(tf(['state','pull']));
@@ -21,10 +22,19 @@ const canonical=x=>{if(Array.isArray(x))return x.map(canonical);if(x&&typeof x==
 const observed=aws(['ecr','get-lifecycle-policy','--repository-name','mangorts-qa-backend']);
 if(JSON.stringify(canonical(JSON.parse(observed.lifecyclePolicyText)))!==JSON.stringify(canonical(JSON.parse(desired))))throw new Error('Live policy differs');
 console.log('Updated existing QA retention policy in place.');
+// Refresh only the verified ECR resource, without unrelated module-wide dependencies.
+// This temporary configuration is never used to apply infrastructure changes.
+const configPath='infra/aws-qa/main.tf';
+const originalConfig=readFileSync(configPath,'utf8');
+const dependency='  depends_on = [\n    aws_cloudwatch_log_group.ecs_container_insights_performance,\n    aws_s3_bucket.attachments,\n  ]';
+if(!originalConfig.includes(dependency))throw new Error('Unexpected QA module dependencies');
+try {
+writeFileSync(configPath,originalConfig.replace(dependency,''));
 tf(['plan','-refresh-only','-target=module.platform.aws_ecr_lifecycle_policy.backend','-out=qa-retention-refresh.tfplan']);
 const refresh=JSON.parse(tf(['show','-json','qa-retention-refresh.tfplan']));
 if((refresh.resource_changes||[]).some(r=>r.mode==='managed'&&!r.change.actions.every(a=>a==='no-op'||a==='read')))throw new Error('Refresh unexpectedly mutates resources');
 tf(['apply','-no-color','qa-retention-refresh.tfplan']);
+} finally { writeFileSync(configPath,originalConfig); }
 tf(['plan','-refresh=false','-target=module.platform.aws_ecr_lifecycle_policy.backend','-out=qa-retention.tfplan']);
 const verified=JSON.parse(tf(['show','-json','qa-retention.tfplan']));
 if(verified.resource_changes.some(r=>r.mode==='managed'&&!r.change.actions.every(a=>a==='no-op'||a==='read')))throw new Error('Retention plan still changes resources');
