@@ -1,6 +1,6 @@
 # QA deployment refresh handoff
 
-On 2026-09-10, Jonathan confirmed that he is the administrator, saved the supplied policy, and authorized deployment to continue. The fresh deployment failed before maintenance: [Actions run 34519274923](https://github.com/ScoobyXD/MangoRTSDev/actions/runs/34519274923), GitHub deployment `6379254722`, dispatched at 19:15:05 UTC for current remote `main`, `d92b1c6872fd8805a59dd4d24a9840a205da9fbe`. QA remains healthy on its old revision. A recovery-image lookup fix is prepared locally; explicit main integration and push approval are required before a new main deployment can use it. Arch verification still needs the existing dashboard/project/trigger URL or original handoff.
+On 2026-09-10, Jonathan confirmed that he is the administrator, saved the supplied policy, and authorized deployment to continue. The fresh deployment failed before maintenance: [Actions run 34519274923](https://github.com/ScoobyXD/MangoRTSDev/actions/runs/34519274923), GitHub deployment `6379254722`, dispatched at 19:15:05 UTC for current remote `main`, `d92b1c6872fd8805a59dd4d24a9840a205da9fbe`. QA remains healthy on its old revision. A recovery-image lookup fix is prepared locally; explicit main integration and push approval are required before a new main deployment can use it. Jonathan subsequently supplied the Arch dashboard URL, and authenticated access works. Its latest visible run predates this deployment attempt; the deployment-trigger binding remains unverified.
 
 ## Verified state before the new deployment
 
@@ -92,11 +92,13 @@ if ($qaFrontend.revision -ne $qaExpectedCommit -or
 }
 ```
 
-## Missing Arch handoff
+## Arch access and baseline
 
-The original attachment was not provided to this task. No handoff file was found in this checkout or the diagnostic branch's tracked documentation. No existing Arch dashboard was open in the available browser session. The exact Arch project, trigger and run identifiers remain unknown.
+Jonathan supplied the existing [MangoRTS Arch session](https://arch.foothill.sh/?appId=dbe123fe-8943-4985-945d-11e4cd0175ed&sessionId=4a8eda4f-bd41-4fb6-93cd-752dcf2249d3). Authenticated browser inspection confirmed recorder app `mangorts`, application ID `dbe123fe-8943-4985-945d-11e4cd0175ed`, and session ID `4a8eda4f-bd41-4fb6-93cd-752dcf2249d3`. The session menu shows 28 runs.
 
-No Arch trigger configuration was found in the tracked repository, the GitHub repository webhooks list was empty, and the relevant commits exposed only GitHub Actions checks and no commit statuses. This does not rule out a GitHub App-owned Arch integration. The current GitHub user authentication could not inspect the repository's app installation endpoint, which requires app authentication; no credentials were retrieved to bypass that limit. Obtain the original handoff or the existing Arch dashboard URL before claiming Arch verification.
+The newest visible entry is [run 9a3dbf34-09a2-4ad9-ae1c-8e31940698d1](https://arch.foothill.sh/?appId=dbe123fe-8943-4985-945d-11e4cd0175ed&sessionId=4a8eda4f-bd41-4fb6-93cd-752dcf2249d3&goalQaRunId=9a3dbf34-09a2-4ad9-ae1c-8e31940698d1), displayed as September 8, 2026, 8:16 PM, with `Goals completed` and `history completed`. These statuses do not mean all journey assertions passed. The all-runs view reports 7 of 26 active journeys passed, 19 failed, and 28 open issues. These are existing results, not results from the pending deployment. No newer run was visible on September 10.
+
+The inspected Inbox, Journeys, app, session, run-history and account controls expose no deployment-trigger configuration or commit/deployment linkage. No Arch trigger configuration was found in the tracked repository, the GitHub repository webhooks list was empty, and the relevant commits exposed only GitHub Actions checks and no commit statuses. This does not rule out a GitHub App-owned Arch integration. The current GitHub user authentication could not inspect the repository's app installation endpoint, which requires app authentication; no credentials were retrieved to bypass that limit. After a successful QA deployment, require a new Arch run and evidence tying it to the exact deployment and commit before claiming trigger verification. No Arch run, fixture change, integration change or schedule was created manually.
 
 The original handoff reports a daily 7:30 PM Pacific schedule in Rohan's local Codex app. This task did not inspect, transfer, modify or duplicate that schedule. Coordinate with its owner before creating any other schedule.
 
