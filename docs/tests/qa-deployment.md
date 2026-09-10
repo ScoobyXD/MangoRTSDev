@@ -34,3 +34,5 @@
 32. Database and object recovery must not claim to undo external email effects.
 33. The current recovery release's backend and migration images must remain protected from ordinary ECR image expiry.
 34. A newer current recovery record must remove obsolete recovery image tags while retaining every image required by that new record.
+35. Recovery image pinning must accept multiple tag entries only when their image digests, manifests, and manifest media types all match.
+36. An image lookup failure, missing image, or conflicting image metadata must stop recovery image pinning before a new recovery tag is published for that image.
