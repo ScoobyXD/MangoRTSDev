@@ -251,7 +251,7 @@ test('history pruning preserves the current recovery record and deletes only exp
   assert.deepEqual(deleted.map((item) => item.VersionId).sort(), ['expired-artifact', 'obsolete-pointer']);
 });
 
-test('recovery image holds retain exact manifests and pin every recorded task image by digest', async () => {
+test('recovery image holds retain exact manifests and pin every recorded task image despite multiple tags', async () => {
   const io = adapter();
   const repository = '686458136219.dkr.ecr.us-west-1.amazonaws.com/mangorts-qa-backend';
   const id = '20260908000000000-aaaaaaaaaaaa';
@@ -273,7 +273,7 @@ test('recovery image holds retain exact manifests and pin every recorded task im
       const digest = request.startsWith('imageDigest=') ? request.slice('imageDigest='.length) : `sha256:${'b'.repeat(64)}`;
       fetched = { registryId: '686458136219', repositoryName: 'mangorts-qa-backend', imageId: { imageDigest: digest, imageTag: 'approved-migrations' },
         imageManifest: JSON.stringify({ schemaVersion: 2, config: { digest } }), imageManifestMediaType: 'application/vnd.docker.distribution.manifest.v2+json' };
-      return { images: [fetched], failures: [] };
+      return { images: [fetched, { ...fetched, imageId: { ...fetched.imageId, imageTag: 'previous-recovery' } }], failures: [] };
     }
     assert.equal(operation, 'put-image');
     assert.equal(args[args.indexOf('--image-manifest') + 1], fetched.imageManifest);
@@ -303,10 +303,16 @@ test('recovery image pinning rejects non-QA sources and missing immutable image 
 
 test('missing or mismatched recovery image metadata never publishes a hold tag', async () => {
   const digest = `sha256:${'a'.repeat(64)}`;
+  const valid = { imageId: { imageDigest: digest }, imageManifest: '{}', imageManifestMediaType: 'application/vnd.docker.distribution.manifest.v2+json' };
   for (const result of [
     { images: [], failures: [{ failureCode: 'ImageNotFound' }] },
+    { images: [], failures: [] },
     { images: [{ imageId: { imageDigest: `sha256:${'b'.repeat(64)}` }, imageManifest: '{}', imageManifestMediaType: 'application/vnd.docker.distribution.manifest.v2+json' }] },
     { images: [{ imageId: { imageDigest: digest }, imageManifestMediaType: 'application/vnd.docker.distribution.manifest.v2+json' }] },
+    { images: [valid, { ...valid, imageId: { imageDigest: `sha256:${'b'.repeat(64)}` } }] },
+    { images: [valid, { ...valid, imageManifest: '{"schemaVersion":2}' }] },
+    { images: [valid, { ...valid, imageManifestMediaType: 'application/vnd.oci.image.manifest.v1+json' }] },
+    { images: [valid, valid], failures: [{ failureCode: 'ImageInaccessible' }] },
   ]) {
     const io = adapter();
     let published = 0;

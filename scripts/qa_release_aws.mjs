@@ -521,10 +521,12 @@ export class QAReleaseAWS {
       if (!match || (!match[2] && !match[3])) throw new Error('Recovery image must be from the exact immutable QA repository');
       const imageID = match[3] ? `imageDigest=${match[3]}` : `imageTag=${match[2]}`;
       const result = await this.aws('ecr', 'batch-get-image', ['--repository-name', 'mangorts-qa-backend', '--image-ids', imageID]);
-      if (result.failures?.length || result.images?.length !== 1) throw new Error('Required recovery image is unavailable');
+      if (result.failures?.length || !result.images?.length) throw new Error('Required recovery image is unavailable');
       const image = result.images[0];
       const digest = image.imageId?.imageDigest;
       if (!/^sha256:[a-f0-9]{64}$/.test(digest || '') || (match[3] && digest !== match[3]) || !image.imageManifest || !image.imageManifestMediaType) throw new Error('Recovery image metadata or digest does not match the requested artifact');
+      // ECR can return the same manifest once per tag when looking up a digest.
+      if (result.images.some(candidate => candidate.imageId?.imageDigest !== digest || candidate.imageManifest !== image.imageManifest || candidate.imageManifestMediaType !== image.imageManifestMediaType)) throw new Error('Recovery image metadata or digest does not match the requested artifact');
       const pinned = await this.aws('ecr', 'put-image', ['--repository-name', 'mangorts-qa-backend', '--image-tag', `qa-recovery-${release.id}-${index}`,
         '--image-manifest', image.imageManifest, '--image-manifest-media-type', image.imageManifestMediaType]);
       if (pinned.image?.imageId?.imageDigest !== digest) throw new Error('ECR did not confirm the pinned recovery image digest');

@@ -1,8 +1,8 @@
 # QA deployment refresh handoff
 
-Checked on 2026-09-10 at 18:52 UTC. Status: waiting for the administrator's IAM review/application confirmation; no new deployment dispatched.
+On 2026-09-10, Jonathan confirmed that he is the administrator, saved the supplied policy, and authorized deployment to continue. The fresh deployment failed before maintenance: [Actions run 34519274923](https://github.com/ScoobyXD/MangoRTSDev/actions/runs/34519274923), GitHub deployment `6379254722`, dispatched at 19:15:05 UTC for current remote `main`, `d92b1c6872fd8805a59dd4d24a9840a205da9fbe`. QA remains healthy on its old revision. A recovery-image lookup fix is prepared locally; explicit main integration and push approval are required before a new main deployment can use it. Arch verification still needs the existing dashboard/project/trigger URL or original handoff.
 
-## Verified state
+## Verified state before the new deployment
 
 | Item | Evidence |
 | --- | --- |
@@ -16,6 +16,20 @@ Checked on 2026-09-10 at 18:52 UTC. Status: waiting for the administrator's IAM 
 The failed deployment log at 2026-09-09T05:00:01Z reports that `mangorts-qa-github-deploy` lacks `rds:DescribeDBInstanceAutomatedBackups` on `arn:aws:rds:us-west-1:686458136219:auto-backup:*`. Later successful diagnostic workflow runs are not evidence of a successful application deployment.
 
 The originating handoff says migration-history reconciliation and recovery-image retention repairs were already applied. Do not rerun their repair SQL or diagnostic jobs. No database access or repair was performed in this task.
+
+## Fresh deployment result and code fix
+
+The new run passed backend tests, Terraform validation, image builds, the frontend build, and QA release/recovery contract tests. Its ECS migration-plan task `0759e1cd9eb24eb899420f7de370affa`, task definition `mangorts-qa-database-migration:27`, exited successfully with code 0. The workflow then failed at 19:23:42 UTC with `Required recovery image is unavailable`; GitHub recorded failure at 19:23:46 UTC. The failure occurred during recovery-artifact capture, before maintenance, migration execution, or application rollout. The public frontend and backend still reported `a30cd0157f51389827924724fa7ad3aa1fef589b`, and `/healthz` returned `ok: true`.
+
+The image was present. A read-only ECR lookup for backend digest `sha256:e4fea17564c83b232c36c4c6cb0c63a1d65c0d312b0d1d884b43d7fc2b298fd0` returned two entries with identical digests, manifests and media types, and no failures. Their tags were `a30cd0157f51389827924724fa7ad3aa1fef589b` and `qa-recovery-20260909045327849-1605cafee4a2-0`. The current code rejected this valid response because it required exactly one entry.
+
+The local fix in `scripts/qa_release_aws.mjs` accepts nonempty matching entries and publishes one recovery tag. It still rejects lookup failures, missing images, differing digests/manifests/media types, and an unconfirmed published digest. No image was deleted, retagged manually, rebuilt as a substitute, or skipped to bypass the recovery check.
+
+The regression test reproduced the failure before the fix. All 83 QA release, AWS, storage and environment tests passed afterward, including rejection of conflicting image entries. Deployment laws 35-36 document the required behavior. Independent diff review found no issues.
+
+The agent-readonly SSO profile also lacked QA ECR access. Follow-up metadata reads used the existing `mangorts-dev` SSO profile in account `686458136219`, without retrieving database credentials or secret values. IAM simulation returned `allowed` for both the deployment role's `ecr:BatchGetImage` permission on the QA repository and its new `rds:DescribeDBInstanceAutomatedBackups` permission on the regional automated-backup ARN.
+
+The failed commit has only GitHub Actions checks and no commit statuses exposing Arch. No successful deployment or Arch run is claimed. Do not rerun the unchanged failed workflow; first integrate the reviewed local fix into remote `main` after the required explicit authorization, then resolve current `main` and dispatch a fresh run.
 
 ## Exact permission for administrator review
 
@@ -40,7 +54,7 @@ The wildcard permits reading automated-backup metadata for **all backups in this
 
 The repository owner should review only this isolated fix. An AWS administrator must review and apply the policy change through the existing local SSO foundation process in account `686458136219`, region `us-west-1`, using QA's state key `mangorts/qa/terraform.tfstate`. The reviewed plan should change only `aws_iam_policy.qa_release`; do not apply a full foundation plan or stale bootstrap variables. Preserve all other policy statements. See [the existing foundation instructions](qa-release-recovery.md#one-time-foundation).
 
-The available `mangorts-dev-agent-readonly` SSO profile authenticated to account `686458136219`, but AWS denied both `iam:ListAttachedRolePolicies` and `iam:ListRolePolicies` on the deploy role. Therefore this task cannot confirm whether the live permission has changed since the failed run. No IAM change or Terraform plan/apply was attempted.
+The available `mangorts-dev-agent-readonly` SSO profile authenticated to account `686458136219`, but AWS denied both `iam:ListAttachedRolePolicies` and `iam:ListRolePolicies` on the deploy role. The agent could not independently inspect the live policy. Jonathan subsequently supplied its existing JSON and confirmed saving the corrected policy as administrator. The agent did not apply IAM changes or run a local Terraform plan/apply.
 
 ## Resume after administrator confirmation
 
@@ -91,5 +105,6 @@ The original handoff reports a daily 7:30 PM Pacific schedule in Rohan's local C
 - `terraform fmt -check infra/aws-qa/release_iam.tf`: passed.
 - `node --test --test-isolation=none infra/tests/qa_environment.test.mjs infra/tests/qa_release_storage.test.mjs`: 37 passed, zero failed; offline checks only.
 - `git diff --check`: passed.
-- No application business logic, backend code, migration, schema, workflow, or schedule changed. No new abstraction or automation was added; the existing deployment workflow and tests remain the implementation.
-- No deployment, live database write, cloud mutation, merge, push or pull request was performed.
+- After the live failure, `node --test --test-isolation=none infra/tests/qa_release.test.mjs infra/tests/qa_release_aws.test.mjs infra/tests/qa_release_storage.test.mjs infra/tests/qa_environment.test.mjs`: 83 passed, zero failed.
+- Local changes cover the isolated IAM statement, recovery-image response validation, its regression tests, deployment laws and this handoff. No application backend code, migration, schema, workflow or schedule changed. No new abstraction or automation was added.
+- The new QA deployment was dispatched after administrator confirmation through the existing workflow, including its authorized ECS migration and coordinated recovery path. No direct database write, repair SQL, local cloud mutation, merge, push or pull request was performed.
