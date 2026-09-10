@@ -19,13 +19,15 @@ The originating handoff says migration-history reconciliation and recovery-image
 
 ## Exact permission for administrator review
 
-The only Terraform change is the seven-line insertion from [commit 1c9c3c9f5e76a117a685d711867b2e05189c0ded](https://github.com/ScoobyXD/MangoRTSDev/commit/1c9c3c9f5e76a117a685d711867b2e05189c0ded), reproduced in [release_iam.tf](../../infra/aws-qa/release_iam.tf). None of the diagnostic branch's other changes were included. It was absent from remote `main` when checked.
+The only Terraform permission change is the isolated insertion from [commit 1c9c3c9f5e76a117a685d711867b2e05189c0ded](https://github.com/ScoobyXD/MangoRTSDev/commit/1c9c3c9f5e76a117a685d711867b2e05189c0ded), prepared in [release_iam.tf](../../infra/aws-qa/release_iam.tf) with a shorter new statement ID. None of the diagnostic branch's other changes were included. The permission was absent from remote `main` when checked.
+
+The administrator subsequently supplied the current policy JSON. Adding the original statement ID would produce 6,154 non-whitespace characters, exceeding [IAM's 6,144-character managed-policy limit](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_iam-quotas.html). Using `ReadBackupMetadata` produces 6,137 characters while preserving all 22 existing statements exactly. This label change does not alter permissions. Use the shorter ID in both the console and Terraform.
 
 The added statement resolves to:
 
 ```json
 {
-  "Sid": "ReadRegionalAutomatedBackupMetadata",
+  "Sid": "ReadBackupMetadata",
   "Effect": "Allow",
   "Action": "rds:DescribeDBInstanceAutomatedBackups",
   "Resource": "arn:aws:rds:us-west-1:686458136219:auto-backup:*"

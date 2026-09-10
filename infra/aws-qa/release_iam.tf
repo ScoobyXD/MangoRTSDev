@@ -29,8 +29,9 @@ data "aws_iam_policy_document" "qa_release" {
   }
   # RDS authorizes backup enumeration against auto-backup ARNs, even when
   # the request is filtered to the exact QA database resource ID.
+  # Keep the new Sid short to fit the IAM managed-policy size limit.
   statement {
-    sid       = "ReadRegionalAutomatedBackupMetadata"
+    sid       = "ReadBackupMetadata"
     actions   = ["rds:DescribeDBInstanceAutomatedBackups"]
     resources = ["${local.qa_rds_arn}:auto-backup:*"]
   }
