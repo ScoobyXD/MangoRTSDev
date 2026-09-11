@@ -472,7 +472,7 @@ Controls enabled:
 - Bucket-owner-enforced object ownership.
 - Versioning enabled.
 - Default server-side encryption enabled with AES256.
-- Tags set: `Project=MangoRTS`, `Environment=prod`, `Purpose=terraform-state`, `ManagedBy=Hermes`.
+- Tags included: `Project=MangoRTS`, `Environment=prod`, `Purpose=terraform-state`.
 
 Local file created:
 
@@ -565,7 +565,7 @@ No prod mutations in this step:
 
 Next action:
 
-- Choose whether Jonat wants Hermes to create the Route 53 hosted zone and prod database resources with explicit approval, or whether Jonat wants to create those manually.
+- Choose whether Jonat wants the agent to create the Route 53 hosted zone and prod database resources with explicit approval, or whether Jonat wants to create those manually.
 - After those prerequisites exist, create local `infra/aws-prod/terraform.tfvars` with the real non-secret IDs and secret ARNs.
 
 ## Step 4A — Remaining prerequisites and sensitive-info rules
@@ -669,7 +669,7 @@ Sensitive-info note:
 
 Next action:
 
-- Get explicit approval before Hermes creates the prod public hosted zone or copies DNS records.
+- Get explicit approval before the agent creates the prod public hosted zone or copies DNS records.
 
 ## Step 4C — Prod Route 53 hosted zone created and dev DNS copied
 
@@ -679,7 +679,7 @@ Updated on: 2026-07-05T07:05:59Z.
 
 Approval:
 
-- Jonat approved Hermes to go as far as possible and stop when Jonat's manual part is needed.
+- Jonat approved the agent to go as far as possible and stop when Jonat's manual part is needed.
 
 Created resource:
 
@@ -871,7 +871,7 @@ Values Jonat must not provide back:
 
 Next action:
 
-- Jonat can either create the DB/secret manually using the documented console instructions, or explicitly approve Hermes to create them via AWS CLI while keeping the generated password out of terminal output.
+- Jonat can either create the DB/secret manually using the documented console instructions, or explicitly approve the agent to create them via AWS CLI while keeping the generated password out of terminal output.
 
 ## Step 5A — AWS console sign-in method clarified
 
@@ -1040,7 +1040,7 @@ Next action:
 
 ## Step 5F — Prod RDS sizing and form-setting decision
 
-Status: guidance documented; no AWS changes made by Hermes.
+Status: guidance documented; no AWS changes made by the agent.
 
 Updated on: 2026-07-06T03:06:22Z.
 
@@ -1102,7 +1102,7 @@ Next action:
 
 ## Step 5G — Full RDS form choices selected
 
-Status: guidance documented; no AWS changes made by Hermes.
+Status: guidance documented; no AWS changes made by the agent.
 
 Updated on: 2026-07-06T03:11:59Z.
 
@@ -1324,7 +1324,7 @@ Tags: project=mangorts, environment=prod
 
 Verification attempt:
 
-- Hermes attempted to query RDS with `aws rds describe-db-clusters --profile mangorts-prod --region us-west-1`.
+- The agent attempted to query RDS with `aws rds describe-db-clusters --profile mangorts-prod --region us-west-1`.
 - Verification was blocked because the local `mangorts-prod` AWS SSO token is expired.
 - This does not mean the DB creation failed; it only means CLI verification needs SSO refresh.
 
@@ -1442,7 +1442,7 @@ Branch status before this documentation update: branch was tracking origin/prod-
 User note:
 
 - Jonat said he pushed all branch changes to GitHub.
-- Hermes verified the local branch is `prod-scaffolding-v1` and has upstream `origin/prod-scaffolding-v1`.
+- The agent verified the local branch is `prod-scaffolding-v1` and has upstream `origin/prod-scaffolding-v1`.
 - New documentation edits after that push still need to be committed/pushed later if Jonat wants them on GitHub.
 
 Required next Terraform task, exact wording requested by Jonat:
@@ -2108,7 +2108,7 @@ Updated on: 2026-07-06T18:30:57Z.
 Approval:
 
 - Jonat explicitly approved applying the scoped prod ECS bootstrap update.
-- Jonat reminded Hermes not to expose sensitive material digitally, to keep docs updated, and to stay mindful of branches/worktrees.
+- Jonat reminded the agent not to expose sensitive material digitally, to keep docs updated, and to stay mindful of branches/worktrees.
 
 Pre-apply branch/worktree check:
 
@@ -2198,7 +2198,7 @@ Next action:
 1. Jonat should check `Jonathankim829@gmail.com` for the Cognito invitation / temporary-password email.
 2. Jonat should sign in at `https://mangorts.com/login` with that email and complete the new-password flow privately.
 3. After login, the first authenticated `/v1/me` request should create company `180 Snacks` and grant the user `dev_admin` membership.
-4. Hermes should then verify the authenticated user/membership only with a non-secret token path or a browser session Jonat controls.
+4. The agent should then verify the authenticated user/membership only with a non-secret token path or a browser session Jonat controls.
 5. After success, clear `bootstrap_admin_emails` and roll ECS again so the one-time allow-list is not left enabled.
 
 ## Step 12D — First login failed due Cognito email case mismatch; alias normalized
@@ -2241,7 +2241,7 @@ Next action:
 
 - Jonat should retry `https://mangorts.com/login` with `jonathankim829@gmail.com` and the same Cognito temporary password from the private email.
 - The app also lowercases internally, so this should reach the correct Cognito user now.
-- If it still fails, do not paste the password; Hermes should resend/recreate the Cognito invitation flow without printing a password.
+- If it still fails, do not paste the password; the agent should resend/recreate the Cognito invitation flow without printing a password.
 
 ## Step 12E — Email-case normalization regression coverage added
 
@@ -2301,8 +2301,8 @@ Next action:
 
 Accountable follow-up on 2026-07-06T18:55:05Z:
 
-- Hermes required a fresh ad-hoc accountable after the backend test edits.
-- Created a temporary accountable script under `C:/Users/Jonat/AppData/Local/Temp` with `hermes-verify-` filename prefix.
+- The agent required a fresh ad-hoc accountable after the backend test edits.
+- Created a temporary accountable script under `C:/Users/Jonat/AppData/Local/Temp` with a task-specific filename prefix.
 - The accountable checked the mixed-case email regression snippets in the three changed backend test files.
 - The accountable ran:
 
@@ -2311,7 +2311,7 @@ go test ./internal/auth ./internal/http
 go test ./...
 ```
 
-- Result: `HERMES_VERIFY_OK mixed-case email normalization regression checks passed`.
+- Result: mixed-case email normalization regression checks passed.
 - The temporary accountable script was deleted after it ran.
 
 This is ad-hoc verification in addition to the normal suite output above, not a separate production deploy.
@@ -2336,7 +2336,7 @@ Read-only verification:
 Cleanup preparation:
 
 - Local gitignored `infra/aws-prod/terraform.tfvars` was edited so `bootstrap_admin_emails` is empty.
-- A temporary `hermes-verify-*` script under `C:/Users/Jonat/AppData/Local/Temp` verified the tfvars file is ignored, untracked, and has an empty bootstrap allow-list; the script was deleted after use.
+- A temporary verification script under `C:/Users/Jonat/AppData/Local/Temp` verified the tfvars file is ignored, untracked, and has an empty bootstrap allow-list; the script was deleted after use.
 - Full Terraform plan was inspected with `AWS_PROFILE=mangorts-prod`; it still includes unrelated CloudFront/S3 changes, so it must not be applied for this cleanup.
 - Scoped cleanup plan was created at ignored path `infra/aws-prod/tfplan` with only:
 
@@ -2442,7 +2442,7 @@ Reason:
 Secret handling:
 
 - Replaced `origin_verify_secret` in local gitignored `infra/aws-prod/terraform.tfvars` without printing the new value.
-- Ran a temporary `hermes-verify-*` script under `C:/Users/Jonat/AppData/Local/Temp` to verify the tfvars file is ignored/untracked and the origin secret was replaced; the accountable script was deleted after use.
+- Ran a temporary verification script under `C:/Users/Jonat/AppData/Local/Temp` to verify the tfvars file is ignored/untracked and the origin secret was replaced; the accountable script was deleted after use.
 
 Planning:
 
@@ -2515,7 +2515,7 @@ Actions taken:
 - Created AWS Secrets Manager secret `mangorts/prod/nylas-state-secret` in prod account `828435022930`.
 - Stored a generated random OAuth state-signing secret value without printing it.
 - Set local gitignored `infra/aws-prod/terraform.tfvars` `nylas_state_secret_arn` to the new secret ARN.
-- Verified the tfvars edit with a temporary `hermes-verify-*` script; the accountable script was deleted.
+- Verified the tfvars edit with a temporary verification script; the accountable script was deleted.
 
 Safe recorded secret metadata:
 
@@ -2569,7 +2569,7 @@ Actions taken:
 - Generated manifest doc: `docs/important tasks/prod db schema copy prep.md`.
 - Ran the helper with output JSON to a temp path and Markdown to the docs path.
 - Verified the helper with `python -m py_compile scripts/prepare_prod_db_schema_copy.py`.
-- Follow-up ad-hoc verification on 2026-07-06T20:43:15Z used a temporary `hermes-verify-*` script under `C:/Users/Jonat/AppData/Local/Temp`. It ran `git diff --check` for the helper, executed the helper against the repo, verified the manifest counts and row-copy exclusions, then deleted the temporary accountable and generated temp manifest files.
+- Follow-up ad-hoc verification on 2026-07-06T20:43:15Z used a temporary verification script under `C:/Users/Jonat/AppData/Local/Temp`. It ran `git diff --check` for the helper, executed the helper against the repo, verified the manifest counts and row-copy exclusions, then deleted the temporary accountable and generated temp manifest files.
 
 Manifest summary:
 
@@ -2674,13 +2674,13 @@ Updated on: 2026-07-07T00:02:51Z.
 User requirement:
 
 - Jonat clarified that human DBeaver/admin access may remain writer/admin.
-- Hermes/Codex/AI agents must be physically prevented from direct DB writes, not merely instructed to avoid them.
+- AI agents must be physically prevented from direct DB writes, not merely instructed to avoid them.
 - Agents must not retrieve DB writer passwords or use ECS/one-off-task paths that inherit backend writer DB secrets.
 - Agents may write only through the MangoRTS app API with a real app account and explicit product permissions; broad delete/destructive access should not be available by default.
 
 Repo changes:
 
-- Updated root `AGENTS.md` so future Hermes/Codex sessions see the database-access boundary immediately.
+- Updated root `AGENTS.md` so future coding-agent sessions see the database-access boundary immediately.
 - Created `docs/security/database-agent-access-contract.md` as the durable policy and setup checklist.
 - Created `scripts/verify_agent_db_access_boundary.py` to verify the current agent shell lacks active human/admin AWS profiles and static AWS env credentials before AWS/database work.
 - Created `docs/security/aws-prod-agent-readonly-permission-set-policy.template.json` as the intended AWS IAM Identity Center inline policy for `mangorts-prod-agent-readonly`.
@@ -2706,22 +2706,22 @@ Policy-template scope after tightening:
 
 Ad-hoc verification:
 
-- Temporary `hermes-verify-*` scripts under `C:/Users/Jonat/AppData/Local/Temp` verified the boundary script, contract text, and AWS permission-set policy template.
+- Temporary verification scripts under `C:/Users/Jonat/AppData/Local/Temp` verified the boundary script, contract text, and AWS permission-set policy template.
 - Latest policy-template check verified JSON parsing, required allow/deny statements, no Secrets Manager allow, full `secretsmanager:*` deny, required mutation denies, and `git diff --check`; temp accountable was deleted.
 
 Not physically enforced yet:
 
 - The AWS Identity Center permission set/profile `mangorts-prod-agent-readonly` has not been created/applied yet.
 - The agent profile does not exist in local AWS CLI config yet.
-- Human-only `infra/aws-prod/terraform.tfvars` and `infra/aws-dev/terraform.tfvars` are still inside the Hermes workspace.
-- DBeaver writer credentials may be accessible if saved in the same Windows profile that Hermes can control.
+- Human-only `infra/aws-prod/terraform.tfvars` and `infra/aws-dev/terraform.tfvars` are still inside the agent workspace.
+- DBeaver writer credentials may be accessible if saved in the same Windows profile that the agent can control.
 - No separate DB read-only user/secret has been created; default agent profile now intentionally has no Secrets Manager access at all.
 
 Next safe actions:
 
 1. Jonat should create the `mangorts-prod-agent-readonly` IAM Identity Center permission set from `docs/security/aws-prod-agent-readonly-permission-set-policy.template.json` in a human AWS Console/admin session.
 2. Configure local AWS CLI profile `mangorts-prod-agent-readonly` only after that assignment exists.
-3. Move/protect human-only tfvars and DBeaver writer passwords outside Hermes-accessible paths, or use a separate Windows user/profile for human writer/admin access.
+3. Move/protect human-only tfvars and DBeaver writer passwords outside agent-accessible paths, or use a separate Windows user/profile for human writer/admin access.
 4. Continue prod DBeaver setup through a human-only private tunnel; do not make prod RDS public just for DBeaver.
 5. Continue Nylas prod setup and ECS/cost review after the agent boundary is enforced.
 

@@ -32,7 +32,7 @@ The EC2 instance is not an app server. It is only a managed SSM tunnel target.
 ## Security Rules
 
 - Human-only.
-- Do not use this from Hermes, Codex, Claude, OpenCode, or other agent sessions.
+- Do not use this from Codex, Claude, OpenCode, or other agent sessions.
 - Do not save the prod writer password in an agent-accessible DBeaver profile.
 - Do not make prod RDS public.
 - Do not add public SSH.

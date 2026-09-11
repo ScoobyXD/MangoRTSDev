@@ -24,9 +24,9 @@ One existing ECS task ran with the exact override `["-mode","audit"]` and exited
 | Actual schema inventory SHA-256 | `21d4afb03de8da9ecfefaec031e2daf2fb331fc3d655cf7f378c30b6ea042f52` |
 | Repository schema SHA-256 | `9cfaa9c7845a0273b402d98f64f81bafe31155e19eb17544e9af744c2c2c1f2c` |
 
-The complete log was read through its final empty page and stable forward token. The current worktree's repository fingerprint matches the audit image exactly; `backend/db` has no file differences from the image commit to `af2bbea9abf33ffbaf569d87b1f1974a7495775e`. These are historical ledger discrepancies, not differences introduced by the deployment coordinator.
+The complete log was read through its final empty page and stable forward token. At audit time the worktree's repository fingerprint matched the audit image exactly; `backend/db` had no file differences from the image commit to `af2bbea9abf33ffbaf569d87b1f1974a7495775e`. These are historical ledger discrepancies, not differences introduced by the deployment coordinator. The counts and fingerprints above remain the historical observation; the current repository has since removed the AI integration and its exclusive migration.
 
-The old audit emits a catalog fingerprint, not individual table definitions. It does **not** prove full schema parity, data backfills, or whether `public.ai_runs` is legacy or current Hermes storage. Hermes identity remains unknown until the new read-only plan or a designated read-only catalog export is reviewed.
+The old audit emits a catalog fingerprint, not individual table definitions. It does **not** prove full schema parity or data backfills. The current read-only plan or a designated read-only catalog export must be reviewed before a release. Source removal has not cleaned live AI objects or rewritten migration history.
 
 ## Meaning of the two operator records
 
@@ -37,14 +37,13 @@ These source identities explain the markers. They do not establish the present p
 
 ## Historical gaps and the new release boundary
 
-Exactly six migration files were added between the last observed QA application revision `a30cd0157f51389827924724fa7ad3aa1fef589b` and the audit image. All six are absent from the ledger:
+Exactly six migration files were added between the last observed QA application revision `a30cd0157f51389827924724fa7ad3aa1fef589b` and the audit image. All six were absent from the observed ledger. Five remain in the repository; the sixth belonged exclusively to the removed AI integration:
 
 - `20260904_process_step_map_layouts.sql`
 - `20260905_attachment_pending_deletion_index.sql`
 - `20260905_process_map_permission_query_plans.sql`
 - `20260905_process_step_sop_bodies.sql`
 - `20260906_user_mailbox_access.sql`
-- `20260907_hermes_action_receipts.sql`
 
 The other 150 missing files already existed in the deployed application's repository history. They include destructive storage retirements, permission cutovers, canonical reconciliation, and data-layout changes. Recent recorded files include `20260903_process_steps.sql` and `20260904_auth_claim_issue_watermark.sql`, while `20260902_process_map_nested_layout_capacity.sql` remains absent. Therefore ledger order is not a trustworthy physical-schema boundary.
 
@@ -56,11 +55,13 @@ There is **no proven safe migration anchor**. Starting after `20260904_auth_clai
 2. Compare the existing physical catalog against a reviewed same-commit canonical catalog with the existing `schema_inventory.sql` and `compare_schema_inventory.py` workflow; classify the 150 historical gaps and both operator records separately from the six release additions.
 3. For each historical gap, verify its required data changes as well as surviving schema effects; mark it as already represented, truly pending, superseded, or unresolved only from evidence.
 4. Review and explicitly approve any exact live history reconciliation or data/schema repair that this classification requires before execution; do not approve a blanket baseline or replay.
-5. Rerun read-only planning and require a clean, understood ledger plus the known one-time migration prerequisites and Hermes native-identity checks before the coordinated release enters maintenance.
+5. Rerun read-only planning and require a clean, understood ledger plus the known one-time migration prerequisites before the coordinated release enters maintenance.
 
 The existing [schema audit runbook](mangorts-schema-audit.md) supplies the comparison tools. Its hosted process is for fresh empty QA bootstrap and it explicitly says the old one-migration reconciliation shortcut is invalid after later migrations. The existing `20260825_canonical_schema_reconciliation.sql` targets an earlier empty-QA schema transition; it does not reconcile this history. The fresh bootstrap/reset and DEV-to-QA copy procedures are not authorized remedies for this running populated QA instance. No existing general safe live-ledger reconciliation command was found.
 
-## Complete missing filename list
+## Missing filename list retained in the current repository
+
+This reproduces the historical list except for the one removed AI-only migration. The observed counts above have not been rewritten.
 
 ```text
 20260527_zz_admin_effective_access_priority.sql
@@ -218,7 +219,6 @@ The existing [schema audit runbook](mangorts-schema-audit.md) supplies the compa
 20260905_process_map_permission_query_plans.sql
 20260905_process_step_sop_bodies.sql
 20260906_user_mailbox_access.sql
-20260907_hermes_action_receipts.sql
 ```
 
 ## Complete recorded filename list

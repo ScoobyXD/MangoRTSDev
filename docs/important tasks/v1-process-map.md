@@ -1,8 +1,8 @@
-# V1 Process Map and AI Integration — Requirements and Step Mapping MVP
+# V1 Process Map — Requirements and Step Mapping MVP
 
 Updated: September 4, 2026
 
-Status: The initial Step and AI increments were integrated into main. The current correction makes the company Process Map the starting point for Process and Step authoring, as Jonat clarified on September 4. Review this small flow before choosing another increment; live rollout remains separate.
+Status: The initial Step increment was integrated into main. The current correction makes the company Process Map the starting point for Process and Step authoring, as Jonat clarified on September 4. Review this small flow before choosing another increment; live rollout remains separate.
 
 ## Purpose and precedence
 
@@ -82,7 +82,7 @@ The rest preserves the original specification. It is deferred except for require
 4. Each Step has one exact Process owner and a stable ID. Preserve applicable name, description, configuration, ordering, assignments, and layout where supported. A Step is not a runtime Node.
 5. A Process with one Step and a Workflow with one Process are valid; creation may start empty while authoring.
 6. Reuse the current Explorer, board, editor, read/state handling, canvas/graph libraries, drag payloads, APIs, authorization, transactions, realtime events, and visual design. Check existing dependency APIs before adding packages; no large dependency without a demonstrated need.
-7. Do not build a universal knowledge graph, resource registry, translated identity, reusable-reference graph, or automatic Process inference from Slack/email. Future AI context is background motivation, not this feature's scope.
+7. Do not build a universal knowledge graph, resource registry, translated identity, reusable-reference graph, or automatic Process inference from Slack/email.
 
 ### Independent copies, never reusable references
 
@@ -257,30 +257,11 @@ These findings are from inspected commit `a30cd0157f51389827924724fa7ad3aa1fef58
 
 The MVP decisions above are resolved. Resolve Workflow ownership/deletion, inherited-copy policies, content-copy boundaries, and optional company-map placement before their respective later increments.
 
-## Coordination with the AI MVP
-
-Agreed September 4, 2026 through direct Codex task messages. Jonat subsequently authorized both tasks to begin implementation. Integration, pushing, and changes to `main` still require a separate request.
-
-| Task | Responsibility |
-|---|---|
-| Investigate workflow copying specification — branch suffix `0000841`, task `01a06dee-677c-7b00-a9fd-13d66f8ac65a` | Process creation/Folder selection; Step authoring/connections/layout persistence; Board / Map toggle. |
-| Discuss Mango AI design — branch suffix `0000842`, task `01a06def-bd41-7353-bffb-63cf15bfd15e` | Chat and `#` Process selection; user/Process/Steps/SOP context; one model connection; create one Node, write into it, and move it between Steps using existing commands. |
-
-1. Use direct Codex task messages for questions, blockers, proposed shared changes, and handoffs. The receiving task replies once; avoid automatic reciprocal messages or idle polling loops.
-2. This Process Map task maintains this short decision record. Both tasks read the same physical file at `C:\Users\Jonat\.codex\worktrees\4ce3\MangoRTSDev\docs\important tasks\v1processmap&aiintegration.md`; their separate worktree copies do not synchronize automatically. A Markdown edit alone does not notify or wake a task.
-3. Keep implementation in the separate worktrees. Before changing a shared Process/Step API, schema, type, ordering/deletion rule, or Board update path, agree on the change and assign one task to own that shared edit. Identify the affected files and exact branch/commit or current diff for review; do not independently implement the same shared behavior.
-4. Keep company-scoped `logic_gate_id` and `process_step_id` identities and existing same-Process operational edges. Map coordinates and routing are presentation; AI must not infer execution order from screen position.
-5. AI reuses existing Node creation, editor, and movement commands and the current SOP storage. Jonat confirmed that the SOP lists and explains the Steps; the map provides their visuals. AI reads those written instructions together with the actual Step records. Preserve the distinction between Step placement and Node status. New per-Step instruction fields are not required for either skeleton.
-6. The AI task reuses the floating Mango chat and existing OpenAI function loop. Its selected-Process actions use the existing Node creation, Node state, and canonical editor-save commands. It reads actual Step names, order, connections, and SOP storage; never map geometry. Ambiguous routing stops for clarification. The backend rejects missing or changed referenced Steps and a Node moved away during a request. Full definition snapshots are deferred. No shared Process/Step schema or public Board API change is needed from the AI task. The AI task owns an internal ExpectedNodeWork precondition in the existing assignment-move and editor-save transactions, using exact Process/Step/status and assignment version. This map task owns only its new layout methods and route dispatch; both additive edits must be preserved when these branches are later integrated.
-7. Keep updates short: decision, owner, affected contract/files, and next action. Escalate product scope or conflicting requirements to Jonat; handle ordinary coordination between tasks. The existing separate approval requirement for integration into `main` still applies.
-
-AI task completion: branch `codex/discuss-mango-ai-design0000842`, commit `c905913d` (September 4, 2026). Its owner reports passing backend, disposable PostgreSQL, frontend, and production build checks, with no live model calls, migration, integration, or push. Preserve its independent additions to `repository.go`, `logic_gate_work_handlers.go`, and `relationships.md` when integration is separately requested.
-
 ## Delivery order and progress
 
 - [x] Investigate existing implementation without changing it.
 - [x] Record full requirements and separate the first MVP.
-- [x] Set MVP interpretation and save interaction; Jonat authorized both implementation tasks.
+- [x] Set MVP interpretation and save interaction; Jonat authorized implementation.
 - [x] Implement/verify only Process creation/location, Step mapping/persistence, and Board / Map toggle.
 - [ ] Review the working MVP with Jonat before expanding scope.
 - [ ] Select the next small increment: candidates include basic Workflow creation/containment/layout, Process copy, nested Workflow copy, optional map placement, and onboarding/filters. Ordering remains a later decision.
@@ -295,7 +276,7 @@ For each delivered increment, report changes and reasons, relevant frontend/back
 - `process_step_map_layouts` stores only exact Process/Step/edge geometry. A fresh revision is allocated for committed saves, dependent deletion cleanup, and restored layouts.
 - Step creation/naming, snapped drag and resize, orthogonal route points, keyboard movement, zoom, Fit, and saving/error feedback are included. Board order and Node status remain independent.
 - Layout deletion and recycle use the existing Process lifecycle. The matching human-run migration is `backend/db/migrations/20260904_process_step_map_layouts.sql`; live application use requires that rollout first.
-- Implementation stays on branch `codex/investigate-workflow-copy-specification0000841` in `C:\Users\Jonat\.codex\worktrees\4ce3\MangoRTSDev`. The AI task stays on its separate `0000842` branch. No integration or push is implied.
+- Implementation stays on branch `codex/investigate-workflow-copy-specification0000841` in `C:\Users\Jonat\.codex\worktrees\4ce3\MangoRTSDev`. No integration or push is implied.
 
 ## MVP verification results — September 4, 2026
 

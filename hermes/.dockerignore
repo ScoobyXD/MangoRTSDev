@@ -1,9 +1,0 @@
-**
-!Dockerfile
-!pyproject.toml
-!mango_plugin.py
-!mango_history.py
-!mango_recovery.py
-!mango_scope.py
-!mango_integrations.py
-!entrypoint.py

@@ -100,18 +100,6 @@ func main() {
 			log.Printf("dictation unavailable: %s", err)
 		}
 	}
-	var hermesRoutes []httpapi.HermesRoute
-	if runtimeRole == "api" {
-		hermesRoutes, err = httpapi.ParseHermesRoutes(os.Getenv("MANGORTS_HERMES_ROUTES"), os.Getenv)
-		if err != nil {
-			log.Fatal(err)
-		}
-		if len(hermesRoutes) > 0 {
-			if _, ok := repo.(*store.PostgresRepo); !ok {
-				log.Fatal("Hermes requires PostgreSQL admission and action receipt storage")
-			}
-		}
-	}
 	server := httpapi.NewServerWithOptions(repo, httpapi.ServerOptions{
 		AuthValidator:         authValidator,
 		TestAuthHeaderEnabled: testAuthHeaderEnabled,
@@ -125,7 +113,6 @@ func main() {
 		NylasClient:                 nylasClient,
 		NylasConfig:                 nylasConfig,
 		DeepgramAPIKey:              deepgramAPIKey,
-		HermesRoutes:                hermesRoutes,
 		AttachmentStorage:           httpapi.NewS3AttachmentStorageFromEnv(),
 		RealtimeTicketSecret:        secretEnvValue("MANGORTS_REALTIME_TICKET_SECRET", "realtime_ticket_secret", "ticket_secret", "MANGORTS_REALTIME_TICKET_SECRET"),
 		RealtimeBackplane:           realtimeBackplane,

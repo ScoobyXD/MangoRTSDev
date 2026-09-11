@@ -60,7 +60,6 @@ func (e *ProjectionRevisionConflictError) Error() string { return "projection re
 func (e *ProjectionRevisionConflictError) Unwrap() error { return ErrVersionConflict }
 
 type Repository interface {
-	AIRepository
 	IdentityRepository
 	AccountRepository
 	EntitiesRepository

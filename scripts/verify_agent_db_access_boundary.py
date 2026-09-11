@@ -112,7 +112,7 @@ def main() -> int:
             warnings.append(
                 f"Sensitive local config exists in workspace: {rel}. "
                 "Do not read it from agent sessions unless the user explicitly approves. "
-                "For hard separation, move human-only prod config outside the Hermes workspace."
+                "For hard separation, move human-only prod config outside the agent workspace."
             )
 
     for warning in warnings:

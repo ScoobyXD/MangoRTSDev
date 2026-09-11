@@ -29,7 +29,7 @@ unless a separate, programmatic gate is unlocked by Jonat.
 
 ## Current Goal
 
-Make the default Hermes/Codex/AI-agent environment safe even if the agent behaves
+Make the default AI-agent environment safe even if the agent behaves
 maliciously.
 
 Default agent sessions may help with local development, but they must not have
@@ -202,7 +202,7 @@ Agent profile should contain:
 Important caveat:
 
 ```text
-If Hermes/Codex runs as the same Windows user as Jonat, Windows file permissions
+If a coding agent runs as the same Windows user as Jonat, Windows file permissions
 do not provide a hard boundary between Jonat's files and the agent.
 ```
 

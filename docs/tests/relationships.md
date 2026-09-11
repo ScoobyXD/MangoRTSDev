@@ -13,17 +13,13 @@ After verified sign-in, Mango resolves the existing user identity and company me
 
 # Current AI Removal Business Logic Laws
 
-1. The app must create no AI inspection archive, archive owner relationship, or AI-generated resource relationship.
+1. The app must create no AI chat, message, run, action, inspection archive, or AI-generated resource relationship.
 2. Ordinary resource ownership, permission, assignment, and recycle behavior must remain governed by the existing typed relationship laws.
-3. Removing the legacy AI source must not delete live database records or business resources.
-4. AI chat, message, run and action links must include exact company/user scope and preserve native chat/message identities without a resource registry.
-5. Membership removal must deny AI history and actions while retaining deduplication, and permanent company/user deletion must remove its scoped Mango AI records.
-6. Hermes search must return existing canonical resource identities and visible paths without creating relationships or granting access.
-7. Hermes Process creation and placement, Step creation, Node assignment, textbox creation and Node chat creation must reuse their existing exact typed commands and commit each business mutation with its scoped AI receipt.
+3. Removing AI source and repository schema must not delete live database records or business resources.
 
 ## AI Removal Story
 
-The legacy AI runtime remains removed. The Hermes HTTP integration may invoke existing Mango business commands under their normal permissions and transaction rules, as specified in `hermes.md`. It creates no inspection archive, resource registry or AI-specific resource relationship. Its chats, native message copies, runs and shared action receipts carry the exact existing company and user IDs. Chat/run/message links include both scope columns, grant no access and never replace canonical Process/Step/Node relationships. Native session and integer message IDs remain unchanged; local run IDs identify Mango admission before Hermes assigns its execution ID. Membership removal retains dormant history and deduplication while denying access; permanent company or user deletion cascades through the Mango AI records. Committed action results are historical evidence and do not recreate deleted resources.
+The AI runtime, UI, endpoints, and repository storage definitions are removed without a replacement. Existing ordinary Process, Step, Node, editor, chat, and relationship commands retain their own identities, permissions, transactions, and lifecycle behavior. Live database objects are unchanged; any cleanup requires separate human authorization. See [AI removal](ai.md).
 
 # Current Process Step Relationship Business Logic Laws
 

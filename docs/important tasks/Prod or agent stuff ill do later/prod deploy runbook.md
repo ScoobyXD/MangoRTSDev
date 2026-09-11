@@ -460,7 +460,7 @@ First-login case-sensitivity pitfall:
 - Retry login with lowercase email and the same private temporary password. Do not paste the password or any code into chat/docs.
 - Follow-up repo verification added regression coverage for mixed-case email handling in Cognito admin create, invitation create, and first-admin bootstrap. `node scripts/run_all_tests.mjs` passed after the tests were added.
 - For normal users, do not nag them to type lowercase. The app/backend should normalize email casing internally.
-- Hermes follow-up ad-hoc verification also created a temporary `hermes-verify-*` script under `C:/Users/Jonat/AppData/Local/Temp`, verified the mixed-case email regression snippets, ran `go test ./internal/auth ./internal/http` and `go test ./...`, reported `HERMES_VERIFY_OK`, and deleted the temporary script.
+- The agent follow-up ad-hoc verification also created a temporary verification script under `C:/Users/Jonat/AppData/Local/Temp`, verified the mixed-case email regression snippets, ran `go test ./internal/auth ./internal/http` and `go test ./...`, reported success, and deleted the temporary script.
 
 Post-login cleanup status:
 
@@ -502,7 +502,7 @@ Prod DB schema-copy prep status:
 - Manifest doc generated: `docs/important tasks/prod db schema copy prep.md`.
 - The manifest treats `backend/db/schema.sql` as canonical unless a live dev schema-only dump proves drift.
 - Broad dev-to-prod data dumps are explicitly disallowed. Only `schema_migrations` is metadata-eligible by default; all tenant/user/work tables are excluded from row copying unless reviewed one by one.
-- Ad-hoc verification used a temporary `hermes-verify-*` script under `C:/Users/Jonat/AppData/Local/Temp` to run the helper, verify manifest counts/exclusions, run `git diff --check` on the helper, and clean up the temp files.
+- Ad-hoc verification used a temporary verification script under `C:/Users/Jonat/AppData/Local/Temp` to run the helper, verify manifest counts/exclusions, run `git diff --check` on the helper, and clean up the temp files.
 
 Prod DB schema-only apply result:
 
@@ -522,8 +522,8 @@ Agent database-access boundary:
 - Accountable: `scripts/verify_agent_db_access_boundary.py`.
 - AWS permission-set template: `docs/security/aws-prod-agent-readonly-permission-set-policy.template.json`.
 - Default prod agent role should be `mangorts-prod-agent-readonly`; it must have no Secrets Manager access and must deny ECS run/register/update, IAM PassRole, RDS mutation, RDS Data API SQL execution, Route53/CloudFormation/Cognito/CloudFront mutation paths, and related write actions.
-- Current Hermes session accountable passes because no `mangorts-prod`/`mangorts-dev` admin SSO token or static AWS credentials are active.
-- Full physical enforcement is not complete until Jonat creates/assigns the IAM Identity Center permission set, configures the read-only AWS CLI profile, and keeps human-only tfvars/DBeaver writer credentials outside Hermes-accessible paths.
+- Current agent session accountable passes because no `mangorts-prod`/`mangorts-dev` admin SSO token or static AWS credentials are active.
+- Full physical enforcement is not complete until Jonat creates/assigns the IAM Identity Center permission set, configures the read-only AWS CLI profile, and keeps human-only tfvars/DBeaver writer credentials outside agent-accessible paths.
 
 ## GitHub production environment setup
 
