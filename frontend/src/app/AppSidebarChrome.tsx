@@ -88,6 +88,7 @@ import { HuddleExplorerSection } from "../modules/huddles/HuddleExplorerSection"
 import { useExplorerSearchQuery } from "../modules/hierarchy/useExplorerSearchQuery.js";
 
 const SidebarCompanyExplorerContent = React.lazy(() => import("../modules/company-explorer/CompanyExplorerContent").then((module) => ({ default: module.CompanyExplorerContent })));
+const AIAgentPanel = React.lazy(() => import("../modules/ai/AIAgentPanel"));
 const AppNodeEditorContent = React.lazy(() => import("../modules/editor/EditorContent").then((module) => ({
   default: module.EditorContent as React.FC<{
     accent: string;
@@ -296,6 +297,7 @@ export function AppSidebar({
   onPinDragLeave,
 }: AppSidebarProps): React.ReactElement {
   const homeActive = activePage === "home";
+  const [aiOpen, setAIOpen] = useState(false);
   const companyID = getActiveCompanyID();
   const apiBase = readAuthConfig().apiBase;
   const pins = pinTree.pins;
@@ -1212,6 +1214,9 @@ export function AppSidebar({
         <MangoWordmark size={22} weight={600} />
         {accountChrome && <div style={appSidebarAccountChromeStyle}>{accountChrome}</div>}
       </div>
+
+      <AppSidebarButton label="Mango AI" active={aiOpen} icon={<span aria-hidden="true" style={{ color: "#0f766e", fontWeight: 700 }}>AI</span>} onClick={() => setAIOpen(true)} />
+      {aiOpen && <React.Suspense fallback={null}><AIAgentPanel key={`${companyID}:${currentUserID}`} companyID={companyID} onClose={() => setAIOpen(false)} /></React.Suspense>}
 
       {!explorerSearchHidden && (
         <div ref={explorerSearchRef} data-frame-interactive="true" style={appSidebarExplorerSearchContainerStyle}>

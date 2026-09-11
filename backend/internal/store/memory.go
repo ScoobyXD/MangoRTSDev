@@ -7,6 +7,8 @@ import (
 )
 
 type MemoryRepo struct {
+	aiAgentSessions                  map[string]AIAgentSession
+	aiAgentActions                   map[string]map[string]AIAgentAction
 	attachmentStorageMu              sync.Mutex
 	mu                               sync.RWMutex
 	nodes                            map[string]domain.Node

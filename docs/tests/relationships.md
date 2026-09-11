@@ -11,15 +11,24 @@
 
 After verified sign-in, Mango resolves the existing user identity and company memberships. A user with none receives one company and a company-admin membership in the same transaction as its default setup. Only verified ownership of an allowlisted email permits developer bootstrap. An accepted invitation already supplies its target membership. Later ordinary removals preserve at least one membership; explicit identity deletion follows the established complete cleanup path.
 
-# Current AI Removal Business Logic Laws
+# Current AI Session Ownership Business Logic Laws
 
-1. The app must create no AI chat, message, run, action, inspection archive, or AI-generated resource relationship.
-2. Ordinary resource ownership, permission, assignment, and recycle behavior must remain governed by the existing typed relationship laws.
-3. Removing AI source and repository schema must not delete live database records or business resources.
+1. `ai_agent_sessions.session_id` must equal the exact OpenAI session ID and have one exact company and user owner.
+2. Every session read or mutation must require that owner and current membership access to its company.
+3. Each `ai_agent_tool_calls` receipt must belong to its exact session and use the exact provider `turn_id + call_id` pair.
+4. One exact session, turn, and call must have one receipt whose saved tool name and arguments never change.
+5. AI receipts must grant no resource access and must never become Process, Step, Node, email, permission, or relationship authority.
+6. An approved AI mutation must use the existing same-company typed business command and its current authorization, transaction, and event rules.
+7. Cancelling or deleting an AI session must preserve every ordinary resource and relationship created or changed by its completed commands.
+8. Deleting an AI session must delete only its owner record and dependent receipts after confirmed provider session deletion.
+9. Permanent deletion of the owning company or user must cascade its app session records and receipts without deleting ordinary resources through an AI edge.
+10. Company-membership removal must deny further session access and tool execution even when app records and provider history remain.
+11. Provider-retained session data must require separate provider cleanup when owner deletion removes only app records.
+12. AI storage must add no central resource registry, translated resource identity, generic business edge, or legacy AI reader.
 
-## AI Removal Story
+## AI Session Ownership Story
 
-The AI runtime, UI, endpoints, and repository storage definitions are removed without a replacement. Existing ordinary Process, Step, Node, editor, chat, and relationship commands retain their own identities, permissions, transactions, and lifecycle behavior. Live database objects are unchanged; any cleanup requires separate human authorization. See [AI removal](ai.md).
+A signed-in user starts a managed OpenAI session from Mango AI. Mango stores that exact provider session ID with its company/user owner and saves each exact provider turn/call receipt before handling it. The owner's approval permits only that saved action; the existing Process and Node commands still validate live permissions and own all resulting resources, typed relationships, transactions, and events. Cancelling prevents new claims, while deleting the task removes its AI history and receipts without undoing completed work. User/company deletion cascades app records; retained OpenAI data requires a separate human provider cleanup. See [AI laws](ai.md) and [operator setup](../openai-agents-setup.md).
 
 # Current Process Step Relationship Business Logic Laws
 

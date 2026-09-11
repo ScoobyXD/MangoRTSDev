@@ -5,6 +5,7 @@ import (
 	"miraeopus/backend/internal/auth"
 	"miraeopus/backend/internal/emailqueue"
 	"miraeopus/backend/internal/notifications"
+	"miraeopus/backend/internal/openaiagents"
 	"miraeopus/backend/internal/realtime"
 	"miraeopus/backend/internal/store"
 	"net/http"
@@ -100,6 +101,10 @@ type Server struct {
 	nylasClient                            NylasClient
 	nylasConfig                            NylasConfig
 	deepgramAPIKey                         string
+	aiClient                               *openaiagents.Client
+	aiAPIKey                               string
+	aiLiveClient                           *http.Client
+	aiLiveURL                              string
 	transcriptionClient                    *http.Client
 	attachmentStorage                      AttachmentObjectStorage
 	attachmentVariantEnsurer               AttachmentImageVariantEnsurer
@@ -129,6 +134,7 @@ type ServerOptions struct {
 	NylasClient                    NylasClient
 	NylasConfig                    NylasConfig
 	DeepgramAPIKey                 string
+	OpenAIAPIKey                   string
 	AttachmentStorage              AttachmentObjectStorage
 	AttachmentVariantEnsurer       AttachmentImageVariantEnsurer
 	RealtimeTicketSecret           string
@@ -194,6 +200,9 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		realtimeTicketSecret = strings.TrimSpace(options.NylasConfig.StateSecret)
 	}
 	server := &Server{
+		aiAPIKey:                           strings.TrimSpace(options.OpenAIAPIKey),
+		aiLiveClient:                       newAILiveClient(),
+		aiLiveURL:                          "https://api.openai.com/v1/live/sessions",
 		repo:                               repo,
 		realtimeRegistry:                   newRealtimeSubscriptionRegistry(),
 		realtimeTickets:                    newRealtimeTicketStore(realtimeTicketSecret),
@@ -250,6 +259,9 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 	}
 	server.startAttachmentDeletionCleanup()
 	server.startRealtimeSpine()
+	if server.aiAPIKey != "" {
+		server.aiClient = openaiagents.NewClient(server.aiAPIKey, nil, "")
+	}
 	return server
 }
 
@@ -285,6 +297,9 @@ func (s *Server) Close() {
 
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/ai/sessions", s.handleAISessions)
+	mux.HandleFunc("/v1/ai/sessions/", s.handleAISession)
+	mux.HandleFunc("/v1/ai/live", s.handleAILive)
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/v2/nodes/", s.handleNodeViewV2Subresource)
 	mux.HandleFunc("/v2/logic-gates/", s.handleLogicGateWorkV2Subresource)
