@@ -94,7 +94,12 @@ func main() {
 		log.Fatal(err)
 	}
 	var deepgramAPIKey string
+	var openAIAPIKey string
 	if runtimeRole == "api" {
+		openAIAPIKey, err = loadRuntimeSecret(context.Background(), "OPENAI_API_KEY", "OPENAI_API_KEY_SECRET_ARN")
+		if err != nil {
+			log.Printf("AI unavailable: %s", err)
+		}
 		deepgramAPIKey, err = loadRuntimeSecret(context.Background(), "DEEPGRAM_API_KEY", "DEEPGRAM_API_KEY_SECRET_ARN")
 		if err != nil {
 			log.Printf("dictation unavailable: %s", err)
@@ -113,6 +118,7 @@ func main() {
 		NylasClient:                 nylasClient,
 		NylasConfig:                 nylasConfig,
 		DeepgramAPIKey:              deepgramAPIKey,
+		OpenAIAPIKey:                openAIAPIKey,
 		AttachmentStorage:           httpapi.NewS3AttachmentStorageFromEnv(),
 		RealtimeTicketSecret:        secretEnvValue("MANGORTS_REALTIME_TICKET_SECRET", "realtime_ticket_secret", "ticket_secret", "MANGORTS_REALTIME_TICKET_SECRET"),
 		RealtimeBackplane:           realtimeBackplane,
