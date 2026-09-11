@@ -28,7 +28,7 @@ func TestSessionProtocol(t *testing.T) {
 				t.Fatal(err)
 			}
 			agent := body["agent"].(map[string]any)
-			if agent["model"] != Model || agent["instructions"] != "Use scoped app tools." || body["input"] != "Review my emails" || body["stream"] != false {
+			if agent["model"] != "gpt-5.6-terra" || agent["instructions"] != "Use scoped app tools." || body["input"] != "Review my emails" || body["stream"] != false {
 				t.Errorf("incorrect session request: %#v", body)
 			}
 			if !reflect.DeepEqual(body["environment"], map[string]any{"type": "none"}) {
@@ -39,9 +39,9 @@ func TestSessionProtocol(t *testing.T) {
 				t.Errorf("unexpected tools: %#v", agent["tools"])
 			}
 			w.WriteHeader(http.StatusCreated)
-			io.WriteString(w, `{"id":"asess_test","status":"in_progress","required_actions":[]}`)
+			io.WriteString(w, `{"id":"asess_test","status":"in_progress","agent":{"model":"gpt-5.6-terra"},"required_actions":[]}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/agents/sessions/asess_test":
-			io.WriteString(w, `{"id":"asess_test","status":"requires_action","required_actions":[{"type":"function_call","turn_id":"turn_test","call_id":"call_test","name":"read_mailbox","arguments":{"after":"mail_100"}}]}`)
+			io.WriteString(w, `{"id":"asess_test","status":"requires_action","agent":{"model":"gpt-5.6-terra"},"required_actions":[{"type":"function_call","turn_id":"turn_test","call_id":"call_test","name":"read_mailbox","arguments":{"after":"mail_100"}}]}`)
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/agents/sessions/asess_test/events":
 			var body map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -64,12 +64,12 @@ func TestSessionProtocol(t *testing.T) {
 	c := NewClient("fixture-key", server.Client(), server.URL+"/v1")
 	ctx := context.Background()
 	tools := []FunctionTool{{Name: "read_mailbox", Description: "Read authorized mail", Parameters: map[string]any{"type": "object"}}}
-	session, err := c.CreateSession(ctx, "Use scoped app tools.", "Review my emails", tools)
-	if err != nil || session.ID != "asess_test" || tools[0].Type != "" {
+	session, err := c.CreateSession(ctx, "gpt-5.6-terra", "Use scoped app tools.", "Review my emails", tools)
+	if err != nil || session.ID != "asess_test" || session.Agent.Model != "gpt-5.6-terra" || tools[0].Type != "" {
 		t.Fatalf("create: %#v, %v; input tools: %#v", session, err, tools)
 	}
 	session, err = c.RetrieveSession(ctx, session.ID)
-	if err != nil || len(session.RequiredActions) != 1 {
+	if err != nil || len(session.RequiredActions) != 1 || session.Agent.Model != "gpt-5.6-terra" {
 		t.Fatalf("retrieve: %#v, %v", session, err)
 	}
 	call := session.RequiredActions[0]
@@ -105,7 +105,7 @@ func TestSessionProtocol(t *testing.T) {
 		t.Errorf("tool result keys did not preserve call identity: %#v", resultKeys)
 	}
 	message := eventBodies[3]["input"].([]any)[0].(map[string]any)
-	if message["role"] != "user" || message["content"].([]any)[0].(map[string]any)["type"] != "input_text" {
+	if len(eventBodies[3]) != 2 || eventBodies[3]["type"] != "agent.session.input.message" || message["role"] != "user" || message["content"].([]any)[0].(map[string]any)["type"] != "input_text" {
 		t.Errorf("incorrect follow-up input: %#v", message)
 	}
 	if !reflect.DeepEqual(eventBodies[4], map[string]any{"type": "agent.session.input.cancel"}) {
@@ -204,10 +204,13 @@ func TestInvalidInputMakesNoProviderRequest(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("invalid input reached provider") }))
 	defer server.Close()
 	c := NewClient("fixture-key", server.Client(), server.URL)
-	if _, err := c.CreateSession(context.Background(), "instructions", " ", nil); err == nil {
+	if _, err := c.CreateSession(context.Background(), "gpt-5.6-luna", "instructions", " ", nil); err == nil {
 		t.Error("empty initial input accepted")
 	}
-	if _, err := c.CreateSession(context.Background(), "instructions", "request", []FunctionTool{{Type: "shell"}}); err == nil {
+	if _, err := c.CreateSession(context.Background(), " ", "instructions", "request", nil); err == nil {
+		t.Error("empty model accepted")
+	}
+	if _, err := c.CreateSession(context.Background(), "gpt-5.6-luna", "instructions", "request", []FunctionTool{{Type: "shell"}}); err == nil {
 		t.Error("non-application tool accepted")
 	}
 	for _, id := range []string{"", "..", "../other", "asess_test%2Fother", "asess_test?x=y"} {

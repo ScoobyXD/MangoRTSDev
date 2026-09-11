@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +21,8 @@ type aiOrchestrationProvider struct {
 	mu              sync.Mutex
 	requests        int
 	sessionStatus   string
+	model           string
+	created         []map[string]any
 	turns           []openaiagents.Turn
 	pending         []openaiagents.RequiredAction
 	failSubmissions int
@@ -40,8 +43,16 @@ func (p *aiOrchestrationProvider) serveHTTP(w http.ResponseWriter, r *http.Reque
 	p.requests++
 	w.Header().Set("Content-Type", "application/json")
 	switch {
+	case r.Method == http.MethodPost && r.URL.Path == "/agents/sessions":
+		var body map[string]any
+		if json.NewDecoder(r.Body).Decode(&body) != nil {
+			http.Error(w, "invalid fixture create", 400)
+			return
+		}
+		p.created = append(p.created, body)
+		json.NewEncoder(w).Encode(map[string]any{"id": "asess_created", "status": "in_progress", "agent": body["agent"]})
 	case r.Method == http.MethodGet && r.URL.Path == "/agents/sessions/asess_test":
-		json.NewEncoder(w).Encode(map[string]any{"id": "asess_test", "status": p.sessionStatus, "required_actions": p.pending, "error": nil})
+		json.NewEncoder(w).Encode(map[string]any{"id": "asess_test", "status": p.sessionStatus, "agent": map[string]string{"model": p.model}, "required_actions": p.pending, "error": nil})
 	case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/turns"):
 		json.NewEncoder(w).Encode(map[string]any{"data": p.turns, "has_more": false})
 	case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/items"):
@@ -119,7 +130,7 @@ func newAIOrchestrationFixture(t *testing.T) *aiOrchestrationFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	provider := &aiOrchestrationProvider{sessionStatus: "requires_action", turns: []openaiagents.Turn{{ID: "turn_test", Status: "waiting"}}}
+	provider := &aiOrchestrationProvider{sessionStatus: "requires_action", model: "gpt-5.6-luna", turns: []openaiagents.Turn{{ID: "turn_test", Status: "waiting"}}}
 	remote := httptest.NewServer(http.HandlerFunc(provider.serveHTTP))
 	t.Cleanup(remote.Close)
 	server := NewServerWithOptions(repo, ServerOptions{DisableAttachmentUploadCleanup: true, DisableNotificationCleanup: true, DisableRealtimeSpine: true})
@@ -151,6 +162,18 @@ func (f *aiOrchestrationFixture) call(t *testing.T, method, suffix string, paylo
 	return w
 }
 
+func (f *aiOrchestrationFixture) collectionCall(t *testing.T, method string, payload any, want int) *httptest.ResponseRecorder {
+	t.Helper()
+	r := f.request(method, "", payload)
+	r.URL.Path = "/v1/ai/sessions"
+	w := httptest.NewRecorder()
+	f.server.handleAISessions(w, r)
+	if w.Code != want {
+		t.Fatalf("%s sessions: got %d %s, want %d", method, w.Code, w.Body, want)
+	}
+	return w
+}
+
 func (f *aiOrchestrationFixture) pendingCreate(title string) openaiagents.RequiredAction {
 	args, _ := json.Marshal(map[string]any{"process_id": f.processID, "step_id": nil, "title": title})
 	return openaiagents.RequiredAction{Type: "function_call", TurnID: "turn_test", CallID: "call_test", Name: "create_process_node", Arguments: args}
@@ -178,6 +201,74 @@ func (f *aiOrchestrationFixture) actions(t *testing.T) []store.AIAgentAction {
 		t.Fatal(err)
 	}
 	return actions
+}
+
+func TestAIAgentModelCatalogAndExplicitCreation(t *testing.T) {
+	wantModels := []string{"gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-astra"}
+	f := newAIOrchestrationFixture(t)
+	w := f.collectionCall(t, http.MethodGet, nil, 200)
+	var catalog struct {
+		Sessions     []store.AIAgentSession `json:"sessions"`
+		Models       []string               `json:"models"`
+		DefaultModel string                 `json:"default_model"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &catalog); err != nil || len(catalog.Sessions) != 1 || !reflect.DeepEqual(catalog.Models, wantModels) || catalog.DefaultModel != "gpt-5.6-luna" {
+		t.Fatalf("model catalog: %s; %v", w.Body, err)
+	}
+	for _, model := range wantModels {
+		t.Run(model, func(t *testing.T) {
+			f := newAIOrchestrationFixture(t)
+			w := f.collectionCall(t, http.MethodPost, map[string]any{"prompt": "Review my workflow", "model": model}, 201)
+			var view aiSessionView
+			if err := json.Unmarshal(w.Body.Bytes(), &view); err != nil || view.Model != model || view.ID != "asess_created" || view.ReadCounts == nil {
+				t.Fatalf("created model: %s; %v", w.Body, err)
+			}
+			f.provider.mu.Lock()
+			defer f.provider.mu.Unlock()
+			if len(f.provider.created) != 1 {
+				t.Fatalf("expected one provider creation, got %d", len(f.provider.created))
+			}
+			agent := f.provider.created[0]["agent"].(map[string]any)
+			if agent["model"] != model || !strings.Contains(agent["instructions"].(string), "Mutating tool requests pause for the user's explicit approval") || len(agent["tools"].([]any)) == 0 {
+				t.Fatalf("model or app safety configuration changed: %#v", agent)
+			}
+		})
+	}
+}
+
+func TestAIAgentInvalidOrMissingModelStopsBeforeProvider(t *testing.T) {
+	f := newAIOrchestrationFixture(t)
+	for _, payload := range []map[string]any{
+		{"prompt": "Review my workflow"},
+		{"prompt": "Review my workflow", "model": ""},
+		{"prompt": "Review my workflow", "model": "gpt-unknown"},
+		{"prompt": "Review my workflow", "model": " gpt-5.6-luna "},
+	} {
+		f.collectionCall(t, http.MethodPost, payload, 400)
+	}
+	f.provider.mu.Lock()
+	defer f.provider.mu.Unlock()
+	if f.provider.requests != 0 {
+		t.Fatalf("invalid model made %d provider requests", f.provider.requests)
+	}
+}
+
+func TestAIAgentSnapshotAndFollowupUseStoredProviderModel(t *testing.T) {
+	for _, model := range []string{"gpt-6-astra", "gpt-5.6-luna", "", "historical-provider-model"} {
+		t.Run(model, func(t *testing.T) {
+			f := newAIOrchestrationFixture(t)
+			f.provider.model = model
+			f.provider.turns = []openaiagents.Turn{{ID: "turn_test", Status: "completed"}}
+			for _, route := range []struct{ method, suffix string }{{http.MethodGet, ""}, {http.MethodPost, "/messages"}} {
+				w := f.call(t, route.method, route.suffix, map[string]any{"prompt": "Continue the workflow"}, 200)
+				var view map[string]any
+				if err := json.Unmarshal(w.Body.Bytes(), &view); err != nil || view["model"] != model {
+					t.Fatalf("existing task model was inferred or replaced: %s; %v", w.Body, err)
+				}
+			}
+			f.call(t, http.MethodPost, "/messages", map[string]any{"prompt": "Continue", "model": "gpt-5.6-terra"}, 400)
+		})
+	}
 }
 
 func TestAIAgentSessionScopeStopsBeforeProviderAccess(t *testing.T) {

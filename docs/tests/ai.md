@@ -1,6 +1,6 @@
 # Current AI Business Logic Laws
 
-1. Mango AI must use the managed Agents API with `gpt-6-astra` and `environment.type=none`.
+1. Mango AI must use the selected supported model through the managed Agents API with `environment.type=none`.
 2. Startup must remain usable without an OpenAI key, and AI requests must report that AI is unavailable.
 3. Every AI session operation must require the signed-in owner and current access to the session's exact company.
 4. Every app tool must reload the current user and memberships before applying the existing resource permissions.
@@ -39,10 +39,16 @@
 37. End voice must close the conversation and leave agent cancellation to the separate Cancel task control.
 38. App responses larger than 512 KiB must fail explicitly without presenting truncated results as complete.
 39. Deletion retries must finish local cleanup when the exact owned provider session is already absent.
+40. Every new task must start with the backend's GPT-5.6 Luna default regardless of the previous task's model.
+41. New tasks must offer Luna, Terra, Sol, and GPT-6 Astra before typed or voice-delegated work starts.
+42. The backend must reject a missing or unsupported model before creating provider work.
+43. Task creation must use the exact selected model without silently substituting another model.
+44. Existing tasks must display the model returned by their provider session.
+45. Follow-ups must retain the task's original model.
 
 ## Current behavior
 
-The sidebar's **Mango AI** panel accepts a typed request, task instructions, and up to eight named skills. Skills are saved text guidance for that task. The managed agent reads authorized email and existing workflows, explains its findings, and proposes one app change at a time. The user reviews the exact arguments before approving a new Process Node, a Process/Step assignment, or a status change. Sending emails and other unavailable steps remain in the existing app UI.
+The sidebar's **Mango AI** panel accepts a model selection, typed request, task instructions, and up to eight named skills. GPT-5.6 Luna is the default for new tasks; Terra, Sol, and GPT-6 Astra remain selectable. The model choice is fixed after task creation and comes from the provider session when reopening history. An unavailable model value is shown as unavailable, never guessed from the new-task default. Skills are saved text guidance for that task. The managed agent reads authorized email and existing workflows, explains its findings, and proposes one app change at a time. The user reviews the exact arguments before approving a new Process Node, a Process/Step assignment, or a status change. Sending emails and other unavailable steps remain in the existing app UI.
 
 **Start voice** creates a GPT-Live WebRTC conversation. Client delegations feed the same managed agent path; short backend results return to voice. Detailed business procedures stay in the backend prompt. Voice transcripts and ordinary email content are data, never authority for mutations. **End voice** closes the conversation; **Cancel task** separately cancels agent work.
 
@@ -58,7 +64,7 @@ An `executing` receipt after an interrupted request may represent a committed co
 
 ## Verification
 
-Focused fixture tests cover provider request/response contracts, session isolation, exact approvals, concurrent execution claims, saved-result recovery, cancellation, mailbox pagination and bodies, current permissions, and voice delegation/closure. They use mocked providers and in-memory repositories; a browser fixture also checked the approval flow. `OPENAI_API_KEY` was absent from the checked environment, project/model access was not checked, and no live OpenAI request or application database migration was performed.
+Focused fixture tests cover provider request/response contracts, model choice and validation, saved-task model display, session isolation, exact approvals, concurrent execution claims, saved-result recovery, cancellation, mailbox pagination and bodies, current permissions, and voice delegation/closure. They use mocked providers and in-memory repositories; a browser fixture also checked the approval flow. `OPENAI_API_KEY` was absent from the checked environment, project/model access was not checked, and no live OpenAI request or application database migration was performed.
 
 Run the frontend fixtures with `node tests/frontend/scripts/run-ai-tests.mjs` and the production build with `npm run build` from `frontend/`. Run the Go provider suite and focused `TestAI` fixtures in `internal/http` and `internal/store` through the approved WSL Ubuntu path on Windows.
 

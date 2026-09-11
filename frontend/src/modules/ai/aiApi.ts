@@ -5,8 +5,10 @@ export type AISkill = { name: string; content: string };
 export type AIItem = { id: string; role: "user" | "ai"; text: string; status?: string };
 export type AIAction = { turn_id: string; call_id: string; name: string; arguments: Record<string, unknown>; state: "pending" | "executing" | "completed" | "failed" | "rejected"; output?: unknown; error?: string; consequential: boolean };
 export type AISessionSummary = { id: string; prompt: string; created_at: string; stopped: boolean };
+export type AISessionList = { sessions: AISessionSummary[]; models: string[]; default_model: string };
 export type AISession = {
   id: string;
+  model: string;
   prompt: string;
   stopped: boolean;
   status: "queued" | "in_progress" | "waiting" | "completed" | "failed" | "cancelled";
@@ -35,16 +37,15 @@ function sessionPath(companyID: string, id: string, suffix = "", cursor = ""): s
   return path(companyID, `/${encodeURIComponent(id)}${suffix}`, cursor);
 }
 
-export async function listAISessions(companyID: string, signal?: AbortSignal): Promise<AISessionSummary[]> {
-  const result = await requestAI<{ sessions: AISessionSummary[] }>(path(companyID), { signal });
-  return result.sessions;
+export function listAISessions(companyID: string, signal?: AbortSignal): Promise<AISessionList> {
+  return requestAI(path(companyID), { signal });
 }
 
 export function getAISession(companyID: string, id: string, signal?: AbortSignal, cursor = ""): Promise<AISession> {
   return requestAI(sessionPath(companyID, id, "", cursor), { signal });
 }
 
-export function createAISession(companyID: string, input: { prompt: string; instructions: string; skills: AISkill[] }, signal?: AbortSignal): Promise<AISession> {
+export function createAISession(companyID: string, input: { model: string; prompt: string; instructions: string; skills: AISkill[] }, signal?: AbortSignal): Promise<AISession> {
   return requestAI(path(companyID), { method: "POST", json: input, signal });
 }
 

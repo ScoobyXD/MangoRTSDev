@@ -4,7 +4,7 @@ import { ACTIVE_COMPANY_CHANGED_EVENT } from "../../auth/currentCompany";
 import {
   advanceAISession, cancelAISession, createAILiveSession, createAISession, decideAIAction,
   deleteAISession, getAISession, listAISessions, messageAISession,
-  type AIAction, type AISession, type AISessionSummary, type AISkill,
+  type AIAction, type AISession, type AISessionList, type AISessionSummary, type AISkill,
 } from "./aiApi";
 import { AILiveConnection, type AILiveStatus, type AILiveTranscript } from "./aiLive";
 import "./ai.css";
@@ -48,9 +48,21 @@ function actionLabel(name: string): string {
   return labels[name] ?? name.replace(/_/g, " ");
 }
 
+function modelLabel(model: string): string {
+  const labels: Record<string, string> = {
+    "gpt-5.6-luna": "GPT-5.6 Luna — lowest cost",
+    "gpt-5.6-terra": "GPT-5.6 Terra — balanced",
+    "gpt-5.6-sol": "GPT-5.6 Sol — advanced",
+    "gpt-6-astra": "GPT-6 Astra — highest capability",
+  };
+  return labels[model] ?? model;
+}
+
 export default function AIAgentPanel({ companyID, onClose }: { companyID: string; onClose: () => void }) {
   const [sessions, setSessions] = useState<AISessionSummary[]>([]);
   const [session, setSession] = useState<AISession | null>(null);
+  const [catalog, setCatalog] = useState<Pick<AISessionList, "models" | "default_model"> | null>(null);
+  const [model, setModel] = useState("");
   const [prompt, setPrompt] = useState("");
   const [instructions, setInstructions] = useState("");
   const [skills, setSkills] = useState<AISkill[]>([]);
@@ -67,11 +79,17 @@ export default function AIAgentPanel({ companyID, onClose }: { companyID: string
   const close = useRef(onClose);
   close.current = onClose;
   const voiceActive = voiceStatus !== "closed";
+  const modelReady = !!catalog?.models.includes(session ? session.model : model);
 
   useEffect(() => {
     alive.current = true;
     const controller = new AbortController();
-    void listAISessions(companyID, controller.signal).then(setSessions).catch((cause) => {
+    void listAISessions(companyID, controller.signal).then((result) => {
+      if (controller.signal.aborted) return;
+      setSessions(result.sessions);
+      setCatalog({ models: result.models, default_model: result.default_model });
+      setModel(result.models.includes(result.default_model) ? result.default_model : "");
+    }).catch((cause) => {
       if (!controller.signal.aborted) setError(errorMessage(cause));
     }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     const companyChanged = () => close.current();
@@ -142,12 +160,13 @@ export default function AIAgentPanel({ companyID, onClose }: { companyID: string
   }
 
   async function submit(text: string): Promise<AISession> {
+    if (!catalog?.models.includes(current.current ? current.current.model : model)) throw new Error("Choose an available model before starting work.");
     if (text.length > 16000) throw new Error("The request is too long. Use a shorter request or start a new voice conversation.");
     if (!text.trim()) throw new Error("Enter a request first.");
     if (!current.current && skills.some((skill) => !skill.name.trim() || !skill.content.trim())) throw new Error("Give each skill a name and its steps, or remove the empty skill.");
     return run((signal) => current.current
       ? messageAISession(companyID, current.current.id, text, signal, current.current.items_cursor)
-      : createAISession(companyID, { prompt: text, instructions, skills }, signal));
+      : createAISession(companyID, { model, prompt: text, instructions, skills }, signal));
   }
 
   function sendPrompt() {
@@ -182,7 +201,7 @@ export default function AIAgentPanel({ companyID, onClose }: { companyID: string
   }
 
   function startVoice() {
-    if (busy || voiceActive) return;
+    if (busy || voiceActive || !modelReady) return;
     setError("");
     setTranscripts([]);
     const connection = new AILiveConnection({
@@ -207,6 +226,7 @@ export default function AIAgentPanel({ companyID, onClose }: { companyID: string
   function reset() {
     current.current = null;
     setSession(null);
+    setModel(catalog?.models.includes(catalog.default_model) ? catalog.default_model : "");
     setPrompt("");
     setError("");
     setConfirmDelete(false);
@@ -262,6 +282,14 @@ export default function AIAgentPanel({ companyID, onClose }: { companyID: string
           </div>
           {confirmDelete && <div className="mango-ai-notice">Delete this AI task and its history? Completed app actions stay in place.<div className="mango-ai-actions"><button type="button" onClick={() => setConfirmDelete(false)}>Keep task</button><button type="button" disabled={busy} onClick={remove}>Delete task and history</button></div></div>}
           <div className="mango-ai-body">
+            <div className="mango-ai-model">
+              <label>Task model<select aria-label="Task model" value={session ? session.model : model} disabled={!!session || busy || voiceActive || loading || !catalog} onChange={(event) => setModel(event.target.value)}>
+                {session
+                  ? <option value={session.model}>{session.model ? modelLabel(session.model) : "Model unavailable"}</option>
+                  : <><option value="" disabled>{loading ? "Loading models…" : catalog?.models.length ? "Choose a model" : "Models unavailable"}</option>{catalog?.models.map((name) => <option key={name} value={name}>{modelLabel(name)}</option>)}</>}
+              </select></label>
+              <p>The model applies to new tasks. Start a new task to change it. Voice conversations use GPT-Live.</p>
+            </div>
             <details className="mango-ai-guidance">
               <summary>Instructions and skills{session ? " for this task" : " for the new task"}</summary>
               <label>Instructions<textarea value={instructions} maxLength={16000} disabled={!!session || busy || voiceActive} onChange={(event) => setInstructions(event.target.value)} placeholder="Describe the workflows the AI should follow, step by step." rows={4} /></label>
@@ -294,10 +322,10 @@ export default function AIAgentPanel({ companyID, onClose }: { companyID: string
           <footer className="mango-ai-footer">
             <form onSubmit={(event) => { event.preventDefault(); sendPrompt(); }}>
               <label className="mango-ai-prompt-label">Your request<textarea aria-label="Your AI request" value={prompt} maxLength={16000} rows={3} disabled={busy || voiceActive || !!awaitingApproval || !!session?.stopped} onChange={(event) => setPrompt(event.target.value)} placeholder={awaitingApproval ? "Review the pending action above." : "Describe what you want the AI to do…"} /></label>
-              <div className="mango-ai-actions"><button className="primary" type="submit" disabled={busy || voiceActive || !prompt.trim() || !!awaitingApproval || !!session?.stopped}>Send</button>
+              <div className="mango-ai-actions"><button className="primary" type="submit" disabled={busy || voiceActive || !modelReady || !prompt.trim() || !!awaitingApproval || !!session?.stopped}>Send</button>
                 {session && !busy && needsAdvance(session) && <button type="button" onClick={() => report(run((signal) => advanceAISession(companyID, session.id, signal, current.current?.items_cursor)))}>Continue task</button>}
                 {session && !session.stopped && (busy || isRunning(session) || awaitingApproval) && <button type="button" onClick={() => report(cancel())}>Cancel task</button>}
-                <button type="button" disabled={voiceStatus === "closing" || (!voiceActive && (busy || !!awaitingApproval || !!session?.stopped))} onClick={() => voiceActive ? report(endVoice()) : startVoice()}>{voiceStatus === "closing" ? "Ending voice…" : voiceActive ? "End voice" : "Start voice"}</button>
+                <button type="button" disabled={voiceStatus === "closing" || (!voiceActive && (busy || !modelReady || !!awaitingApproval || !!session?.stopped))} onClick={() => voiceActive ? report(endVoice()) : startVoice()}>{voiceStatus === "closing" ? "Ending voice…" : voiceActive ? "End voice" : "Start voice"}</button>
                 {voiceActive && <span role="status">{voiceStatus === "listening" ? "Microphone on" : voiceStatus}</span>}
               </div>
             </form>

@@ -17,8 +17,6 @@ import (
 	"time"
 )
 
-const Model = "gpt-6-astra"
-
 const maxResponseBytes = 16 << 20
 
 type Client struct {
@@ -51,8 +49,13 @@ type FunctionTool struct {
 type Session struct {
 	ID              string           `json:"id"`
 	Status          string           `json:"status"`
+	Agent           Agent            `json:"agent"`
 	Error           string           `json:"error,omitempty"`
 	RequiredActions []RequiredAction `json:"required_actions"`
+}
+
+type Agent struct {
+	Model string `json:"model"`
 }
 
 type RequiredAction struct {
@@ -142,7 +145,10 @@ func (e *APIError) Error() string {
 	}
 }
 
-func (c *Client) CreateSession(ctx context.Context, instructions, input string, tools []FunctionTool) (Session, error) {
+func (c *Client) CreateSession(ctx context.Context, model, instructions, input string, tools []FunctionTool) (Session, error) {
+	if strings.TrimSpace(model) == "" {
+		return Session{}, errors.New("an agent model is required")
+	}
 	if strings.TrimSpace(input) == "" {
 		return Session{}, errors.New("an initial agent request is required")
 	}
@@ -155,7 +161,7 @@ func (c *Client) CreateSession(ctx context.Context, instructions, input string, 
 		functions[i] = tool
 	}
 	body := map[string]any{
-		"agent":       map[string]any{"model": Model, "instructions": instructions, "tools": functions},
+		"agent":       map[string]any{"model": model, "instructions": instructions, "tools": functions},
 		"environment": map[string]string{"type": "none"},
 		"input":       input,
 		"stream":      false,

@@ -16,6 +16,7 @@
 .mango-ai-panel textarea, .mango-ai-panel input, .mango-ai-panel select { width: 100%; box-sizing: border-box; border: 1px solid #cbd5df; border-radius: 7px; padding: 8px 10px; color: #172b3a; background: white; font: inherit; font-size: 14px; font-weight: 400; }
 .mango-ai-panel textarea { resize: vertical; min-height: 65px; max-height: 220px; }
 .mango-ai-body { min-height: 0; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; flex: 1; }
+.mango-ai-model p { color: #60717d; font-size: 12px; margin-top: 5px; }
 .mango-ai-guidance { padding: 12px; border: 1px solid #dbe4e8; border-radius: 9px; }
 .mango-ai-panel summary { cursor: pointer; font-weight: 600; }
 .mango-ai-guidance label { margin: 12px 0; }

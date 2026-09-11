@@ -1,10 +1,10 @@
 # Mango AI setup and operation
 
-Mango AI uses OpenAI's managed Agents API with `gpt-6-astra` for reasoning and GPT-Live with `gpt-live-1` for voice. The Go API supplies authorized app functions; the React panel supplies requests and explicit action decisions. Sessions use `environment.type=none`, so this feature requires no separate agent service, Docker container, sandbox executor, or Hermes installation. OpenAI manages the agent session and conversation context. See the [Agents overview](https://developers.openai.com/api/docs/guides/agents-api/overview).
+Mango AI uses OpenAI's managed Agents API with a user-selected reasoning model and GPT-Live with `gpt-live-1` for voice. New tasks default to `gpt-5.6-luna`; `gpt-5.6-terra`, `gpt-5.6-sol`, and `gpt-6-astra` are also selectable. The Go API supplies authorized app functions; the React panel supplies requests and explicit action decisions. Sessions use `environment.type=none`, so this feature requires no separate agent service, Docker container, sandbox executor, or Hermes installation. OpenAI manages the agent session and conversation context. See the [Agents overview](https://developers.openai.com/api/docs/guides/agents-api/overview).
 
 ## Before enabling it
 
-1. Use an OpenAI Platform project with billing and access to `gpt-6-astra`. Its application key needs `api.agents.read`, `api.agents.write`, and `api.responses.write`. The backend sends `Authorization: Bearer` and `OpenAI-Beta: agents=v1` for Agents calls. These requirements come from the [Agents quickstart](https://developers.openai.com/api/docs/guides/agents-api/quickstart).
+1. Use an OpenAI Platform project with billing and access to the selected agent model. Its application key needs `api.agents.read`, `api.agents.write`, and `api.responses.write`. The backend sends `Authorization: Bearer` and `OpenAI-Beta: agents=v1` for Agents calls. These requirements come from the [Agents quickstart](https://developers.openai.com/api/docs/guides/agents-api/quickstart). A choice in Mango's model list does not confirm project entitlement; provider rejection is reported without substituting another model.
 2. For voice, confirm GPT-Live access for that project and paid usage Tier 1 or above; Free tier is unsupported. The browser needs microphone permission and HTTPS or localhost. Live creation uses the project key on the backend. See [GPT-Live 1](https://developers.openai.com/api/docs/models/gpt-live-1) and [Live WebRTC setup](https://developers.openai.com/api/docs/guides/voice-webrtc?api=live).
 3. Use Mango's authenticated sign-in and an existing company membership. AI deliberately rejects anonymous `AUTH_MODE=disabled` requests; simple local anonymous mode alone is insufficient for this feature.
 4. Have a human apply the database change described below before using AI with the PostgreSQL repository. The app checks that its session store is available before starting billable agent or voice work.
@@ -41,7 +41,20 @@ The optional [retire_ai_storage.sql](../scripts/retire_ai_storage.sql) still tar
 
 ## Using typed requests and voice
 
-Open **Mango AI** in the sidebar. Choose **New task**, expand **Instructions and skills**, and enter the workflow guidance before sending the first request. Each task accepts up to eight named skills; these are task-local text instructions, not executable packages. Start a new task to change them.
+Open **Mango AI** in the sidebar. Choose **New task**, select the **Task model**, expand **Instructions and skills**, and enter the workflow guidance before sending the first request. Each task accepts up to eight named skills; these are task-local text instructions, not executable packages. Start a new task to change its model or guidance. The selected model is also used when voice starts a new delegated task. New task resets to Luna instead of inheriting a previous task's more expensive model.
+
+The backend supplies the model choices and default with the existing session-list response. Task creation requires an explicit allowed model. OpenAI already persists that model in the session configuration, which Mango reads for saved-task display; this selector requires no additional database table, column, or migration. Reasoning effort remains unspecified and uses provider behavior; there is no reasoning-level selector in this version.
+
+For cost comparison, the [official model catalog](https://developers.openai.com/api/docs/models) lists these standard text-token rates as of September 11, 2026:
+
+| Model | Input per million tokens | Output per million tokens |
+| --- | --- | --- |
+| GPT-5.6 Luna | $0.20 | $1.20 |
+| GPT-5.6 Terra | $2.00 | $12.00 |
+| GPT-5.6 Sol | $4.00 | $20.00 |
+| GPT-6 Astra | $10.00 | $50.00 |
+
+These are token rates, not a fixed task quote or spending cap. Context size, repeated reads and turns, reasoning output, caching, and provider pricing rules affect the total. Prompts over 272K input tokens use higher rates; consult the current [pricing documentation](https://developers.openai.com/api/docs/pricing). Voice remains GPT-Live and has its own charges regardless of the selected reasoning model. Compare results on representative workflows before relying on a cheaper model for complex work.
 
 For example: “Review all of my emails, group them by our existing workflows, and explain the next step for each group.” The agent can enumerate the acting user's personal accounts, page through all provider-visible mail, read exact message bodies, and read accessible Processes, Step SOPs, flow connections, and Nodes. It can propose creating a Process Node, moving a Node into a Process/Step, or changing its status. Each proposed mutation pauses for **Approve this action** or **Reject**, with its exact arguments displayed.
 

@@ -9,9 +9,14 @@ import (
 	"miraeopus/backend/internal/openaiagents"
 	"miraeopus/backend/internal/store"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 )
+
+// The first choice is the default offered for new tasks. Creation still requires
+// an explicit selection; existing sessions keep their provider configuration.
+var aiModels = []string{"gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-astra"}
 
 const aiAppInstructions = `You are Mango AI, an on-demand agent for the authenticated user's company.
 Follow the user's requested workflow step by step. Read the relevant Process overview, Step SOPs and operational connections before proposing work. Explain the plan, progress, actual results, unavailable data and failures plainly.
@@ -26,6 +31,7 @@ type aiSkill struct {
 	Content string `json:"content"`
 }
 type aiStartInput struct {
+	Model        string    `json:"model"`
 	Prompt       string    `json:"prompt"`
 	Instructions string    `json:"instructions"`
 	Skills       []aiSkill `json:"skills"`
@@ -38,6 +44,7 @@ type aiDisplayItem struct {
 }
 type aiSessionView struct {
 	store.AIAgentSession
+	Model        string                `json:"model"`
 	Status       string                `json:"status"`
 	Error        string                `json:"error,omitempty"`
 	Items        []aiDisplayItem       `json:"items"`
@@ -117,10 +124,14 @@ func (s *Server) handleAISessions(w http.ResponseWriter, r *http.Request) {
 			aiError(w, err)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"sessions": sessions})
+		writeJSON(w, 200, map[string]any{"sessions": sessions, "models": aiModels, "default_model": aiModels[0]})
 	case http.MethodPost:
 		var in aiStartInput
 		if !aiDecode(w, r, &in) {
+			return
+		}
+		if !slices.Contains(aiModels, in.Model) {
+			writeError(w, 400, "Choose an available AI model before starting a task")
 			return
 		}
 		in.Prompt = strings.TrimSpace(in.Prompt)
@@ -154,7 +165,7 @@ func (s *Server) handleAISessions(w http.ResponseWriter, r *http.Request) {
 		for i := range toolList {
 			toolList[i].Type = "function"
 		}
-		provider, err := s.aiClient.CreateSession(r.Context(), config, in.Prompt, toolList)
+		provider, err := s.aiClient.CreateSession(r.Context(), in.Model, config, in.Prompt, toolList)
 		if err != nil {
 			aiError(w, err)
 			return
@@ -171,7 +182,7 @@ func (s *Server) handleAISessions(w http.ResponseWriter, r *http.Request) {
 		if saved, readErr := s.repo.GetAIAgentSession(r.Context(), c, u, provider.ID); readErr == nil {
 			local = saved
 		}
-		writeJSON(w, 201, aiSessionView{AIAgentSession: local, Status: "queued", Items: []aiDisplayItem{}, ReadCounts: map[string]int{}, Actions: []store.AIAgentAction{}})
+		writeJSON(w, 201, aiSessionView{AIAgentSession: local, Model: in.Model, Status: "queued", Items: []aiDisplayItem{}, ReadCounts: map[string]int{}, Actions: []store.AIAgentAction{}})
 	default:
 		writeError(w, 405, "method_not_allowed")
 	}
@@ -341,6 +352,7 @@ func (s *Server) aiSnapshot(ctx context.Context, local store.AIAgentSession, aft
 	if err != nil {
 		return view, err
 	}
+	view.Model = provider.Agent.Model
 	actions, err := s.repo.ListAIAgentActions(ctx, local.CompanyID, local.UserID, local.ID)
 	if err != nil {
 		return view, err
