@@ -13,6 +13,7 @@ const (
 	SchemaVersion = 1
 
 	KindIngestion                = "email_ingestion"
+	KindCtrlLoop                 = "ctrl_loop"
 	KindArchiveItem              = "email_archive_item"
 	KindReconciliationControl    = "reconciliation_control"
 	KindReconciliationConnection = "reconciliation_connection"
@@ -43,7 +44,7 @@ func (m Message) Validate() error {
 		return errors.New("unsupported email work message schema")
 	}
 	switch m.Kind {
-	case KindIngestion, KindArchiveItem:
+	case KindIngestion, KindArchiveItem, KindCtrlLoop:
 		if strings.TrimSpace(m.JobID) == "" || strings.TrimSpace(m.CompanyID) == "" || strings.TrimSpace(m.EmailConnectionID) == "" {
 			return errors.New("email work message is missing a stable identity")
 		}
@@ -62,6 +63,9 @@ func (m Message) Validate() error {
 }
 
 func (m Message) GroupID() string {
+	if m.Kind == KindCtrlLoop {
+		return "ctrl-loop:" + strings.TrimSpace(m.CompanyID)
+	}
 	if m.Kind == KindReconciliationControl {
 		return ReconciliationControlGroup
 	}

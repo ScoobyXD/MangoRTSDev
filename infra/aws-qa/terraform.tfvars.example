@@ -59,6 +59,11 @@ email_from_address     = ""
 bootstrap_admin_emails = ""
 bootstrap_company_name = "Mango QA"
 
+# Managed OpenAI uses a separate QA secret; CtrlLoop is disabled until qualification.
+openai_api_key_secret_arn = ""
+ctrl_loop_enabled = false
+ctrl_loop_model = "gpt-5.6-luna"
+
 # Separate QA Nylas app and Secrets Manager ARNs. Never reuse live grants or keys.
 nylas_client_id            = "00000000-0000-0000-0000-000000000000"
 nylas_api_base_url         = "https://api.us.nylas.com"

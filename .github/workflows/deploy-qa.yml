@@ -121,6 +121,9 @@ jobs:
           TF_BOOTSTRAP_ADMIN_EMAILS: ${{ vars.TF_BOOTSTRAP_ADMIN_EMAILS || '' }}
           TF_BOOTSTRAP_COMPANY_NAME: ${{ vars.TF_BOOTSTRAP_COMPANY_NAME || 'Mango QA' }}
           TF_NYLAS_CLIENT_ID: ${{ vars.TF_QA_NYLAS_CLIENT_ID || '' }}
+          TF_OPENAI_API_KEY_SECRET_ARN: ${{ vars.TF_QA_OPENAI_API_KEY_SECRET_ARN || '' }}
+          TF_CTRL_LOOP_ENABLED: ${{ vars.TF_QA_CTRL_LOOP_ENABLED || 'false' }}
+          TF_CTRL_LOOP_MODEL: ${{ vars.TF_QA_CTRL_LOOP_MODEL || 'gpt-5.6-luna' }}
           TF_NYLAS_API_BASE_URL: ${{ vars.TF_QA_NYLAS_API_BASE_URL || 'https://api.us.nylas.com' }}
           TF_NYLAS_API_KEY_SECRET_ARN: ${{ vars.TF_QA_NYLAS_API_KEY_SECRET_ARN || '' }}
           TF_NYLAS_STATE_SECRET_ARN: ${{ vars.TF_QA_NYLAS_STATE_SECRET_ARN || '' }}
@@ -156,12 +159,14 @@ jobs:
               EFFECTIVE_BACKEND_DESIRED_COUNT=0
               EFFECTIVE_EMAIL_SCHEMA_MIGRATED=false
               EFFECTIVE_EMAIL_WORKER_ENABLED=false
+              EFFECTIVE_CTRL_LOOP_ENABLED=false
               EFFECTIVE_EMAIL_SCHEDULE_ENABLED=false
               ;;
             deploy|recover)
               EFFECTIVE_BACKEND_DESIRED_COUNT=1
               EFFECTIVE_EMAIL_SCHEMA_MIGRATED=true
               EFFECTIVE_EMAIL_WORKER_ENABLED="$TF_EMAIL_WORKER_ENABLED"
+              EFFECTIVE_CTRL_LOOP_ENABLED="$TF_CTRL_LOOP_ENABLED"
               EFFECTIVE_EMAIL_SCHEDULE_ENABLED="$TF_EMAIL_SCHEDULE_ENABLED"
               ;;
             *)
@@ -179,6 +184,7 @@ jobs:
             "$TF_DATABASE_DELETION_PROTECTION" \
             "$TF_EMAIL_SCHEMA_MIGRATED" \
             "$TF_EMAIL_WORKER_ENABLED" \
+            "$TF_CTRL_LOOP_ENABLED" \
             "$TF_EMAIL_SCHEDULE_ENABLED" \
             "$TF_REALTIME_VALKEY_ENABLED" \
             "$TF_ECS_CONTAINER_INSIGHTS_ENABLED" \
@@ -258,6 +264,9 @@ jobs:
           bootstrap_admin_emails = $(json_string "$TF_BOOTSTRAP_ADMIN_EMAILS")
           bootstrap_company_name = $(json_string "$TF_BOOTSTRAP_COMPANY_NAME")
           nylas_client_id = $(json_string "$TF_NYLAS_CLIENT_ID")
+          openai_api_key_secret_arn = $(json_string "$TF_OPENAI_API_KEY_SECRET_ARN")
+          ctrl_loop_enabled = $EFFECTIVE_CTRL_LOOP_ENABLED
+          ctrl_loop_model = $(json_string "$TF_CTRL_LOOP_MODEL")
           nylas_api_base_url = $(json_string "$TF_NYLAS_API_BASE_URL")
           nylas_api_key_secret_arn = $(json_string "$TF_NYLAS_API_KEY_SECRET_ARN")
           nylas_state_secret_arn = $(json_string "$TF_NYLAS_STATE_SECRET_ARN")

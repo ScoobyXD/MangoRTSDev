@@ -26,6 +26,9 @@ func (r *MemoryRepo) CreateAttachmentWithResourceLinkContext(ctx context.Context
 	if err != nil {
 		return domain.Attachment{}, domain.ResourceAttachment{}, err
 	}
+	if link.ResourceType == "ctrl_loop_job" {
+		return domain.Attachment{}, domain.ResourceAttachment{}, ErrNotFound
+	}
 	if _, ok := r.companies[attachment.CompanyID]; !ok {
 		return domain.Attachment{}, domain.ResourceAttachment{}, ErrNotFound
 	}
@@ -646,10 +649,17 @@ func normalizeResourceAttachmentInput(input ResourceAttachmentInput) (domain.Res
 	if link.CompanyID == "" || link.ResourceID == "" || link.AttachmentID == "" {
 		return domain.ResourceAttachment{}, ErrInvalid
 	}
+	if resourceType == "ctrl_loop_job" && (cleanUUIDText(link.ResourceID) == "" || relationshipKind != AttachmentRelationshipFileAttachment ||
+		strings.TrimSpace(input.InformationID) != "" || link.MessageID != "" || link.EditorSurface != "") {
+		return domain.ResourceAttachment{}, ErrInvalid
+	}
 	return link, nil
 }
 
 func (r *MemoryRepo) upsertResourceAttachmentLocked(link domain.ResourceAttachment) (domain.ResourceAttachment, error) {
+	if link.ResourceType == "ctrl_loop_job" {
+		return domain.ResourceAttachment{}, ErrNotFound
+	}
 	if _, ok := r.companies[link.CompanyID]; !ok {
 		return domain.ResourceAttachment{}, ErrNotFound
 	}

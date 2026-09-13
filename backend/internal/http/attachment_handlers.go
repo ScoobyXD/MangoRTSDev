@@ -177,7 +177,13 @@ func clearAttachmentDownloadWriteDeadline(w http.ResponseWriter) {
 
 func (s *Server) canReadAttachmentThroughLinks(w http.ResponseWriter, r *http.Request, companyID string, links []domain.ResourceAttachment) bool {
 	for _, link := range links {
-		allowed, err := s.canViewAttachmentResource(r, companyID, link.ResourceType, link.ResourceID)
+		var allowed bool
+		var err error
+		if link.ResourceType == "ctrl_loop_job" {
+			allowed, err = s.canViewCtrlLoopAttachment(r, companyID, link.ResourceID, link.AttachmentID)
+		} else {
+			allowed, err = s.canViewAttachmentResource(r, companyID, link.ResourceType, link.ResourceID)
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_check_attachment_permission")
 			return false
@@ -471,6 +477,12 @@ func (s *Server) requireFinalEmailAttachmentResourceAccess(w http.ResponseWriter
 
 func (s *Server) requireAttachmentResourceView(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID string) bool {
 	resourceType = store.NormalizeAttachmentResourceType(resourceType)
+	if resourceType == "ctrl_loop_job" {
+		// A job owns provisional versions too. The CtrlLoop view exposes only
+		// its published current/original pointers, never its full file history.
+		writeError(w, http.StatusForbidden, "ctrl_loop_workbooks_require_automation_view")
+		return false
+	}
 	if (resourceType == "shared_inbox" || resourceType == "shared_inbox_folder") && !requireMailboxAccess(w, r) {
 		return false
 	}
@@ -486,6 +498,10 @@ func (s *Server) requireAttachmentResourceView(w http.ResponseWriter, r *http.Re
 }
 func (s *Server) requireAttachmentResourceEdit(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID string) bool {
 	resourceType = store.NormalizeAttachmentResourceType(resourceType)
+	if resourceType == "ctrl_loop_job" {
+		writeError(w, http.StatusForbidden, "ctrl_loop_workbooks_require_automation_command")
+		return false
+	}
 	if (resourceType == "shared_inbox" || resourceType == "shared_inbox_folder") && !requireMailboxAccess(w, r) {
 		return false
 	}
@@ -518,6 +534,11 @@ func (s *Server) canReadAttachmentThroughResourceLink(w http.ResponseWriter, r *
 
 func (s *Server) canViewAttachmentResource(r *http.Request, companyID, resourceType, resourceID string) (bool, error) {
 	resourceType = store.NormalizeAttachmentResourceType(resourceType)
+	if resourceType == "ctrl_loop_job" {
+		// Reading this owner alone is insufficient; the exact attachment must
+		// be one of its committed public pointers.
+		return false, nil
+	}
 	if (resourceType == "shared_inbox" || resourceType == "shared_inbox_folder") && mailboxDisabledForRequest(r) {
 		return false, nil
 	}
@@ -544,6 +565,26 @@ func (s *Server) canViewAttachmentResource(r *http.Request, companyID, resourceT
 		return false, nil
 	}
 	return s.repo.UserHasEffectiveAccess(companyID, userID, entityType, resourceID, store.EntityPermissionEdit)
+}
+
+func (s *Server) canViewCtrlLoopAttachment(r *http.Request, companyID, jobID, attachmentID string) (bool, error) {
+	if mailboxDisabledForRequest(r) {
+		return false, nil
+	}
+	actor, ok := authenticatedActor(r)
+	if !ok || actorRoleForCompany(actor, companyID) == "" || strings.TrimSpace(actor.User.UserID) == "" {
+		return false, nil
+	}
+	repo, ok := s.repo.(store.CtrlLoopRepository)
+	if !ok {
+		return false, nil
+	}
+	job, err := repo.GetCtrlLoopJob(r.Context(), companyID, actor.User.UserID, jobID)
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrInvalid) {
+		return false, nil
+	}
+	return err == nil && job.CompanyID == companyID && job.UserID == actor.User.UserID && job.ID == jobID &&
+		attachmentID != "" && (attachmentID == job.OriginalAttachmentID || attachmentID == job.CurrentAttachmentID), err
 }
 
 func attachmentPermissionEntityType(resourceType string) (string, bool) {

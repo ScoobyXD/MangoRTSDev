@@ -1,3 +1,15 @@
+# Current CtrlLoop Attachment Relationship Business Logic Laws
+
+1. Each original and saved workbook version must use `attachment_relationships` with the exact same-company `ctrl_loop_job` and `job_id` owner.
+2. A CtrlLoop file must use `file_attachment` with no editor, information, or message owner fields.
+3. Creating a version must lock and validate its exact job before storing bytes and must commit its attachment and owner link together.
+4. Original and current attachment pointers select versions and must not become a second file ownership authority.
+5. Reading a job-owned attachment must require the exact job owner, current company membership, enabled mailbox access, and an exact original or current published attachment pointer.
+6. Generic attachment upload, linking, and deletion APIs must reject CtrlLoop job mutations; workbook creation and version changes must use the CtrlLoop commands.
+7. Deleting a job, including mailbox or membership cascades, must retire only its exact attachment links and mark each newly unowned file pending through the existing attachment cleanup system.
+8. A job deletion must preserve attachments still owned by another live resource and must create no resource registry or cleanup queue.
+9. Generic resource attachment listing must reject CtrlLoop jobs; provisional and prior intermediate versions must stay private until selected by the committed current pointer.
+
 # Current Signup Company Membership Business Logic Laws
 
 1. The first authenticated user context with no company membership creates one company and its exact `company_memberships` edge atomically with the existing company defaults.

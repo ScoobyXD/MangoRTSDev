@@ -21,6 +21,9 @@
 19. Cleanup and deterministic email re-import hold the same lock for the exact company and attachment through object access and database finalization, so a stale duplicate cleanup cannot delete replacement bytes.
 20. Email re-import rechecks the attachment under that lock, reuses a live attachment without uploading, and rejects a still-pending attachment before uploading.
 21. Initial rollout and rollback stop all cleanup/import processes that lack the shared lock before running processes that depend on it; older and new images must not overlap.
+22. Deleting a CtrlLoop job, including membership or mailbox cascades, must retire all of that exact job's workbook-version links in the deleting transaction.
+23. CtrlLoop owner deletion must mark a workbook pending only when no active same-company owner remains and must preserve unrelated files and owners.
+24. CtrlLoop deletion must use the existing pending markers and cleanup recovery; original/current pointers must never authorize storage deletion.
 
 ## Process Story
 

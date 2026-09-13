@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { preloadCtrlLoopPage } from "../pages/lazyPages";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../app/ConfirmActionMenu";
 import { preloadAccountManagerSurface, preloadEntitiesSurface, preloadHomeSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface, preloadMyWorkSurface, preloadProcessMapSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "../app/preloadDashboardModules";
 import { HeaderRecycleBinIcon, HeaderSettingsIcon } from "../icons/index.js";
@@ -85,6 +86,10 @@ function preloadRouteSurface(path: string): void {
     preloadTeamsSurface();
     return;
   }
+  if (path === "/ctrl-loop") {
+    preloadCtrlLoopPage();
+    return;
+  }
   if (path === "/entities") {
     preloadEntitiesSurface();
     return;
@@ -116,6 +121,7 @@ const AUTH_RETURN_STATIC_PATHS = new Set([
   "/project-management",
   "/account-manager",
   "/teams",
+  "/ctrl-loop",
   "/entities",
   "/settings",
   "/admin/users",
@@ -373,9 +379,11 @@ export default function AuthGate() {
             ? "account-manager"
             : normalizedPath === "/teams"
               ? "teams"
-              : normalizedPath === "/entities"
-                ? "entities"
-                : undefined;
+              : normalizedPath === "/ctrl-loop"
+                ? "ctrl-loop"
+                : normalizedPath === "/entities"
+                  ? "entities"
+                  : undefined;
 
   if (!authEnabled) {
     return (
@@ -432,6 +440,9 @@ export default function AuthGate() {
 
   if (normalizedPath === "/teams") {
     return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="teams" /></React.Suspense>;
+  }
+  if (normalizedPath === "/ctrl-loop") {
+    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="ctrl-loop" /></React.Suspense>;
   }
   if (normalizedPath === "/entities") {
     return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="entities" /></React.Suspense>;

@@ -76,6 +76,10 @@ module "platform" {
   bootstrap_company_name = var.bootstrap_company_name
   origin_verify_secret   = var.origin_verify_secret
 
+  openai_api_key_secret_arn = var.openai_api_key_secret_arn
+  ctrl_loop_enabled         = var.ctrl_loop_enabled
+  ctrl_loop_model           = var.ctrl_loop_model
+
   nylas_client_id             = var.nylas_client_id
   nylas_api_base_url          = var.nylas_api_base_url
   nylas_api_key_secret_arn    = var.nylas_api_key_secret_arn

@@ -135,7 +135,7 @@ function sanitizeFrames(value: unknown): FrameDataModel[] {
 
 function sanitizePage(value: unknown): ViewTab["page"] {
   if (value === "communications") return "home";
-  return value === "logic-gate-arena" || value === "my-work" || value === "project-management" || value === "process-map" || value === "entities" || value === "account-manager" || value === "teams" || value === "home" ? value : undefined;
+  return value === "logic-gate-arena" || value === "my-work" || value === "project-management" || value === "process-map" || value === "entities" || value === "account-manager" || value === "teams" || value === "home" || value === "ctrl-loop" ? value : undefined;
 }
 
 function createUniqueFrameID(usedFrameIDs: Set<string>): string {

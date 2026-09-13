@@ -79,6 +79,9 @@ module "platform" {
 
 
   deepgram_api_key_secret_arn = var.deepgram_api_key_secret_arn
+  openai_api_key_secret_arn   = var.openai_api_key_secret_arn
+  ctrl_loop_enabled           = var.ctrl_loop_enabled
+  ctrl_loop_model             = var.ctrl_loop_model
 
   nylas_client_id          = var.nylas_client_id
   nylas_api_base_url       = var.nylas_api_base_url

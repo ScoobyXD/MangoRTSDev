@@ -89,6 +89,9 @@ jobs:
           TF_BOOTSTRAP_DEV_ADMIN_EMAILS: ${{ vars.TF_BOOTSTRAP_DEV_ADMIN_EMAILS || '' }}
           TF_BOOTSTRAP_DEV_COMPANY_NAME: ${{ vars.TF_BOOTSTRAP_DEV_COMPANY_NAME || 'MangoRTS Bootstrap' }}
           TF_DEEPGRAM_API_KEY_SECRET_ARN: ${{ vars.TF_DEEPGRAM_API_KEY_SECRET_ARN || '' }}
+          TF_OPENAI_API_KEY_SECRET_ARN: ${{ vars.TF_OPENAI_API_KEY_SECRET_ARN || '' }}
+          TF_CTRL_LOOP_ENABLED: ${{ vars.TF_CTRL_LOOP_ENABLED || 'false' }}
+          TF_CTRL_LOOP_MODEL: ${{ vars.TF_CTRL_LOOP_MODEL || 'gpt-5.6-luna' }}
           TF_NYLAS_CLIENT_ID: ${{ vars.TF_NYLAS_CLIENT_ID || '' }}
           TF_NYLAS_API_BASE_URL: ${{ vars.TF_NYLAS_API_BASE_URL || 'https://api.us.nylas.com' }}
           TF_NYLAS_API_KEY_SECRET_ARN: ${{ vars.TF_NYLAS_API_KEY_SECRET_ARN || '' }}
@@ -191,6 +194,9 @@ jobs:
           bootstrap_dev_admin_emails = $(json_string "$TF_BOOTSTRAP_DEV_ADMIN_EMAILS")
           bootstrap_dev_company_name = $(json_string "$TF_BOOTSTRAP_DEV_COMPANY_NAME")
           deepgram_api_key_secret_arn = $(json_string "$TF_DEEPGRAM_API_KEY_SECRET_ARN")
+          openai_api_key_secret_arn = $(json_string "$TF_OPENAI_API_KEY_SECRET_ARN")
+          ctrl_loop_enabled = $(json_string "$TF_CTRL_LOOP_ENABLED")
+          ctrl_loop_model = $(json_string "$TF_CTRL_LOOP_MODEL")
           nylas_client_id = $(json_string "$TF_NYLAS_CLIENT_ID")
           nylas_api_base_url = $(json_string "$TF_NYLAS_API_BASE_URL")
           nylas_api_key_secret_arn = $(json_string "$TF_NYLAS_API_KEY_SECRET_ARN")

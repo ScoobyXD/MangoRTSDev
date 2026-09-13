@@ -11,7 +11,7 @@ export const TEAMS_MODULE_KINDS = ["teams"];
 export const ENTITIES_MODULE_KINDS: string[] = [];
 export const PROCESS_MAP_MODULE_KINDS: string[] = [];
 
-export type DashboardRouteSurface = "home" | "my-work" | "logic-gate-arena" | "project-management" | "account-manager" | "teams" | "entities" | "process-map";
+export type DashboardRouteSurface = "home" | "my-work" | "logic-gate-arena" | "project-management" | "account-manager" | "teams" | "entities" | "process-map" | "ctrl-loop";
 
 export type DashboardPreloadPlan = {
   moduleKinds: string[];
@@ -49,6 +49,9 @@ export function planLikelyDashboardPreload(activeTab: ({ page?: ViewTab["page"];
   }
   if (activeTab.page === "teams") {
     return { moduleKinds: TEAMS_MODULE_KINDS, routeSurfaces: ["teams"] };
+  }
+  if (activeTab.page === "ctrl-loop") {
+    return { moduleKinds: [], routeSurfaces: ["ctrl-loop"] };
   }
   if (activeTab.page === "entities") {
     return { moduleKinds: ENTITIES_MODULE_KINDS, routeSurfaces: ["entities"] };

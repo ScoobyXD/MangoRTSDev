@@ -46,6 +46,25 @@ type FunctionTool struct {
 	Parameters  map[string]any `json:"parameters"`
 }
 
+// MCPTool is a service-origin HTTP connection, which needs no execution
+// environment. Authentication belongs to this session, never to its prompt.
+// https://developers.openai.com/api/docs/guides/agents-api/tools/mcp
+type MCPTool struct {
+	Type             string           `json:"type"`
+	ServerLabel      string           `json:"server_label"`
+	Transport        MCPHTTPTransport `json:"transport"`
+	ConnectionOrigin string           `json:"connection_origin"`
+	AllowedTools     []string         `json:"allowed_tools"`
+	Required         bool             `json:"required"`
+}
+
+type MCPHTTPTransport struct {
+	Type          string            `json:"type"`
+	ServerURL     string            `json:"server_url"`
+	Authorization string            `json:"authorization,omitempty"`
+	Headers       map[string]string `json:"headers,omitempty"`
+}
+
 type Session struct {
 	ID              string           `json:"id"`
 	Status          string           `json:"status"`
@@ -145,23 +164,37 @@ func (e *APIError) Error() string {
 	}
 }
 
-func (c *Client) CreateSession(ctx context.Context, model, instructions, input string, tools []FunctionTool) (Session, error) {
+func (c *Client) CreateSession(ctx context.Context, model, instructions, input string, tools []FunctionTool, mcps ...MCPTool) (Session, error) {
 	if strings.TrimSpace(model) == "" {
 		return Session{}, errors.New("an agent model is required")
 	}
 	if strings.TrimSpace(input) == "" {
 		return Session{}, errors.New("an initial agent request is required")
 	}
-	functions := make([]FunctionTool, len(tools))
-	for i, tool := range tools {
+	agentTools := make([]any, 0, len(tools)+len(mcps))
+	for _, tool := range tools {
 		if tool.Type != "" && tool.Type != "function" {
 			return Session{}, errors.New("only application function tools are supported")
 		}
 		tool.Type = "function"
-		functions[i] = tool
+		agentTools = append(agentTools, tool)
+	}
+	labels := make(map[string]bool, len(mcps))
+	for _, mcp := range mcps {
+		if err := mcp.validate(); err != nil {
+			return Session{}, err
+		}
+		if labels[mcp.ServerLabel] {
+			return Session{}, errors.New("MCP server labels must be unique")
+		}
+		labels[mcp.ServerLabel] = true
+		mcp.Type = "mcp"
+		mcp.Transport.Type = "http"
+		mcp.ConnectionOrigin = "service"
+		agentTools = append(agentTools, mcp)
 	}
 	body := map[string]any{
-		"agent":       map[string]any{"model": model, "instructions": instructions, "tools": functions},
+		"agent":       map[string]any{"model": model, "instructions": instructions, "tools": agentTools},
 		"environment": map[string]string{"type": "none"},
 		"input":       input,
 		"stream":      false,
@@ -173,6 +206,39 @@ func (c *Client) CreateSession(ctx context.Context, model, instructions, input s
 		err = errors.New("OpenAI returned an agent session without an ID")
 	}
 	return session, err
+}
+
+func (m MCPTool) validate() error {
+	if (m.Type != "" && m.Type != "mcp") || (m.Transport.Type != "" && m.Transport.Type != "http") || (m.ConnectionOrigin != "" && m.ConnectionOrigin != "service") {
+		return errors.New("MCP tools require service-origin HTTP transport")
+	}
+	if strings.TrimSpace(m.ServerLabel) == "" || strings.ContainsAny(m.ServerLabel, " \t\r\n") {
+		return errors.New("an MCP server label is required")
+	}
+	serverURL, err := url.Parse(m.Transport.ServerURL)
+	if err != nil || serverURL.Scheme != "https" || serverURL.Hostname() == "" || serverURL.User != nil || serverURL.Fragment != "" {
+		return errors.New("MCP server URL must be HTTPS without embedded credentials or a fragment")
+	}
+	if len(m.AllowedTools) == 0 {
+		return errors.New("MCP tools require an explicit nonempty tool allowlist")
+	}
+	for _, name := range m.AllowedTools {
+		if strings.TrimSpace(name) == "" || name == "*" {
+			return errors.New("MCP allowed tools must name individual tools")
+		}
+	}
+	if strings.ContainsAny(m.Transport.Authorization, "\r\n") {
+		return errors.New("invalid MCP authorization value")
+	}
+	for key, value := range m.Transport.Headers {
+		if strings.TrimSpace(key) == "" || strings.ContainsAny(key, " \t\r\n:") || strings.ContainsAny(value, "\r\n") {
+			return errors.New("invalid MCP HTTP header")
+		}
+		if strings.EqualFold(key, "Authorization") && m.Transport.Authorization != "" {
+			return errors.New("MCP authorization must use only one source")
+		}
+	}
+	return nil
 }
 
 func (c *Client) RetrieveSession(ctx context.Context, sessionID string) (Session, error) {

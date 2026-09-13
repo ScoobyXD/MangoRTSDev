@@ -8,6 +8,18 @@ let accountManagerPagePromise: Promise<typeof import("./account-manager")> | nul
 let teamsPagePromise: Promise<typeof import("./teams")> | null = null;
 let entitiesPagePromise: Promise<typeof import("./entities")> | null = null;
 let processMapPagePromise: Promise<typeof import("./process-map/ProcessMapPage")> | null = null;
+let ctrlLoopPagePromise: Promise<typeof import("./ctrl-loop/CtrlLoopPage")> | null = null;
+
+function loadCtrlLoopPage() {
+  ctrlLoopPagePromise ??= import("./ctrl-loop/CtrlLoopPage");
+  return ctrlLoopPagePromise;
+}
+
+export function preloadCtrlLoopPage(): void {
+  void loadCtrlLoopPage();
+}
+
+export const LazyCtrlLoopPage = React.lazy(() => loadCtrlLoopPage().then((module) => ({ default: module.CtrlLoopPage })));
 
 function loadLogicGateArenaPage() {
   logicGateArenaPagePromise ??= import("./logic-gate-arena");

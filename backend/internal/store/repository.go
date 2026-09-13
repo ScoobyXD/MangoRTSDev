@@ -545,6 +545,8 @@ func NormalizeAttachmentResourceType(resourceType string) string {
 		return "email_draft"
 	case "email_signature", "email-signature":
 		return "email_signature"
+	case "ctrl_loop_job":
+		return "ctrl_loop_job"
 	case "shared_inbox", "shared-inbox":
 		return "shared_inbox"
 	case "company_explorer_folder", "company-explorer-folder":

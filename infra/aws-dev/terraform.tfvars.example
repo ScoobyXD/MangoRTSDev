@@ -80,6 +80,11 @@ bootstrap_company_name  = "MangoRTS Bootstrap"
 # Optional speech-to-text dictation. Store the raw Deepgram key in Secrets Manager; supply only its ARN here.
 deepgram_api_key_secret_arn = ""
 
+# Managed OpenAI uses an existing secret. CtrlLoop stays disabled until reviewed rollout.
+openai_api_key_secret_arn = ""
+ctrl_loop_enabled = false
+ctrl_loop_model = "gpt-5.6-luna"
+
 # Deprecated compatibility aliases accepted by the dev root:
 # bootstrap_dev_admin_emails = ""
 # bootstrap_dev_company_name  = "MangoRTS Bootstrap"

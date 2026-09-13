@@ -1,5 +1,11 @@
 import type React from "react";
 
+export const HeaderCtrlLoopIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
+  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
+    <path d="M13.2 6.4A5.4 5.4 0 0 0 3.4 4.7M2.8 9.6a5.4 5.4 0 0 0 9.8 1.7M3.4 1.9v2.8h2.8M12.6 14.1v-2.8H9.8" fill="none" stroke={color} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 export const StaggeredGroupingIcon: React.FC<{ color?: string; size?: number }> = ({ color = "currentColor", size = 16 }) => (
   <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
     <path d="M2.2 2.1v11.8M.7 3.7 2.2 2.1l1.5 1.6M.7 12.3l1.5 1.6 1.5-1.6" fill="none" stroke={color} strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />

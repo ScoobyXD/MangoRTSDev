@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderHomeIcon, HeaderLogicGateArenaIcon, HeaderMapIcon, HeaderMyWorkIcon, HeaderProjectManagementIcon, HeaderTeamsIcon } from "../icons/index.js";
+import { HeaderAccountManagerIcon, HeaderCtrlLoopIcon, HeaderExplorerIcon, HeaderHomeIcon, HeaderLogicGateArenaIcon, HeaderMapIcon, HeaderMyWorkIcon, HeaderProjectManagementIcon, HeaderTeamsIcon } from "../icons/index.js";
 import { isAuthEnabled, type CurrentUserResponse } from "../auth/cognitoAuth";
 import { getActiveCompanyID } from "../auth/currentCompany";
 import FrameCanvas from "./framecanvas";
@@ -35,7 +35,7 @@ import {
 } from "./frameLayoutTypes";
 import { loadFrameLinks, loadSettings, loadViews, persistFrameLinks, persistFrameRegistry, saveSettings, saveViews } from "./useFramePersistence";
 import { preloadAccountManagerSurface, preloadEntitiesSurface, preloadHomeSurface, preloadLogicGateArenaSurface, preloadMyWorkSurface, preloadProcessMapSurface, preloadProjectManagementSurface, preloadTeamsSurface, preloadVisibleFrameModules } from "./preloadDashboardModules";
-import { LazyAccountManagerPage, LazyEntitiesPage, LazyHomePage, LazyLogicGateArenaPage, LazyMyWorkPage, LazyProcessMapPage, LazyProjectManagementPage, LazyTeamsPage } from "../pages/lazyPages";
+import { LazyAccountManagerPage, LazyCtrlLoopPage, LazyEntitiesPage, LazyHomePage, LazyLogicGateArenaPage, LazyMyWorkPage, LazyProcessMapPage, LazyProjectManagementPage, LazyTeamsPage, preloadCtrlLoopPage } from "../pages/lazyPages";
 import type { HomeViewID } from "../pages/home/homeTypes";
 import { writePendingLogicGateArenaSelection } from "../pages/logic-gate-arena/logicGateArenaLaunch";
 import { NotificationRealtimeBridge } from "./NotificationRealtimeBridge";
@@ -117,7 +117,7 @@ const SIDEBAR_WIDTH_KEY = "mangorts.app-sidebar-width.v1";
 const HOME_VIEW_STORAGE_PREFIX = "mangorts.app.home-view.v1";
 const SHOW_LEGACY_HEADER = false;
 
-type PrimaryPage = "home" | "my-work" | "logic-gate-arena" | "project-management" | "process-map" | "entities" | "account-manager" | "teams";
+type PrimaryPage = "home" | "my-work" | "logic-gate-arena" | "project-management" | "process-map" | "entities" | "account-manager" | "teams" | "ctrl-loop";
 type NavigateOptions = { replace?: boolean };
 type ExplorerEntityActivatedDetail = {
   companyID?: string;
@@ -190,6 +190,7 @@ function createPrimaryPageTab(page: PrimaryPage, id = createTabId()): ViewTab {
   if (page === "entities") return { id, name: "Entities", page: "entities", frames: [] };
   if (page === "account-manager") return { id, name: "Accounts", page: "account-manager", frames: createAccountManagerFrames() };
   if (page === "teams") return { id, name: "Teams", page: "teams", frames: createTeamsFrames() };
+  if (page === "ctrl-loop") return { id, name: "[CTRL] Loop", page: "ctrl-loop", frames: [] };
   return { id, name: "Home", page: "home", frames: createHomeViewFrames() };
 }
 
@@ -253,6 +254,7 @@ function pageForTab(tab: ViewTab): PrimaryPage | null {
   if (tab.page === "entities") return "entities";
   if (tab.page === "account-manager") return "account-manager";
   if (tab.page === "teams") return "teams";
+  if (tab.page === "ctrl-loop") return "ctrl-loop";
   if (/^(project management|projects)$/i.test(tab.name.trim())) return "project-management";
   if (/^my work$/i.test(tab.name.trim())) return "my-work";
   if (/^process map$/i.test(tab.name.trim())) return "process-map";
@@ -272,6 +274,7 @@ function labelForTab(tab: ViewTab): string {
   if (page === "entities") return "Entities";
   if (page === "account-manager") return "Accounts";
   if (page === "teams") return "Teams";
+  if (page === "ctrl-loop") return "[CTRL] Loop";
   return tab.name;
 }
 
@@ -285,6 +288,7 @@ function iconForTab(tab: ViewTab): React.ReactNode {
   if (page === "entities") return <HeaderExplorerIcon />;
   if (page === "account-manager") return <HeaderAccountManagerIcon />;
   if (page === "teams") return <HeaderTeamsIcon />;
+  if (page === "ctrl-loop") return <HeaderCtrlLoopIcon />;
   return null;
 }
 
@@ -297,6 +301,7 @@ function routeForPage(page: PrimaryPage): string {
   if (page === "entities") return "/entities";
   if (page === "account-manager") return "/account-manager";
   if (page === "teams") return "/teams";
+  if (page === "ctrl-loop") return "/ctrl-loop";
   return "/";
 }
 
@@ -529,10 +534,11 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   const isEntitiesView = activePrimaryPage === "entities";
   const isAccountManagerView = activePrimaryPage === "account-manager";
   const isTeamsView = activePrimaryPage === "teams";
+  const isCtrlLoopView = activePrimaryPage === "ctrl-loop";
   const huddleLogicGateID = deepLink?.kind === "huddle_logic_gate" ? deepLink.huddleLogicGateID : "";
   const isHuddleLogicGateView = Boolean(huddleLogicGateID);
   const processMapVisible = isProcessMapView && !isHuddleLogicGateView && !overrideContent;
-  const isFullPageView = isHuddleLogicGateView || isLogicGateArenaView || isHomeView || isMyWorkView || isProjectManagementView || isProcessMapView || isEntitiesView || isAccountManagerView || isTeamsView;
+  const isFullPageView = isHuddleLogicGateView || isLogicGateArenaView || isHomeView || isMyWorkView || isProjectManagementView || isProcessMapView || isEntitiesView || isAccountManagerView || isTeamsView || isCtrlLoopView;
   const homePageOwnsEmailReferencePreview = !overrideContent && !isHuddleLogicGateView && !isLogicGateArenaView && isHomeView;
   const rootFrames = useMemo(() => frames.filter((frame) => !frame.parentId), [frames]);
 
@@ -1122,6 +1128,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     if (page === "entities") preloadEntitiesSurface();
     if (page === "account-manager") preloadAccountManagerSurface();
     if (page === "teams") preloadTeamsSurface();
+    if (page === "ctrl-loop") preloadCtrlLoopPage();
 
     const ensured = ensurePrimaryPageTab(tabs, page);
     setTabs(ensured.tabs);
@@ -2151,6 +2158,10 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
         ) : isTeamsView ? (
           <React.Suspense fallback={fullPageFallback}>
             <LazyTeamsPage me={me} />
+          </React.Suspense>
+        ) : isCtrlLoopView ? (
+          <React.Suspense fallback={fullPageFallback}>
+            <LazyCtrlLoopPage key={activeCompanyID} companyID={activeCompanyID} currentUserID={me?.user.user_id ?? ""} />
           </React.Suspense>
         ) : isEntitiesView ? (
           <React.Suspense fallback={fullPageFallback}>
