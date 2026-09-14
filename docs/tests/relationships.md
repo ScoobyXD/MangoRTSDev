@@ -18,6 +18,8 @@
 7. Deleting a job, including mailbox or membership cascades, must retire only its exact attachment links and mark each newly unowned file pending through the existing attachment cleanup system.
 8. A job deletion must preserve attachments still owned by another live resource and must create no resource registry or cleanup queue.
 9. Generic resource attachment listing must reject CtrlLoop jobs; provisional and prior intermediate versions must stay private until selected by the committed current pointer.
+10. The owner-only CtrlLoop Delete command must use the existing company workbook lock and job deletion trigger to retire every exact workbook-version link atomically.
+11. A successful CtrlLoop Delete command must wake the existing attachment cleanup consumer and preserve source emails, other jobs and surviving attachment owners.
 
 # Current Signup Company Membership Business Logic Laws
 

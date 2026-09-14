@@ -50,6 +50,17 @@
 48. Instructions must show at most three lines in the table and open their full editable text in a popup above the table without changing its height.
 49. The edit popup must save names and instructions through the existing revision-checked job API while preserving the job's mailbox and timezone; Cancel must discard unsaved edits.
 50. Excel uploads must authorize the query company and pass workbook bytes unchanged through authentication to the existing CtrlLoop workbook command.
+51. Each loop row must provide a Delete action that confirms removal of that loop's workbook versions and update history.
+52. Deleting a loop must require its exact owner, current company membership and enabled mailbox access without requiring a connected provider or working AI setup.
+53. Deleting a loop must hold the existing company workbook lock and reject deletion while that lock is held by processing.
+54. Successful deletion must retire every workbook-version attachment link through the existing job deletion trigger and wake the existing attachment cleanup consumer.
+55. Deleting a loop must preserve stored source emails, other loops and files with another live owner.
+56. A failed deletion must leave the row visible and show the error.
+57. The cloud-integrated local launcher must read the dev API service's selected task definition, rather than an undeployed task revision.
+58. The local launcher must copy the deployed CTRL Loop MCP URL and model into the local API process.
+59. The local launcher must import the deployed OpenAI secret reference only when no explicit local reference exists and never read the OpenAI secret value.
+60. Normal localhost testing must continue using the shared dev email worker and its public MCP endpoint without requiring a laptop tunnel or starting a competing queue consumer.
+61. The local launcher must clear stale inherited CTRL Loop URL/model values when deployed values are absent and report the missing dev setup at startup.
 
 # Verification
 
@@ -62,6 +73,8 @@
 `node tests/frontend/scripts/run-ctrl-loop-tests.mjs` verifies direct creation, automatic email/timezone defaults, instruction editing, page-specific seen IDs, safe links, preview windows, company-switch cancellation and uploads. Frontend production build and synthetic browser review cover the integrated navigation/table/dialogs.
 
 `backend/internal/http/ctrl_loop_upload_auth_test.go` sends generated Excel bytes through authentication and verifies their preservation, company access checks and unchanged JSON validation on other routes.
+
+The CtrlLoop deletion HTTP and disposable repository tests cover owner/company access, processing conflicts, exact workbook-version cleanup, preserved shared files/source emails and completion of queued work after its job is removed. `tests/scripts/test_process_map_reset_launcher.ps1` uses synthetic AWS and Go commands to verify the local launcher's deployed settings, credential-reference handling and missing-configuration messages without contacting a service.
 
 The Gmail worker fixture verifies real Excel/MCP output with the exact stored-message Mango URL. Source-reader tests verify message contents, exact IDs, permission changes and zero provider calls. UI tests cover the popup, safe rendering, source links and sign-in return routing.
 

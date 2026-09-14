@@ -91,7 +91,10 @@ test("cloud-integrated local backend reuses the deployed DEV queue", () => {
   assert.match(localBackend, /\$env:MANGORTS_EMAIL_WORK_QUEUE_URL = \$emailWorkQueueURL/);
   assert.match(localBackend, /throw "The deployed DEV backend task does not provide MANGORTS_EMAIL_WORK_QUEUE_URL/);
   assert.doesNotMatch(localBackend, /First-NonBlank @\(\s*\$env:MANGORTS_EMAIL_WORK_QUEUE_URL/);
-  assert.match(localBackend, /Unable to list the deployed DEV backend task definition/);
+  assert.match(localBackend, /aws ecs describe-services/);
+  assert.match(localBackend, /\$taskDefinitionArn = \[string\]\$service\.taskDefinition/);
+  assert.doesNotMatch(localBackend, /aws ecs list-task-definitions/);
+  assert.match(localBackend, /Unable to read the deployed DEV backend ECS service/);
   assert.match(localBackend, /Unable to read the deployed DEV backend task definition/);
   assert.doesNotMatch(localBackend, /MANGORTS_EMAIL_WORK_QUEUE_URL\s*=\s*"https:\/\//);
 });

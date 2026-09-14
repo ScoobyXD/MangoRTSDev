@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  ctrlLoopTitle, downloadCtrlLoopWorkbook, getCtrlLoopHistory, markCtrlLoopChangesSeen,
+  ctrlLoopTitle, deleteCtrlLoopJob, downloadCtrlLoopWorkbook, getCtrlLoopHistory, markCtrlLoopChangesSeen,
   previewCtrlLoopWorkbook, saveCtrlLoopJob, uploadCtrlLoopWorkbook, workbookWebLink,
 } from "../../../../frontend/src/modules/ctrl-loop/ctrlLoopApi.js";
 
@@ -10,6 +10,7 @@ test("CtrlLoop API preserves company scope, exact seen IDs, upload bytes and bin
   const calls: { url: URL; init: RequestInit }[] = [];
   globalThis.fetch = (async (input: string, init: RequestInit) => {
     calls.push({ url: new URL(input), init });
+    if (init.method === "DELETE") return new Response(null, { status: 204 });
     return new Response((init.method ?? "GET") === "GET" && input.includes("/workbook?") ? "xlsx bytes" : "{}", { status: 200 });
   }) as typeof fetch;
   try {
@@ -39,6 +40,11 @@ test("CtrlLoop API preserves company scope, exact seen IDs, upload bytes and bin
     await saveCtrlLoopJob("company A", input, { ...input, id: "job/1", revision: 4, status: "Listening", unseen_updates: 3 });
     assert.equal(calls[6].init.method, "PATCH");
     assert.equal(JSON.parse(calls[6].init.body as string).revision, 4);
+    await deleteCtrlLoopJob("company A", "job/1");
+    assert.equal(calls[7].init.method, "DELETE");
+    assert.equal(calls[7].url.pathname, "/v1/ctrl-loop/jobs/job%2F1");
+    assert.equal(calls[7].url.searchParams.get("company_id"), "company A");
+    assert.equal(calls[7].init.body, undefined);
   } finally { globalThis.fetch = previousFetch; }
 });
 

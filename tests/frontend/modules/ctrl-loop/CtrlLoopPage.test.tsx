@@ -170,6 +170,84 @@ test("CtrlLoop prevents duplicate creation while saving and allows retry after a
   });
 });
 
+test("CtrlLoop deletion requires confirmation, retains a failed row and removes only the target after success", async () => {
+  const jobs: CtrlLoopJob[] = [
+    { ...existingJob, file_name: "Orders.xlsx", status: "Listening", unseen_updates: 3 },
+    { ...existingJob, id: "other-job", name: "Other Loop", unseen_updates: 2 },
+  ];
+  const confirmations: string[] = [];
+  let confirmed = false;
+  let writes = 0;
+  let listCalls = 0;
+  let completeRequest!: (response: Response) => void;
+  await withPageBrowser(async (input, init) => {
+    if (init.method === "DELETE") {
+      writes++;
+      assert.equal(new URL(input).pathname, "/v1/ctrl-loop/jobs/existing-job");
+      if (writes === 1) return new Promise<Response>((resolve) => { completeRequest = resolve; });
+      return new Response(null, { status: 204 });
+    }
+    listCalls++;
+    return jsonResponse({ jobs, mailboxes: [] });
+  }, async (root) => {
+    window.confirm = (message) => { confirmations.push(message ?? ""); return confirmed; };
+    await act(async () => { root.render(<CtrlLoopPage companyID="company-one" currentUserID="" currentUserEmail="buyer@example.com" />); });
+    const remove = document.querySelector<HTMLButtonElement>('[aria-label="Delete loop Existing Loop"]')!;
+    await act(async () => { remove.click(); });
+    assert.equal(writes, 0);
+    assert.equal(document.querySelectorAll(".ctrl-loop-name").length, 2);
+    assert.match(confirmations[0], /Permanently delete.*Existing Loop/);
+    assert.match(confirmations[0], /workbooks.*history/);
+    assert.match(confirmations[0], /Source emails will stay/);
+    confirmed = true;
+    await act(async () => { remove.click(); });
+    assert.equal(remove.textContent, "Deleting…");
+    assert.equal(document.querySelectorAll(".ctrl-loop-name").length, 2, "the pending request must leave the saved row visible");
+    assert.equal(button("Create New Loop").disabled, true);
+    assert.equal(button("Existing Loop").disabled, true);
+    assert.equal(document.querySelector<HTMLButtonElement>('[aria-label="Edit instructions for Existing Loop"]')!.disabled, true);
+    assert.equal(document.querySelector<HTMLButtonElement>(".ctrl-loop-file")!.disabled, true);
+    assert.equal(document.querySelector<HTMLButtonElement>('[aria-label="Download latest workbook for Existing Loop"]')!.disabled, true);
+    assert.equal(document.querySelector<HTMLInputElement>('input[type="file"]')!.disabled, true);
+    assert.equal(document.querySelector<HTMLButtonElement>('[aria-label="Delete loop Other Loop"]')!.disabled, true);
+    await act(async () => { remove.click(); });
+    assert.equal(writes, 1);
+    await act(async () => { completeRequest(jsonResponse({ error: "The loop is processing. Try again after it finishes." }, 409)); });
+    assert.equal(remove.disabled, false);
+    assert.equal(document.querySelectorAll(".ctrl-loop-name").length, 2);
+    assert.match(document.querySelector('[role="alert"]')?.textContent ?? "", /processing/i);
+    await act(async () => { remove.click(); });
+    assert.equal(writes, 2);
+    assert.equal(document.querySelectorAll(".ctrl-loop-name").length, 1);
+    assert.equal(document.querySelector('[aria-label="Delete loop Existing Loop"]'), null);
+    assert.ok(button("Other Loop"));
+    assert.equal(document.title, "[2] [CTRL] Loop");
+    assert.equal(document.querySelector('[role="alert"]'), null);
+    assert.equal(listCalls, 1, "deletion removes the target without replacing other rows from a new list response");
+  });
+});
+
+test("CtrlLoop deletion closes its workbook preview and cancels the pending preview read", async () => {
+  let previewSignal: AbortSignal | undefined;
+  await withPageBrowser(async (input, init) => {
+    if (init.method === "DELETE") return new Response(null, { status: 204 });
+    if (new URL(input).pathname.endsWith("/preview")) {
+      previewSignal = init.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => init.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true }));
+    }
+    return jsonResponse({ jobs: [{ ...existingJob, file_name: "Orders.xlsx" }], mailboxes: [] });
+  }, async (root) => {
+    window.confirm = () => true;
+    await act(async () => { root.render(<CtrlLoopPage companyID="company-one" currentUserID="" currentUserEmail="buyer@example.com" />); });
+    await act(async () => { document.querySelector<HTMLButtonElement>(".ctrl-loop-file")!.click(); });
+    assert.ok(document.querySelector('[role="dialog"]'));
+    await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="Delete loop Existing Loop"]')!.click(); });
+    assert.equal(previewSignal?.aborted, true);
+    assert.equal(document.querySelector('[role="dialog"]'), null);
+    assert.equal(document.querySelector(".ctrl-loop-name"), null);
+  });
+});
+
 test("CtrlLoop renders the four states, reads real workbook cells, marks only displayed changes and clears company data", async () => {
   const jobs: CtrlLoopJob[] = ["Awaiting file", "Listening", "Processing", "Error"].map((status, index) => ({
     id: `job-${index}`, name: `Automation ${index}`, instructions: "Stamp the shipped cell for matching purchase orders",

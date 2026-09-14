@@ -45,6 +45,9 @@ export function saveCtrlLoopJob(companyID: string, input: CtrlLoopJobInput, job?
     method: job ? "PATCH" : "POST", json: { ...input, ...(job ? { revision: job.revision } : {}) },
   });
 }
+export function deleteCtrlLoopJob(companyID: string, id: string): Promise<void> {
+  return request(jobPath(companyID, id), { method: "DELETE" });
+}
 export function uploadCtrlLoopWorkbook(companyID: string, id: string, file: File): Promise<CtrlLoopJob> {
   if (!/\.xlsx$/i.test(file.name)) return Promise.reject(new Error("Choose an Excel .xlsx file."));
   return request(jobPath(companyID, id, "/workbook"), {
