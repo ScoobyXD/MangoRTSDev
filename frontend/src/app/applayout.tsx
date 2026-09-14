@@ -2161,7 +2161,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
           </React.Suspense>
         ) : isCtrlLoopView ? (
           <React.Suspense fallback={fullPageFallback}>
-            <LazyCtrlLoopPage key={activeCompanyID} companyID={activeCompanyID} currentUserID={me?.user.user_id ?? ""} />
+            <LazyCtrlLoopPage key={activeCompanyID} companyID={activeCompanyID} currentUserID={me?.user.user_id ?? ""} currentUserEmail={me?.user.email ?? ""} />
           </React.Suspense>
         ) : isEntitiesView ? (
           <React.Suspense fallback={fullPageFallback}>

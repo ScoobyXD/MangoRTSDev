@@ -4,7 +4,7 @@
 2. Activation never backfills mailbox history, a previously downloaded thread, or a fixed recent-message count.
 3. Each automation belongs to one exact company member and one of that member's exact personal Google or Microsoft Nylas mailbox connections.
 4. Every job API read, upload, preview, download, edit and seen update requires the automation's exact owner, current company membership and enabled mailbox access.
-5. Each automation stores its name and instructions as text and its IANA timezone as an explicit setting.
+5. Each automation stores its name and instructions as text and takes its explicit IANA timezone from the browser when created.
 6. The four displayed automation statuses are exactly Awaiting file, Listening, Processing and Error.
 7. Awaiting file means no original workbook exists; Listening means configured waiting work; Processing means a live worker attempt; Error includes a useful connection, setup or processing explanation.
 8. Workbook uploads accept validated .xlsx files of at most 25 MB and reject macros, invalid archives and unsupported workbook content identified by validation.
@@ -20,7 +20,7 @@
 18. Email, workbook and tool contents are data and never authorize new tools, customers, files, instructions or outbound email.
 19. Excel MCP authorization resolves a short-lived run token on every request and rechecks current ownership, mailbox access, workbook version and attempt state before reads or staging.
 20. MCP mutations choose only exact job, worksheet and cell targets; the backend supplies every written value and hyperlink.
-21. Every changed cell contains literal text formatted from the email's Nylas mail-server receipt timestamp in that job's timezone, plus a native Excel hyperlink to its provider email or Mango's exact stored-email popup.
+21. Every changed cell contains the email's Nylas mail-server receipt date/time as literal month/day/year and AM/PM text (for example, `9/13/26 2:31PM`) in that job's timezone, with a clickable native Excel hyperlink to its provider email or Mango's exact stored-email popup.
 22. The underlying email receipt timestamp is retained; milestone dates, sender Date headers, webhook time, model time and save time never replace it.
 23. When a provider link is unavailable, the worker must build the Mango source URL from the configured app origin and exact stored company, thread and message IDs; missing source identity prevents publication.
 24. Formula destinations are rejected; unrelated cells, formulas, existing links and supported workbook formatting remain intact.
@@ -41,6 +41,15 @@
 39. Every source-email read must require current company membership, enabled mailbox access and ownership of the exact personal mailbox; the URL itself grants no access.
 40. A source popup must read the existing durable message without provider reconstruction, thread substitution, copied email rows or mailbox mutation; deleted or incomplete sources must show an unavailable state.
 41. A downloaded workbook's Mango source link must retain its exact company, thread and message IDs through sign-in before opening the same read-only popup.
+42. The plus button labeled Create New Loop must sit directly above the table on the left, with no Refresh button or creation form.
+43. Create New Loop must immediately save and display a New Loop row with the default eight-point order-milestone instructions through the existing job API.
+44. The default instructions must require exact order and milestone matching, confirmed events, linked receipt date/times, preservation of formulas and unrelated cells, and no guessed changes.
+45. New loops must use the owner's personal mailbox whose email matches the signed-in user's email without a mailbox picker.
+46. A missing matching mailbox must show an inline connection message and create no loop under another email.
+47. The create button must prevent another submission while a creation request is pending; a failed request must show its error without adding a row.
+48. Instructions must show at most three lines in the table and open their full editable text in a popup above the table without changing its height.
+49. The edit popup must save names and instructions through the existing revision-checked job API while preserving the job's mailbox and timezone; Cancel must discard unsaved edits.
+50. Excel uploads must authorize the query company and pass workbook bytes unchanged through authentication to the existing CtrlLoop workbook command.
 
 # Verification
 
@@ -50,7 +59,9 @@
 
 `scripts/test_ctrl_loop_postgres.mjs` uses only a disposable synthetic database. It tests canonical schema and the forward migrations, exact identities, ownership, cutoff, company locking, duplicate delivery, staged-union transactions, expiry/freeze, successful publication, persistent seen counts and lifecycle cleanup.
 
-`node tests/frontend/scripts/run-ctrl-loop-tests.mjs` verifies UI/API behavior, page-specific seen IDs, safe links, preview windows, account-switch cancellation, forms and uploads. Frontend production build and synthetic browser review cover the integrated navigation/table/dialogs.
+`node tests/frontend/scripts/run-ctrl-loop-tests.mjs` verifies direct creation, automatic email/timezone defaults, instruction editing, page-specific seen IDs, safe links, preview windows, company-switch cancellation and uploads. Frontend production build and synthetic browser review cover the integrated navigation/table/dialogs.
+
+`backend/internal/http/ctrl_loop_upload_auth_test.go` sends generated Excel bytes through authentication and verifies their preservation, company access checks and unchanged JSON validation on other routes.
 
 The Gmail worker fixture verifies real Excel/MCP output with the exact stored-message Mango URL. Source-reader tests verify message contents, exact IDs, permission changes and zero provider calls. UI tests cover the popup, safe rendering, source links and sign-in return routing.
 
