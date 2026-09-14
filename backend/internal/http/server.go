@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"miraeopus/backend/internal/auth"
+	"miraeopus/backend/internal/ctrlloopexcel"
 	"miraeopus/backend/internal/emailqueue"
 	"miraeopus/backend/internal/notifications"
 	"miraeopus/backend/internal/openaiagents"
@@ -102,6 +103,8 @@ type Server struct {
 	nylasConfig                            NylasConfig
 	deepgramAPIKey                         string
 	aiClient                               *openaiagents.Client
+	ctrlLoopMCPURL                         string
+	ctrlLoopModel                          string
 	aiAPIKey                               string
 	aiLiveClient                           *http.Client
 	aiLiveURL                              string
@@ -201,6 +204,8 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 	}
 	server := &Server{
 		aiAPIKey:                           strings.TrimSpace(options.OpenAIAPIKey),
+		ctrlLoopMCPURL:                     strings.TrimSpace(os.Getenv("MANGORTS_CTRL_LOOP_MCP_URL")),
+		ctrlLoopModel:                      firstNonBlank(os.Getenv("MANGORTS_CTRL_LOOP_MODEL"), "gpt-5.6-luna"),
 		aiLiveClient:                       newAILiveClient(),
 		aiLiveURL:                          "https://api.openai.com/v1/live/sessions",
 		repo:                               repo,
@@ -297,6 +302,10 @@ func (s *Server) Close() {
 
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/ctrl-loop/jobs", s.handleCtrlLoopJobs)
+	mux.HandleFunc("/v1/ctrl-loop/jobs/", s.handleCtrlLoopJob)
+	mux.HandleFunc("/v1/ctrl-loop/emails/", s.handleCtrlLoopSourceEmail)
+	mux.Handle("/v1/ctrl-loop/mcp", ctrlloopexcel.NewHandler(ctrlLoopExcelBackend{s: s}))
 	mux.HandleFunc("/v1/ai/sessions", s.handleAISessions)
 	mux.HandleFunc("/v1/ai/sessions/", s.handleAISession)
 	mux.HandleFunc("/v1/ai/live", s.handleAILive)

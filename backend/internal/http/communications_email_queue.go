@@ -157,6 +157,8 @@ func (s *Server) waitForEmailWorkerReadiness(ctx context.Context) error {
 
 func (s *Server) processEmailQueueDelivery(ctx context.Context, delivery emailqueue.Delivery) (bool, error) {
 	switch delivery.Message.Kind {
+	case emailqueue.KindCtrlLoop:
+		return s.processCtrlLoopDelivery(ctx, delivery.Message)
 	case emailqueue.KindIngestion:
 		return s.processEmailIngestionDelivery(ctx, delivery.Message)
 	case emailqueue.KindArchiveItem:
@@ -190,6 +192,9 @@ func (s *Server) processEmailIngestionDelivery(ctx context.Context, message emai
 	}
 	switch job.Status {
 	case store.CommunicationsEmailIngestionJobCompleted:
+		if err := s.enqueueCtrlLoopRun(ctx, job); err != nil {
+			return false, err
+		}
 		err := s.publishCommunicationsEmailIngestionStatusContext(ctx, job)
 		return err == nil, err
 	case store.CommunicationsEmailIngestionJobParked:
@@ -204,6 +209,9 @@ func (s *Server) processEmailIngestionDelivery(ctx context.Context, message emai
 	if !started {
 		switch job.Status {
 		case store.CommunicationsEmailIngestionJobCompleted:
+			if err := s.enqueueCtrlLoopRun(ctx, job); err != nil {
+				return false, err
+			}
 			err := s.publishCommunicationsEmailIngestionStatusContext(ctx, job)
 			return err == nil, err
 		case store.CommunicationsEmailIngestionJobParked:
@@ -213,6 +221,9 @@ func (s *Server) processEmailIngestionDelivery(ctx context.Context, message emai
 		}
 	}
 	workErr := s.processCommunicationsEmailIngestionProviderWork(ctx, job)
+	if workErr == nil {
+		workErr = s.enqueueCtrlLoopRun(ctx, job)
+	}
 	if workErr == nil {
 		settled := job
 		settled.Status = store.CommunicationsEmailIngestionJobCompleted

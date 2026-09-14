@@ -383,6 +383,10 @@ func (s *Server) maybeBootstrapDevAdmin(ctx context.Context, claims auth.Claims)
 
 func isPublicAuthEndpoint(path string) bool {
 	switch path {
+	// This server-to-server endpoint authenticates an expiring, run-scoped
+	// bearer token itself. User Cognito credentials grant no MCP access.
+	case "/v1/ctrl-loop/mcp":
+		return true
 	case "/v1/invitations/validate", "/v1/invitations/accept":
 		return true
 	default:

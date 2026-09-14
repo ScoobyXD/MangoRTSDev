@@ -6,7 +6,8 @@ import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMe
 import { AppModalPortal } from "./AppModalPortal";
 import FrameRightClickMenu from "./framerightclickmenu";
 import { AppSidebarPinnedSection } from "./AppSidebarPinnedSection";
-import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderMapIcon, HeaderMyWorkIcon, HeaderProjectManagementIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "../icons/index.js";
+import { HeaderAccountManagerIcon, HeaderCtrlLoopIcon, HeaderExplorerIcon, HeaderMapIcon, HeaderMyWorkIcon, HeaderProjectManagementIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "../icons/index.js";
+import { preloadCtrlLoopPage } from "../pages/lazyPages";
 import { MangoWordmark } from "../icons/index.js";
 import { UI_THEME } from "./frameLayoutTypes";
 import { preloadAccountManagerSurface, preloadEntitiesSurface, preloadMyWorkSurface, preloadProcessMapSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "./preloadDashboardModules";
@@ -145,7 +146,7 @@ type SidebarSectionID = "shared-triage";
 export type HomeKeyViewID = "my-triage" | "shared-root" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox" | "updates" | `shared:${string}`;
 export type { SidebarPin, SidebarPinKind } from "./sidebarPins";
 
-type AppSidebarPrimaryPage = "home" | "my-work" | "logic-gate-arena" | "project-management" | "process-map" | "entities" | "account-manager" | "teams";
+type AppSidebarPrimaryPage = "home" | "my-work" | "logic-gate-arena" | "project-management" | "process-map" | "entities" | "account-manager" | "teams" | "ctrl-loop";
 
 type AppSidebarProps = {
   accountChrome?: React.ReactNode;
@@ -1359,6 +1360,16 @@ export function AppSidebar({
 
       <section style={appSidebarNavSectionStyle} aria-label="Tower">
         <AppSidebarSectionHeader label="Tower" />
+        <AppSidebarButton
+          label="[CTRL] Loop"
+          active={activePage === "ctrl-loop"}
+          icon={<HeaderCtrlLoopIcon color="#21814b" />}
+          elevated
+          onPointerEnter={preloadCtrlLoopPage}
+          onFocus={preloadCtrlLoopPage}
+          onPointerDown={preloadCtrlLoopPage}
+          onClick={() => onPageSelect("ctrl-loop")}
+        />
         <AppSidebarButton
           label="My Work"
           active={activePage === "my-work"}

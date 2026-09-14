@@ -1,6 +1,6 @@
 import type { FrameDataModel } from "../types";
 import { preloadModuleKinds, preloadModulesForFrames } from "../modules";
-import { preloadAccountManagerPage, preloadEntitiesPage, preloadHomePage, preloadLogicGateArenaPage, preloadMyWorkPage, preloadProcessMapPage, preloadProjectManagementPage, preloadTeamsPage } from "../pages/lazyPages";
+import { preloadAccountManagerPage, preloadCtrlLoopPage, preloadEntitiesPage, preloadHomePage, preloadLogicGateArenaPage, preloadMyWorkPage, preloadProcessMapPage, preloadProjectManagementPage, preloadTeamsPage } from "../pages/lazyPages";
 import { loadViews } from "./useFramePersistence";
 import {
   ACCOUNT_MANAGER_MODULE_KINDS,
@@ -72,6 +72,7 @@ function preloadDashboardPlan(plan: DashboardPreloadPlan): void {
     if (surface === "project-management") preloadProjectManagementPage();
     if (surface === "account-manager") preloadAccountManagerPage();
     if (surface === "teams") preloadTeamsPage();
+    if (surface === "ctrl-loop") preloadCtrlLoopPage();
     if (surface === "entities") preloadEntitiesPage();
     if (surface === "process-map") preloadProcessMapPage();
   }

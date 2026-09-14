@@ -1,4 +1,11 @@
-# Current AI Business Logic Laws
+# Current Managed Agents Transport Business Logic Laws
+
+1. Managed sessions must preserve ordinary function tools and add MCP only when the caller explicitly supplies a server.
+2. CtrlLoop MCP must use authenticated HTTPS service transport; every MCP server must have an explicit nonempty tool allowlist without wildcards.
+3. MCP credentials must appear only in transport configuration and must never appear in instructions or user input.
+4. A configured required MCP server must fail the session if unavailable; existing interactive approval rules must remain unchanged.
+
+# Current Interactive AI Business Logic Laws
 
 1. Mango AI must use the selected supported model through the managed Agents API with `environment.type=none`.
 2. Startup must remain usable without an OpenAI key, and AI requests must report that AI is unavailable.

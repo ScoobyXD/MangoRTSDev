@@ -23,6 +23,7 @@ var exactEntityTableColumnContracts = []exactTableColumnContract{
 }
 
 var requiredApplicationTables = []string{
+	"ctrl_loop_jobs", "ctrl_loop_runs", "ctrl_loop_run_jobs", "ctrl_loop_changes",
 	"email_connections",
 	"communications_message_read_receipt_summaries", "communications_message_read_receipt_signals",
 	"email_threads", "email_messages", "email_relationships", "email_drafts",

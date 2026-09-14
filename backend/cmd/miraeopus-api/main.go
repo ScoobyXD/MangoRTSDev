@@ -95,11 +95,13 @@ func main() {
 	}
 	var deepgramAPIKey string
 	var openAIAPIKey string
-	if runtimeRole == "api" {
+	if runtimeRole == "api" || strings.TrimSpace(os.Getenv("MANGORTS_CTRL_LOOP_MCP_URL")) != "" {
 		openAIAPIKey, err = loadRuntimeSecret(context.Background(), "OPENAI_API_KEY", "OPENAI_API_KEY_SECRET_ARN")
 		if err != nil {
 			log.Printf("AI unavailable: %s", err)
 		}
+	}
+	if runtimeRole == "api" {
 		deepgramAPIKey, err = loadRuntimeSecret(context.Background(), "DEEPGRAM_API_KEY", "DEEPGRAM_API_KEY_SECRET_ARN")
 		if err != nil {
 			log.Printf("dictation unavailable: %s", err)
@@ -569,7 +571,7 @@ func withCORS(next http.Handler) http.Handler {
 		// Keep CORS allow-list aligned with hot-path API verbs and headers used by frontend modules.
 		// V2 policy writes use If-Match for stale-write protection.
 		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization,Cache-Control,If-Match,If-None-Match,Idempotency-Key,Last-Event-ID,X-Idempotency-Key,X-Mango-Confirmation-Display-Name,X-Mango-Company-ID,X-Mango-Realtime-Connection-ID,X-Mango-Test-Subject")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization,Cache-Control,If-Match,If-None-Match,Idempotency-Key,Last-Event-ID,X-Idempotency-Key,X-Filename,X-Mango-Confirmation-Display-Name,X-Mango-Company-ID,X-Mango-Realtime-Connection-ID,X-Mango-Test-Subject")
 		w.Header().Set("Access-Control-Expose-Headers", "ETag")
 		w.Header().Set("Access-Control-Max-Age", "600")
 		if r.Method == http.MethodOptions {

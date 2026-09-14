@@ -25,6 +25,7 @@ data "aws_iam_policy_document" "ecs_execution_secrets" {
     resources = compact([
       local.db_password_secret_arn,
       local.dictation_enabled ? trimspace(var.deepgram_api_key_secret_arn) : "",
+      local.openai_enabled ? trimspace(var.openai_api_key_secret_arn) : "",
       var.nylas_api_key_secret_arn,
       var.nylas_state_secret_arn,
       var.nylas_webhook_secret_arn
@@ -67,6 +68,7 @@ data "aws_iam_policy_document" "email_worker_execution_secrets" {
   statement {
     actions = ["secretsmanager:GetSecretValue"]
     resources = compact([
+      var.ctrl_loop_enabled && local.openai_enabled ? trimspace(var.openai_api_key_secret_arn) : "",
       local.db_password_secret_arn,
       var.nylas_api_key_secret_arn,
     ])

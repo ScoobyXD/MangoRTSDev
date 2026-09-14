@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { preloadCtrlLoopPage } from "../pages/lazyPages";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../app/ConfirmActionMenu";
 import { preloadAccountManagerSurface, preloadEntitiesSurface, preloadHomeSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface, preloadMyWorkSurface, preloadProcessMapSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "../app/preloadDashboardModules";
 import { HeaderRecycleBinIcon, HeaderSettingsIcon } from "../icons/index.js";
@@ -26,11 +27,12 @@ import {
   type CurrentUserResponse,
   type LoginResult,
 } from "./cognitoAuth";
-import { isAuthPath, nextPathAfterAuthentication, nextPathForAuthState } from "./authRoutes";
+import { canUseAuthReturnPath, isAuthPath, nextPathAfterAuthentication, nextPathForAuthState } from "./authRoutes";
 import { listCompanyUsers, markCommunicationsWorkspaceResourcesStale } from "../modules/communications/communicationsApi";
 import { normalizeAppPath, parseDeepLinkRoute } from "../app/deepLinkRoutes";
 import { RecycleBinPage } from "../pages/recycle-bin/RecycleBinPage";
 import { RealtimeHealthChrome } from "../modules/realtime/RealtimeHealthChrome";
+import { parseCtrlLoopEmailRoute } from "../modules/ctrl-loop/ctrlLoopEmailRoute";
 
 type PendingChallenge = Extract<LoginResult, { status: "new_password_required" }> | null;
 type AppLayoutModule = typeof import("../app/applayout");
@@ -48,6 +50,7 @@ function preloadAppLayout(): void {
 }
 
 const LazyAppLayout = React.lazy(() => loadAppLayout().then((module) => ({ default: module.default })));
+const LazyCtrlLoopEmailRoute = React.lazy(() => import("../pages/ctrl-loop/CtrlLoopEmailPreview").then((module) => ({ default: module.CtrlLoopEmailRoute })));
 const routeFallback = <div aria-busy="true" style={{ width: "100vw", height: "100vh", background: "#ffffff" }} />;
 
 function preloadAuthenticatedShell(): void {
@@ -85,6 +88,10 @@ function preloadRouteSurface(path: string): void {
     preloadTeamsSurface();
     return;
   }
+  if (path === "/ctrl-loop") {
+    preloadCtrlLoopPage();
+    return;
+  }
   if (path === "/entities") {
     preloadEntitiesSurface();
     return;
@@ -106,22 +113,6 @@ const accountManagerPrefetch = prefetchHandlers(preloadAccountManagerSurface);
 const teamsPrefetch = prefetchHandlers(preloadTeamsSurface);
 const entitiesPrefetch = prefetchHandlers(preloadEntitiesSurface);
 const AUTH_RETURN_PATH_KEY = "mangorts:auth-return-path-v1";
-const AUTH_RETURN_STATIC_PATHS = new Set([
-  "/",
-  "/home",
-  "/communication",
-  "/communications",
-  "/logic-gate-arena",
-  "/my-work",
-  "/project-management",
-  "/account-manager",
-  "/teams",
-  "/entities",
-  "/settings",
-  "/admin/users",
-  "/recycle-bin",
-  "/connect-google",
-]);
 
 type CompanyUser = {
   company_id: string;
@@ -175,11 +166,6 @@ type CommunicationsStatus = {
     status?: string;
   };
 };
-
-function canUseAuthReturnPath(pathname: string): boolean {
-  const path = normalizeAppPath(pathname);
-  return AUTH_RETURN_STATIC_PATHS.has(path) || parseDeepLinkRoute(path) !== null;
-}
 
 function rememberAuthReturnPath(pathname: string): void {
   if (typeof sessionStorage === "undefined" || !canUseAuthReturnPath(pathname)) return;
@@ -359,6 +345,7 @@ export default function AuthGate() {
 
   const normalizedPath = normalizeAppPath(path);
   const deepLinkRoute = parseDeepLinkRoute(normalizedPath);
+  const ctrlLoopEmail = parseCtrlLoopEmailRoute(normalizedPath);
   const deepLinkInitialPage = deepLinkRoute?.kind === "process_map"
     ? "process-map"
     : deepLinkRoute?.kind === "logic_gate"
@@ -373,11 +360,14 @@ export default function AuthGate() {
             ? "account-manager"
             : normalizedPath === "/teams"
               ? "teams"
-              : normalizedPath === "/entities"
-                ? "entities"
-                : undefined;
+              : normalizedPath === "/ctrl-loop"
+                ? "ctrl-loop"
+                : normalizedPath === "/entities"
+                  ? "entities"
+                  : undefined;
 
   if (!authEnabled) {
+    if (ctrlLoopEmail) return <React.Suspense fallback={routeFallback}><LazyCtrlLoopEmailRoute target={ctrlLoopEmail} onClose={() => navigate("/ctrl-loop")} /></React.Suspense>;
     return (
       <React.Suspense fallback={routeFallback}>
         <LazyAppLayout initialPage={deepLinkInitialPage} deepLink={deepLinkRoute} onNavigate={navigate} />
@@ -400,6 +390,10 @@ export default function AuthGate() {
       return <ForgotPasswordPage onNavigate={navigate} initialCodeEntryOpen />;
     }
     return <LoginPage onChallenge={setPendingChallenge} onAuthenticated={loadMe} onNavigate={navigate} loadError={error} />;
+  }
+
+  if (ctrlLoopEmail) {
+    return <React.Suspense fallback={routeFallback}><LazyCtrlLoopEmailRoute target={ctrlLoopEmail} onClose={() => navigate("/ctrl-loop")} /></React.Suspense>;
   }
 
   if (normalizedPath === "/settings" || normalizedPath === "/admin/users") {
@@ -432,6 +426,9 @@ export default function AuthGate() {
 
   if (normalizedPath === "/teams") {
     return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="teams" /></React.Suspense>;
+  }
+  if (normalizedPath === "/ctrl-loop") {
+    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="ctrl-loop" /></React.Suspense>;
   }
   if (normalizedPath === "/entities") {
     return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="entities" /></React.Suspense>;

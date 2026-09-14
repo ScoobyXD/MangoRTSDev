@@ -224,6 +224,7 @@ resource "aws_ecs_task_definition" "email_worker" {
       image     = var.backend_image_uri
       essential = true
       environment = concat(
+        local.ctrl_loop_environment,
         [
           { name = "APP_ENV", value = var.environment },
           { name = "ALLOW_INMEMORY_FALLBACK", value = "false" },
@@ -267,6 +268,9 @@ resource "aws_ecs_task_definition" "email_worker" {
         ] : []
       )
       secrets = concat(
+        var.ctrl_loop_enabled && local.openai_enabled ? [
+          { name = "OPENAI_API_KEY", valueFrom = trimspace(var.openai_api_key_secret_arn) }
+        ] : [],
         [
           { name = "DB_PASSWORD", valueFrom = local.db_password_secret_value_from }
         ],

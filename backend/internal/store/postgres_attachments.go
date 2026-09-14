@@ -74,6 +74,19 @@ func (r *PostgresRepo) CreateAttachmentWithResourceLinkContext(ctx context.Conte
 		return domain.Attachment{}, domain.ResourceAttachment{}, err
 	}
 	defer tx.Rollback()
+	if link.ResourceType == "ctrl_loop_job" {
+		// Lock the exact owner before touching S3. A concurrent owner deletion
+		// must either retire this committed version or finish before this check.
+		var ownerID string
+		err := tx.QueryRowContext(ctx, `select job_id::text from ctrl_loop_jobs
+where company_id=$1::uuid and job_id=$2::uuid for key share`, link.CompanyID, link.ResourceID).Scan(&ownerID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Attachment{}, domain.ResourceAttachment{}, ErrNotFound
+		}
+		if err != nil {
+			return domain.Attachment{}, domain.ResourceAttachment{}, err
+		}
+	}
 	if err := attachmentcleanup.LockAttachmentStorageTx(ctx, tx, attachment.CompanyID, attachment.AttachmentID); err != nil {
 		return domain.Attachment{}, domain.ResourceAttachment{}, err
 	}

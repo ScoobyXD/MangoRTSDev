@@ -72,6 +72,17 @@ resource "aws_ecs_cluster" "main" {
 
   lifecycle {
     precondition {
+      condition = !var.ctrl_loop_enabled || (
+        local.nonproduction_services_environment &&
+        local.openai_enabled &&
+        local.email_worker_service_enabled &&
+        local.email_worker_dependencies_configured &&
+        local.nylas_realtime_enabled &&
+        local.attachment_storage_enabled
+      )
+      error_message = "CtrlLoop requires dev or QA, OpenAI secret ARN, the configured SQS email worker, Nylas webhooks, and attachment S3 storage. Apply the reviewed CtrlLoop schema before enabling it."
+    }
+    precondition {
       condition     = !var.deployment_maintenance_mode || var.environment == "qa"
       error_message = "deployment_maintenance_mode is supported only by the QA release coordinator."
     }
@@ -139,6 +150,7 @@ resource "aws_ecs_task_definition" "backend" {
         protocol      = "tcp"
       }]
       environment = concat(
+        local.ctrl_loop_environment,
         [
           { name = "APP_ENV", value = var.environment },
           { name = "ALLOW_INMEMORY_FALLBACK", value = "false" },
@@ -195,6 +207,9 @@ resource "aws_ecs_task_definition" "backend" {
         ] : []
       )
       secrets = concat(
+        local.openai_enabled ? [
+          { name = "OPENAI_API_KEY", valueFrom = trimspace(var.openai_api_key_secret_arn) }
+        ] : [],
         [
           { name = "DB_PASSWORD", valueFrom = local.db_password_secret_value_from }
         ],

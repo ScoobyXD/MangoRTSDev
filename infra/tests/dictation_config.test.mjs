@@ -18,7 +18,7 @@ test("dictation has one optional dev secret independent of the removed agent", (
   assert.match(read("infra/aws-dev/terraform.tfvars.example"), /deepgram_api_key_secret_arn\s*=\s*""/);
   assert.match(locals, /dictation_enabled\s*=\s*var\.environment == "dev" && trimspace\(var\.deepgram_api_key_secret_arn\) != ""/);
   assert.match(ecs, /condition\s*=\s*trimspace\(var\.deepgram_api_key_secret_arn\) == "" \|\| var\.environment == "dev"/);
-  assert.doesNotMatch([locals, ecs, iam, devWorkflow].join("\n"), /assistant_model|assistant_enabled|OPENAI_API_KEY|ai\/runtime|MANGORTS_PI/i);
+  assert.doesNotMatch([locals, ecs, iam, devWorkflow].join("\n"), /assistant_model|assistant_enabled|ai\/runtime|MANGORTS_PI/i);
 });
 
 test("ECS injects the key as a secret and grants only the configured secret ARN", () => {

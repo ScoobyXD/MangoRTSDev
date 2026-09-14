@@ -31,6 +31,11 @@ locals {
     contains(["https://api.us.nylas.com", "https://api.eu.nylas.com"], trimspace(var.nylas_api_base_url))
   )
   attachment_storage_enabled = trimspace(var.attachment_s3_bucket) != ""
+  openai_enabled             = trimspace(var.openai_api_key_secret_arn) != ""
+  ctrl_loop_environment = var.ctrl_loop_enabled ? [
+    { name = "MANGORTS_CTRL_LOOP_MCP_URL", value = "https://${local.api_domain}/v1/ctrl-loop/mcp" },
+    { name = "MANGORTS_CTRL_LOOP_MODEL", value = var.ctrl_loop_model }
+  ] : []
   attachment_browser_origins = sort(distinct(concat(
     ["https://${local.app_domain}"],
     var.environment == "dev" ? ["http://localhost:5173"] : [],

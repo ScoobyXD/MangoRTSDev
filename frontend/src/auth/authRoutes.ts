@@ -1,4 +1,18 @@
+import { normalizeAppPath, parseDeepLinkRoute } from "../app/deepLinkRoutes.js";
+import { parseCtrlLoopEmailRoute } from "../modules/ctrl-loop/ctrlLoopEmailRoute.js";
+
 export const AUTH_PATHS = new Set(["/login", "/accept-invite", "/complete-account", "/forgot-password", "/reset-password"]);
+
+const AUTH_RETURN_STATIC_PATHS = new Set([
+  "/", "/home", "/communication", "/communications", "/logic-gate-arena", "/my-work",
+  "/project-management", "/account-manager", "/teams", "/ctrl-loop", "/entities", "/settings",
+  "/admin/users", "/recycle-bin", "/connect-google",
+]);
+
+export function canUseAuthReturnPath(pathname: string): boolean {
+  const path = normalizeAppPath(pathname);
+  return AUTH_RETURN_STATIC_PATHS.has(path) || parseDeepLinkRoute(path) !== null || parseCtrlLoopEmailRoute(path) !== null;
+}
 
 const LEGACY_AUTHENTICATED_PATHS = new Map([
   ["/admin/users", "/settings"],
