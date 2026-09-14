@@ -9,6 +9,7 @@
 7. Failure of a later migration must leave earlier committed migrations recorded; code rollback alone must never be presented as reversing those database changes.
 8. An already recorded migration must perform no work when the runner resumes.
 9. Removing retired application schema from the repository must not silently remove live objects or rewrite their migration ledger.
+10. Shipped migration files must remain unchanged in the release history after their application feature is retired; recorded migrations must stay recognized and skipped without restoring runtime code.
 
 `miraeopus-migrate -mode plan` emits one `MANGORTS_MIGRATION_PLAN=` line containing JSON. `ready=false` produces a nonzero exit after the result is written. The plan checks known catalog conflicts; transactional SQL preconditions and data validation remain in the original migration scripts. A successful plan is not proof of full schema parity or data backfills. The ledger stores filenames, so reported file hashes identify the release's repository bytes and do not claim to prove historical applied bytes.
 

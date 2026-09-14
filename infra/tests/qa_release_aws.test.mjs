@@ -116,6 +116,19 @@ test('migration plan rejects missing, duplicated and blocked structured reports'
   }
 });
 
+test('blocked migration plan names the unknown recorded migrations in the deployment error', async () => {
+  const io = adapter();
+  io.migrationDefinition = definition();
+  io.runTask = async () => ({ exitCode: 1, messages: [`MANGORTS_MIGRATION_PLAN=${JSON.stringify({
+    ready: false,
+    blockers: ['migration ledger contains versions absent from this release'],
+    unknown_to_repository: ['retired.sql', 'other.sql'],
+  })}`] });
+  await assert.rejects(io.plan(), {
+    message: 'Migration plan blocked: migration ledger contains versions absent from this release; unknown recorded migrations: retired.sql, other.sql',
+  });
+});
+
 test('attachment maintenance blocks every known application writer and preserves unrelated bucket policy', async () => {
   const io = adapter();
   const unrelated = { Sid: 'RequireTLS', Effect: 'Deny', Action: 's3:*', Principal: '*', Resource: '*', Condition: { Bool: { 'aws:SecureTransport': 'false' } } };

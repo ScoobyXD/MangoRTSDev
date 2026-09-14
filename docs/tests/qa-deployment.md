@@ -10,7 +10,7 @@
 8. A release must retain the actual previous frontend files, immutable backend image digest, task configuration, migration state, and database identity.
 9. All QA API, worker, scheduled, and standalone writers must stop before migration.
 10. Maintenance must block API traffic, outstanding attachment upload URLs, and delayed cleanup invocations.
-11. The migration plan must reject unknown history, known manual-application conflicts, and unsupported PostgreSQL.
+11. The migration plan must reject unknown history, known manual-application conflicts, and unsupported PostgreSQL; deployment errors for unknown history must name every unknown recorded migration.
 12. The migration state must remain unchanged between the initial plan and the stopped-writer plan.
 13. Pending SQL must not start until AWS automated backups cover the quiesced recovery timestamp.
 14. Restore-point waits must stop after a bounded timeout without starting SQL.
