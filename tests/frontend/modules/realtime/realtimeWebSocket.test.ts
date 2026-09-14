@@ -812,6 +812,7 @@ test("frontend source inventory contains only retained narrow scope families", (
     "modules/kanban/KanbanContent.tsx",
     "modules/logic-gates/qdRatingsApi.ts",
     "modules/process-map/ProcessMapSurface.tsx",
+    "pages/ctrl-loop/CtrlLoopPage.tsx",
     "pages/home/EmailCollaborationChatSurface.tsx",
     "pages/home/EmailReferencePreviewHost.tsx",
     "pages/home/HomePage.tsx",
