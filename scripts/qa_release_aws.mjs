@@ -143,7 +143,11 @@ export class QAReleaseAWS {
     const reports = result.messages.filter(m => m.startsWith('MANGORTS_MIGRATION_PLAN='));
     if (reports.length !== 1) throw new Error('Migration task did not emit exactly one structured plan');
     const plan = JSON.parse(reports[0].slice('MANGORTS_MIGRATION_PLAN='.length));
-    if (result.exitCode !== 0 || !plan.ready) throw new Error(`Migration plan blocked: ${(plan.blockers || []).join('; ')}`);
+    if (result.exitCode !== 0 || !plan.ready) {
+      const unknown = plan.unknown_to_repository || [];
+      const details = unknown.length ? `; unknown recorded migrations: ${unknown.join(', ')}` : '';
+      throw new Error(`Migration plan blocked: ${(plan.blockers || []).join('; ')}${details}`);
+    }
     return plan;
   }
 

@@ -105,6 +105,8 @@ func pendingMigrationCatalogConflicts(version string, items []schemaInventoryIte
 		targets = []string{"public.process_steps.body_json", "public.process_steps.revision", "public.logic_gate_textboxes_history.resource_type", "public.mangorts_enforce_process_step_editor_text_limit()"}
 	case "20260906_user_mailbox_access.sql":
 		targets = []string{"public.users.mailbox_enabled"}
+	case "20260907_hermes_action_receipts.sql":
+		targets = []string{"public.ai_chats", "public.ai_runs", "public.ai_messages", "public.ai_actions"}
 	}
 	conflicts := []string{}
 	for _, target := range targets {
