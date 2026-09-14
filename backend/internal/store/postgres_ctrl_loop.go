@@ -83,6 +83,21 @@ func ctrlAffected(result sql.Result, err error) error {
 	}
 	return err
 }
+func (r *PostgresRepo) DeleteCtrlLoopJob(ctx context.Context, c, u, id string) error {
+	return r.WithCtrlLoopCompanyLock(ctx, c, func() error {
+		// The existing deletion trigger retires every workbook owner link;
+		// run-job/history cascades preserve the stored source emails and runs.
+		result, err := r.db.ExecContext(ctx, `DELETE FROM ctrl_loop_jobs WHERE company_id=$1 AND user_id=$2 AND job_id=$3`, c, u, id)
+		if err != nil {
+			return err
+		}
+		count, err := result.RowsAffected()
+		if err == nil && count == 0 {
+			return ErrNotFound
+		}
+		return err
+	})
+}
 func (r *PostgresRepo) AttachCtrlLoopWorkbook(ctx context.Context, c, u, id string, revision int64, attachment string) error {
 	result, err := r.db.ExecContext(ctx, `UPDATE ctrl_loop_jobs j SET original_attachment_id=$5,current_attachment_id=$5,status='Listening',last_error='',activated_at=clock_timestamp(),revision=revision+1
 WHERE company_id=$1 AND user_id=$2 AND job_id=$3 AND revision=$4 AND original_attachment_id IS NULL

@@ -198,6 +198,15 @@ func (s *Server) handleCtrlLoopJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(parts) == 1 {
+		if r.Method == http.MethodDelete {
+			if err := repo.DeleteCtrlLoopJob(r.Context(), c, u, id); err != nil {
+				ctrlLoopError(w, err)
+				return
+			}
+			s.wakeAttachmentDeletionCleanup()
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if r.Method != http.MethodGet {
 			writeError(w, 405, "method_not_allowed")
 			return

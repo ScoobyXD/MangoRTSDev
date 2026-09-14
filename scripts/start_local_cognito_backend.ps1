@@ -193,29 +193,32 @@ function Join-URLPath {
   return $base + $pathValue
 }
 
-function Get-LatestBackendContainerDefinition {
+function Get-DeployedBackendContainerDefinition {
   param(
     [string]$ProjectName,
     [string]$EnvironmentName
   )
 
-  $family = "$ProjectName-$EnvironmentName-backend"
-  $raw = & aws ecs list-task-definitions `
+  $serviceName = "$ProjectName-$EnvironmentName-backend"
+  $raw = & aws ecs describe-services `
     @awsProfileArgs `
     --region $AwsRegion `
-    --family-prefix $family `
-    --sort DESC `
-    --max-items 1 `
+    --cluster "$ProjectName-$EnvironmentName-cluster" `
+    --services $serviceName `
     --output json
 
   if ($LASTEXITCODE -ne 0) {
-    throw "Unable to list the deployed DEV backend task definition. Run aws sso login for the selected profile and verify ECS read access."
+    throw "Unable to read the deployed DEV backend ECS service. Run aws sso login for the selected profile and verify ECS read access."
   }
 
-  $list = $raw | ConvertFrom-Json
-  $taskDefinitionArn = @($list.taskDefinitionArns | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)[0]
+  $result = $raw | ConvertFrom-Json
+  $service = @($result.services | Where-Object { $_.serviceName -eq $serviceName } | Select-Object -First 1)[0]
+  if ($null -eq $service -or $service.status -ne "ACTIVE") {
+    throw "No active DEV backend ECS service was found for $serviceName."
+  }
+  $taskDefinitionArn = [string]$service.taskDefinition
   if ([string]::IsNullOrWhiteSpace($taskDefinitionArn)) {
-    throw "No deployed DEV backend task definition was found for $family."
+    throw "The deployed DEV backend service $serviceName has no task definition."
   }
 
   $taskRaw = & aws ecs describe-task-definition `
@@ -356,7 +359,7 @@ $localEmailFromCandidate = First-NonBlank @(
   $MangoLocalEmailFrom,
   $tfvarsEmailFrom
 )
-$backendContainer = Get-LatestBackendContainerDefinition -ProjectName $projectName -EnvironmentName $environmentName
+$backendContainer = Get-DeployedBackendContainerDefinition -ProjectName $projectName -EnvironmentName $environmentName
 
 $appURL = First-NonBlank @(
   $AppURL,
@@ -375,6 +378,10 @@ $emailWorkQueueURL = Get-ContainerEnvironmentValue -Container $backendContainer 
 if ([string]::IsNullOrWhiteSpace($emailWorkQueueURL)) {
   throw "The deployed DEV backend task does not provide MANGORTS_EMAIL_WORK_QUEUE_URL. Deploy DEV with email_sqs_enabled=true before starting the cloud-integrated local backend."
 }
+$ctrlLoopMCPURL = Get-ContainerEnvironmentValue -Container $backendContainer -Name "MANGORTS_CTRL_LOOP_MCP_URL"
+$ctrlLoopModel = Get-ContainerEnvironmentValue -Container $backendContainer -Name "MANGORTS_CTRL_LOOP_MODEL"
+$deployedOpenAIAPIKeySecretArn = Get-ContainerSecretReference -Container $backendContainer -Name "OPENAI_API_KEY"
+$openAIAPIKeySecretArn = First-NonBlank @($env:OPENAI_API_KEY_SECRET_ARN, $deployedOpenAIAPIKeySecretArn)
 
 $nylasClientID = First-NonBlank @(
   $MangoLocalNylasClientID,
@@ -448,6 +455,11 @@ $env:MANGORTS_ADDR = ":8080"
 $env:MANGORTS_ALLOWED_ORIGIN = $AllowedOrigin
 $env:MANGORTS_APP_URL = $appURL
 $env:MANGORTS_EMAIL_WORK_QUEUE_URL = $emailWorkQueueURL
+# Use the same public endpoint as the deployed worker consuming this queue.
+# The API loads the existing OpenAI secret itself; the launcher copies only its ARN.
+[Environment]::SetEnvironmentVariable("MANGORTS_CTRL_LOOP_MCP_URL", $ctrlLoopMCPURL, "Process")
+[Environment]::SetEnvironmentVariable("MANGORTS_CTRL_LOOP_MODEL", $ctrlLoopModel, "Process")
+[Environment]::SetEnvironmentVariable("OPENAI_API_KEY_SECRET_ARN", $openAIAPIKeySecretArn, "Process")
 if ([string]::IsNullOrWhiteSpace($emailFromAddress)) {
   Remove-Item Env:\MANGORTS_EMAIL_FROM -ErrorAction SilentlyContinue
 } else {
@@ -542,6 +554,11 @@ if ($AwsProfile) {
   Write-Host "AWS profile: $AwsProfile"
 }
 Write-Host "Email SQS: using the deployed DEV work queue."
+if ([string]::IsNullOrWhiteSpace($ctrlLoopMCPURL) -or [string]::IsNullOrWhiteSpace($ctrlLoopModel) -or [string]::IsNullOrWhiteSpace($deployedOpenAIAPIKeySecretArn)) {
+  Write-Host "CTRL Loop: the shared DEV API and email worker need CTRL Loop and OpenAI configuration. Deploy those settings and restart this local API before activating a workbook."
+} else {
+  Write-Host "CTRL Loop: using the deployed DEV API and email worker configuration."
+}
 
 Push-Location (Join-Path $repoRoot "backend")
 try {

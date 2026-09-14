@@ -11,7 +11,8 @@ $discardVariables = $databaseVariables + @(
   "NYLAS_CLIENT_ID", "NYLAS_API_KEY", "NYLAS_API_BASE_URL", "NYLAS_API_KEY_SECRET_ARN", "NYLAS_STATE_SECRET",
   "NYLAS_STATE_SECRET_ARN", "NYLAS_WEBHOOK_SECRET", "NYLAS_WEBHOOK_SECRET_ARN", "NYLAS_GOOGLE_SCOPES", "NYLAS_MICROSOFT_SCOPES",
   "MANGORTS_LOCAL_TUNNEL_URL", "MANGORTS_APP_URL", "MANGORTS_EMAIL_FROM", "MANGORTS_ATTACHMENT_S3_BUCKET",
-  "MANGORTS_LOCAL_NYLAS_WEBHOOK_SECRET", "MANGORTS_LOCAL_NYLAS_WEBHOOK_SECRET_ARN"
+  "MANGORTS_LOCAL_NYLAS_WEBHOOK_SECRET", "MANGORTS_LOCAL_NYLAS_WEBHOOK_SECRET_ARN",
+  "MANGORTS_CTRL_LOOP_MCP_URL", "MANGORTS_CTRL_LOOP_MODEL", "OPENAI_API_KEY_SECRET_ARN", "OPENAI_API_KEY"
 )
 foreach ($name in $discardVariables) {
   [Environment]::SetEnvironmentVariable($name, $null, "Process")
@@ -22,6 +23,8 @@ $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ("mangorts-reset-launcher-" 
 $fixtureLauncher = Join-Path $fixtureRoot "scripts/start_local_cognito_backend.ps1"
 $fixtureTfvars = Join-Path $fixtureRoot "infra/aws-dev/terraform.tfvars"
 $fixtureSecretARN = "arn:aws:secretsmanager:us-west-1:000000000000:secret:fixture-reset-db"
+$fixtureOpenAISecretARN = "arn:aws:secretsmanager:us-west-1:000000000000:secret:fixture-openai"
+$fixtureLocalOpenAISecretARN = "arn:aws:secretsmanager:us-west-1:000000000000:secret:fixture-local-openai"
 $expectedDatabase = @{
   DB_HOST = "fixture-db.invalid"; DB_PORT = "5432"; DB_NAME = "fixture_database"; DB_USER = "fixture_user"
   DB_PASSWORD = "fixture-password"; DB_SSLMODE = "require"; PGPASSWORD = "fixture-password"; PGSSLMODE = "require"
@@ -85,15 +88,30 @@ function aws {
       Assert-Arguments $arguments @("configure", "export-credentials", "--format", "process", "--profile", "mangorts-dev") "normal credential export"
       return '{"AccessKeyId":"fixture-access","SecretAccessKey":"fixture-secret","SessionToken":"fixture-session"}'
     }
-    "ecs list-task-definitions" {
+    "ecs describe-services" {
       if ($global:LauncherReset) { throw "Reset must not inspect ECS" }
-      Assert-Arguments $arguments @("ecs", "list-task-definitions", "--profile", "mangorts-dev", "--region", "us-west-1", "--family-prefix", "fixture-dev-backend", "--sort", "DESC", "--max-items", "1", "--output", "json") "normal ECS lookup"
-      return '{"taskDefinitionArns":["fixture-task"]}'
+      Assert-Arguments $arguments @("ecs", "describe-services", "--profile", "mangorts-dev", "--region", "us-west-1", "--cluster", "fixture-dev-cluster", "--services", "fixture-dev-backend", "--output", "json") "normal ECS lookup must use the deployed service, not a newer undeployed task definition"
+      if ($global:LauncherFailure -eq "ecs-service") { $global:LASTEXITCODE = 1; return }
+      if ($global:LauncherFailure -eq "missing-service") { return '{"services":[],"failures":[{"reason":"MISSING"}]}' }
+      if ($global:LauncherFailure -eq "missing-task") { return '{"services":[{"serviceName":"fixture-dev-backend","status":"ACTIVE","taskDefinition":""}]}' }
+      return '{"services":[{"serviceName":"fixture-dev-backend","status":"ACTIVE","taskDefinition":"fixture-task"}]}'
     }
     "ecs describe-task-definition" {
       if ($global:LauncherReset) { throw "Reset must not inspect ECS" }
       Assert-Arguments $arguments @("ecs", "describe-task-definition", "--profile", "mangorts-dev", "--region", "us-west-1", "--task-definition", "fixture-task", "--output", "json") "normal ECS configuration"
-      return '{"taskDefinition":{"containerDefinitions":[{"name":"backend","environment":[{"name":"MANGORTS_EMAIL_WORK_QUEUE_URL","value":"https://fixture-queue.invalid"}],"secrets":[]}]}}'
+      $container = @{
+        name = "backend"
+        environment = @(@{ name = "MANGORTS_EMAIL_WORK_QUEUE_URL"; value = "https://fixture-queue.invalid" })
+        secrets = @()
+      }
+      if ($global:LauncherCtrlLoopConfigured) {
+        $container.environment += @(
+          @{ name = "MANGORTS_CTRL_LOOP_MCP_URL"; value = "https://fixture-dev-api.invalid/v1/ctrl-loop/mcp" },
+          @{ name = "MANGORTS_CTRL_LOOP_MODEL"; value = "gpt-5.6-sol" }
+        )
+        $container.secrets = @(@{ name = "OPENAI_API_KEY"; valueFrom = $fixtureOpenAISecretARN })
+      }
+      return @{ taskDefinition = @{ containerDefinitions = @($container) } } | ConvertTo-Json -Depth 6 -Compress
     }
     default { throw "Unexpected AWS operation: $operation" }
   }
@@ -113,6 +131,20 @@ function go {
     Assert-Equal $env:ALLOW_INMEMORY_FALLBACK "false" "normal database requirement"
     Assert-Equal $env:MANGORTS_APP_URL "http://fixture-local.invalid" "normal launch must load its local configuration"
     Assert-Equal $env:MANGORTS_EMAIL_WORK_QUEUE_URL "https://fixture-queue.invalid" "normal deployed queue configuration"
+    if ($global:LauncherCtrlLoopConfigured) {
+      Assert-EnvironmentValue "MANGORTS_CTRL_LOOP_MCP_URL" "https://fixture-dev-api.invalid/v1/ctrl-loop/mcp" "deployed MCP endpoint must replace the inherited value"
+      Assert-EnvironmentValue "MANGORTS_CTRL_LOOP_MODEL" "gpt-5.6-sol" "deployed model must replace the inherited value"
+    } else {
+      Assert-EnvironmentValue "MANGORTS_CTRL_LOOP_MCP_URL" "" "missing deployed MCP configuration must clear the inherited value"
+      Assert-EnvironmentValue "MANGORTS_CTRL_LOOP_MODEL" "" "missing deployed model must clear the inherited value"
+    }
+    if ($global:LauncherLocalOpenAIReference) {
+      Assert-EnvironmentValue "OPENAI_API_KEY_SECRET_ARN" $fixtureLocalOpenAISecretARN "explicit local OpenAI configuration must remain available to interactive Mango AI"
+    } elseif ($global:LauncherCtrlLoopConfigured) {
+      Assert-EnvironmentValue "OPENAI_API_KEY_SECRET_ARN" $fixtureOpenAISecretARN "the deployed OpenAI secret reference must reach the API when no local reference exists"
+    } else {
+      Assert-EnvironmentValue "OPENAI_API_KEY_SECRET_ARN" "" "no OpenAI reference may be invented when none is configured"
+    }
   }
   $global:LASTEXITCODE = if ($global:LauncherFailure -eq "go") { 1 } else { 0 }
 }
@@ -126,6 +158,8 @@ function Invoke-LauncherCase {
     [string]$Name,
     [hashtable]$Parameters = @{ ResetProcessMap = $true },
     [string]$Failure = "",
+    [switch]$CtrlLoopConfigured,
+    [switch]$LocalOpenAIReference,
     [string]$EnvironmentName = "dev",
     [string]$ExpectedError = "",
     [string[]]$ExpectedCalls
@@ -133,6 +167,8 @@ function Invoke-LauncherCase {
   $global:LauncherCalls = [Collections.Generic.List[object]]::new()
   $global:LauncherFailure = $Failure
   $global:LauncherReset = [bool]$Parameters.ResetProcessMap
+  $global:LauncherCtrlLoopConfigured = [bool]$CtrlLoopConfigured
+  $global:LauncherLocalOpenAIReference = [bool]$LocalOpenAIReference
   $global:LauncherLocalConfigLoaded = $false
   $global:LASTEXITCODE = 0
   foreach ($environmentVariable in $databaseVariables) {
@@ -143,6 +179,9 @@ function Invoke-LauncherCase {
   $env:AWS_ACCESS_KEY_ID = "fixture-previous-access"
   $env:AWS_SECRET_ACCESS_KEY = "fixture-previous-secret"
   $env:AWS_SESSION_TOKEN = "fixture-previous-session"
+  $env:MANGORTS_CTRL_LOOP_MCP_URL = "https://fixture-old-api.invalid/v1/ctrl-loop/mcp"
+  $env:MANGORTS_CTRL_LOOP_MODEL = "fixture-old-model"
+  [Environment]::SetEnvironmentVariable("OPENAI_API_KEY_SECRET_ARN", $(if ($LocalOpenAIReference) { $fixtureLocalOpenAISecretARN } else { $null }), "Process")
   @"
 project_name = "fixture"
 environment = "$EnvironmentName"
@@ -153,7 +192,8 @@ existing_db_password_secret_arn = "$fixtureSecretARN"
 "@ | Set-Content -LiteralPath $fixtureTfvars
   $previousLocation = (Get-Location).Path
   $failureMessage = ""
-  try { & $fixtureLauncher @Parameters *>&1 | Out-Null } catch { $failureMessage = $_.Exception.Message + " at " + $_.InvocationInfo.PositionMessage }
+  $launcherOutput = ""
+  try { $launcherOutput = & $fixtureLauncher @Parameters *>&1 | Out-String } catch { $failureMessage = $_.Exception.Message + " at " + $_.InvocationInfo.PositionMessage }
   if ($ExpectedError) {
     if ($failureMessage -notlike "*$ExpectedError*") { throw "${Name}: expected error '$ExpectedError', got '$failureMessage'" }
   } elseif ($failureMessage) {
@@ -171,6 +211,12 @@ existing_db_password_secret_arn = "$fixtureSecretARN"
     Assert-Equal $env:AWS_ACCESS_KEY_ID "fixture-previous-access" "$Name must preserve AWS access key"
     Assert-Equal $env:AWS_SECRET_ACCESS_KEY "fixture-previous-secret" "$Name must preserve AWS secret"
     Assert-Equal $env:AWS_SESSION_TOKEN "fixture-previous-session" "$Name must preserve AWS session"
+  } elseif (-not $ExpectedError -and $global:LauncherCtrlLoopConfigured) {
+    Assert-Equal ($launcherOutput -match "CTRL Loop: using the deployed DEV API and email worker configuration") $true "$Name must report shared deployed configuration"
+    Assert-Equal ($launcherOutput -match "need CTRL Loop and OpenAI configuration") $false "$Name must not report missing configuration"
+  } elseif (-not $ExpectedError) {
+    Assert-Equal ($launcherOutput -match "shared DEV API and email worker need CTRL Loop and OpenAI configuration") $true "$Name must explain the missing shared setup while starting the ordinary API"
+    Assert-Equal ($launcherOutput -match "CTRL Loop: using the deployed DEV API and email worker configuration") $false "$Name must not claim CTRL Loop is configured"
   }
   Write-Host "PASS $Name"
 }
@@ -192,7 +238,13 @@ $MangoLocalAppURL = "http://fixture-local.invalid"
   Invoke-LauncherCase -Name "reject different profile" -Parameters @{ ResetProcessMap = $true; AwsProfile = "mangorts-prod" } -ExpectedError "only the mangorts-dev AWS profile" -ExpectedCalls @()
   Invoke-LauncherCase -Name "reject non-dev configuration" -EnvironmentName "prod" -ExpectedError "requires the dev database configuration" -ExpectedCalls @()
   Invoke-LauncherCase -Name "reject stopping backend" -Parameters @{ ResetProcessMap = $true; StopExisting = $true } -ExpectedError "without -StopExisting" -ExpectedCalls @()
-  Invoke-LauncherCase -Name "normal backend launch" -Parameters @{ AwsProfile = "mangorts-dev"; SkipNylas = $true } -ExpectedCalls @("configure export-credentials", "secretsmanager get-secret-value", "ecs list-task-definitions", "ecs describe-task-definition", "go")
+  Invoke-LauncherCase -Name "normal backend launch without CTRL Loop configuration" -Parameters @{ AwsProfile = "mangorts-dev"; SkipNylas = $true } -ExpectedCalls @("configure export-credentials", "secretsmanager get-secret-value", "ecs describe-services", "ecs describe-task-definition", "go")
+  Invoke-LauncherCase -Name "normal backend launch with CTRL Loop configuration" -CtrlLoopConfigured -Parameters @{ AwsProfile = "mangorts-dev"; SkipNylas = $true } -ExpectedCalls @("configure export-credentials", "secretsmanager get-secret-value", "ecs describe-services", "ecs describe-task-definition", "go")
+  Invoke-LauncherCase -Name "normal backend launch preserves local OpenAI with CTRL Loop configuration" -CtrlLoopConfigured -LocalOpenAIReference -Parameters @{ AwsProfile = "mangorts-dev"; SkipNylas = $true } -ExpectedCalls @("configure export-credentials", "secretsmanager get-secret-value", "ecs describe-services", "ecs describe-task-definition", "go")
+  Invoke-LauncherCase -Name "normal backend launch preserves local OpenAI without CTRL Loop configuration" -LocalOpenAIReference -Parameters @{ AwsProfile = "mangorts-dev"; SkipNylas = $true } -ExpectedCalls @("configure export-credentials", "secretsmanager get-secret-value", "ecs describe-services", "ecs describe-task-definition", "go")
+  Invoke-LauncherCase -Name "failed deployed service lookup" -Failure "ecs-service" -Parameters @{ AwsProfile = "mangorts-dev"; SkipNylas = $true } -ExpectedError "Unable to read the deployed DEV backend ECS service" -ExpectedCalls @("configure export-credentials", "secretsmanager get-secret-value", "ecs describe-services")
+  Invoke-LauncherCase -Name "missing deployed service" -Failure "missing-service" -Parameters @{ AwsProfile = "mangorts-dev"; SkipNylas = $true } -ExpectedError "No active DEV backend ECS service" -ExpectedCalls @("configure export-credentials", "secretsmanager get-secret-value", "ecs describe-services")
+  Invoke-LauncherCase -Name "missing deployed task definition" -Failure "missing-task" -Parameters @{ AwsProfile = "mangorts-dev"; SkipNylas = $true } -ExpectedError "has no task definition" -ExpectedCalls @("configure export-credentials", "secretsmanager get-secret-value", "ecs describe-services")
   Write-Host "Process Map launcher tests passed. No external commands or services were called."
 } finally {
   $resolvedFixture = [IO.Path]::GetFullPath($fixtureRoot)

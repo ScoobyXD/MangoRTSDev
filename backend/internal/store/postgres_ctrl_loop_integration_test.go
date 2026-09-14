@@ -216,6 +216,9 @@ func TestPostgresCtrlLoopLifecycle(t *testing.T) {
 			if err := r2.WithCtrlLoopCompanyLock(ctx, otherCompany.CompanyID, func() error { return nil }); err != nil {
 				t.Fatalf("different company blocked: %v", err)
 			}
+			if err := r2.DeleteCtrlLoopJob(ctx, company.CompanyID, owner.UserID, otherConnectionJob.ID); !errors.Is(err, ErrConflict) {
+				t.Fatalf("delete bypassed active workbook lock: %v", err)
+			}
 			return nil
 		}))
 		must(r2.WithCtrlLoopCompanyLock(ctx, company.CompanyID, func() error { return nil }))
@@ -279,8 +282,7 @@ func TestPostgresCtrlLoopLifecycle(t *testing.T) {
 		if after.CurrentAttachmentID != configured.CurrentAttachmentID || after.UnseenUpdates != 0 || after.LastUpdated != nil {
 			t.Fatal("recovered ineligible run changed workbook or count")
 		}
-		_, err = db.Exec(`DELETE FROM ctrl_loop_jobs WHERE company_id=$1 AND job_id=$2`, company.CompanyID, configured.ID)
-		must(err)
+		must(repo.DeleteCtrlLoopJob(ctx, company.CompanyID, owner.UserID, configured.ID))
 	})
 	hash := strings.Repeat("1", 64)
 	work, err := repo.StartCtrlLoopRun(ctx, company.CompanyID, run.ID, hash, time.Now().Add(time.Hour))
@@ -433,18 +435,73 @@ func TestPostgresCtrlLoopLifecycle(t *testing.T) {
 		}
 	})
 	t.Run("owner deletion retires only exact job files", func(t *testing.T) {
-		_, err := db.Exec(`DELETE FROM ctrl_loop_jobs WHERE company_id=$1 AND job_id=$2`, company.CompanyID, otherConnectionJob.ID)
+		privateVersion, currentVersion := makeAttachment(otherConnectionJob), makeAttachment(otherConnectionJob)
+		incoming := makeMessage(secondMailbox, arrival.Add(3*time.Minute))
+		completedRun, _, err := repo.AcceptCtrlLoopRun(ctx, incoming, "inbox-fixture")
 		must(err)
-		var retired bool
-		must(db.QueryRow(`SELECT deleted_timestamp IS NOT NULL FROM attachments WHERE company_id=$1 AND attachment_id=$2`, company.CompanyID, otherConnectionJob.OriginalAttachmentID).Scan(&retired))
-		if !retired {
-			t.Fatal("deleted job leaked its owned workbook")
+		token := strings.Repeat("6", 64)
+		books, err := repo.StartCtrlLoopRun(ctx, company.CompanyID, completedRun.ID, token, time.Now().Add(time.Hour))
+		must(err)
+		if len(books) != 1 || books[0].ID != otherConnectionJob.ID {
+			t.Fatal("deletion fixture has unexpected workbooks")
 		}
-		var preserved bool
-		must(db.QueryRow(`SELECT deleted_timestamp IS NULL FROM attachments WHERE company_id=$1 AND attachment_id=$2`, company.CompanyID, job.OriginalAttachmentID).Scan(&preserved))
-		if !preserved {
-			t.Fatal("another job's original file was retired")
+		must(repo.SetCtrlLoopSource(ctx, company.CompanyID, completedRun.ID, token, link, "delete-fixture"))
+		must(repo.StageCtrlLoopTargets(ctx, token, map[string]json.RawMessage{otherConnectionJob.ID: stage(otherConnectionJob, "C2")}))
+		_, err = repo.FreezeCtrlLoopRun(ctx, company.CompanyID, completedRun.ID, token)
+		must(err)
+		must(repo.CompleteCtrlLoopRun(ctx, company.CompanyID, completedRun.ID, token, []CtrlLoopSavedWorkbook{{
+			JobID: otherConnectionJob.ID, AttachmentID: currentVersion,
+			Changes: []CtrlLoopChange{{Sheet: "WIP", Cell: "C2", Text: "9/13/26 2:31PM", SourceURL: link, ArrivalAt: completedRun.ArrivalAt}},
+		}}))
+		_, err = repo.LinkResourceAttachment(ResourceAttachmentInput{CompanyID: company.CompanyID, ResourceType: "ctrl_loop_job", ResourceID: job.ID, AttachmentID: currentVersion, RelationshipKind: AttachmentRelationshipFileAttachment})
+		must(err)
+		queuedMail := makeMessage(secondMailbox, arrival.Add(4*time.Minute))
+		queuedRun, accepted, err := repo.AcceptCtrlLoopRun(ctx, queuedMail, "inbox-fixture")
+		must(err)
+		if !accepted {
+			t.Fatal("deletion fixture did not queue an incoming email")
 		}
+		if err := repo.DeleteCtrlLoopJob(ctx, company.CompanyID, stranger.UserID, otherConnectionJob.ID); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("another owner can delete job: %v", err)
+		}
+		if err := repo.DeleteCtrlLoopJob(ctx, otherCompany.CompanyID, owner.UserID, otherConnectionJob.ID); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("another company can delete job: %v", err)
+		}
+		must(repo.DeleteCtrlLoopJob(ctx, company.CompanyID, owner.UserID, otherConnectionJob.ID))
+		if err := repo.DeleteCtrlLoopJob(ctx, company.CompanyID, owner.UserID, otherConnectionJob.ID); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("repeated deletion did not report missing job: %v", err)
+		}
+		for _, attachment := range []string{otherConnectionJob.OriginalAttachmentID, privateVersion} {
+			var retired bool
+			must(db.QueryRow(`SELECT deleted_timestamp IS NOT NULL FROM attachments WHERE company_id=$1 AND attachment_id=$2`, company.CompanyID, attachment).Scan(&retired))
+			if !retired {
+				t.Fatal("deleted job leaked an owned workbook version")
+			}
+		}
+		for _, attachment := range []string{job.OriginalAttachmentID, currentVersion} {
+			var preserved bool
+			must(db.QueryRow(`SELECT deleted_timestamp IS NULL FROM attachments WHERE company_id=$1 AND attachment_id=$2`, company.CompanyID, attachment).Scan(&preserved))
+			if !preserved {
+				t.Fatal("another job's owned file was retired")
+			}
+		}
+		if countPostgresRows(t, db, `SELECT count(*) FROM attachment_relationships WHERE company_id=$1 AND resource_type='ctrl_loop_job' AND resource_id=$2 AND deleted_timestamp IS NULL`, company.CompanyID, otherConnectionJob.ID) != 0 {
+			t.Fatal("deleted job left a live attachment owner")
+		}
+		if countPostgresRows(t, db, `SELECT count(*) FROM ctrl_loop_run_jobs WHERE company_id=$1 AND job_id=$2`, company.CompanyID, otherConnectionJob.ID) != 0 || countPostgresRows(t, db, `SELECT count(*) FROM ctrl_loop_changes WHERE company_id=$1 AND job_id=$2`, company.CompanyID, otherConnectionJob.ID) != 0 {
+			t.Fatal("deleted job left work or change history")
+		}
+		if countPostgresRows(t, db, `SELECT count(*) FROM email_messages WHERE company_id=$1 AND email_message_id IN ($2,$3)`, company.CompanyID, completedRun.EmailMessageID, queuedRun.EmailMessageID) != 2 {
+			t.Fatal("job deletion removed a stored source email")
+		}
+		books, err = repo.StartCtrlLoopRun(ctx, company.CompanyID, queuedRun.ID, token, time.Now().Add(time.Hour))
+		must(err)
+		if len(books) != 0 {
+			t.Fatal("queued email recreated a deleted workbook")
+		}
+		_, err = repo.FreezeCtrlLoopRun(ctx, company.CompanyID, queuedRun.ID, token)
+		must(err)
+		must(repo.CompleteCtrlLoopRun(ctx, company.CompanyID, queuedRun.ID, token, nil))
 	})
 	t.Run("missing owner rejects storage and mailbox cascade preserves shared files", func(t *testing.T) {
 		for _, scope := range []struct{ company, job string }{{company.CompanyID, NewUUIDv7String()}, {otherCompany.CompanyID, job.ID}} {

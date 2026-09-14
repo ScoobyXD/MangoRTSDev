@@ -24,6 +24,7 @@
 22. Deleting a CtrlLoop job, including membership or mailbox cascades, must retire all of that exact job's workbook-version links in the deleting transaction.
 23. CtrlLoop owner deletion must mark a workbook pending only when no active same-company owner remains and must preserve unrelated files and owners.
 24. CtrlLoop deletion must use the existing pending markers and cleanup recovery; original/current pointers must never authorize storage deletion.
+25. The explicit CtrlLoop row Delete command must wake attachment cleanup only after its authorized, company-locked deletion succeeds.
 
 ## Process Story
 

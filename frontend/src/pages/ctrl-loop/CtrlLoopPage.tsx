@@ -3,7 +3,7 @@ import { readAuthConfig } from "../../auth/cognitoAuth.js";
 import { fetchCommunicationsAuthURL, type EmailProvider } from "../../modules/communications/communicationsApi.js";
 import { realtimePersonalMailboxScope, subscribeRealtimeScope } from "../../modules/realtime/realtimeWebSocket.js";
 import {
-  ctrlLoopTitle, downloadCtrlLoopWorkbook, listCtrlLoopJobs, saveCtrlLoopJob, uploadCtrlLoopWorkbook,
+  ctrlLoopTitle, deleteCtrlLoopJob, downloadCtrlLoopWorkbook, listCtrlLoopJobs, saveCtrlLoopJob, uploadCtrlLoopWorkbook,
   type CtrlLoopJob, type CtrlLoopJobs,
 } from "../../modules/ctrl-loop/ctrlLoopApi.js";
 import { CtrlLoopEditDialog, CtrlLoopHistoryDialog, CtrlLoopPreviewDialog, loopDate } from "./CtrlLoopDialogs.js";
@@ -94,6 +94,20 @@ export function CtrlLoopPage({ companyID, currentUserID, currentUserEmail }: { c
     finally { setBusy(""); }
   }
 
+  async function removeLoop(job: CtrlLoopJob) {
+    if (busy || !window.confirm(`Permanently delete “${job.name}”, its workbooks, and its update history? This cannot be undone. Source emails will stay in your mailbox.`)) return;
+    setBusy(`delete:${job.id}`); setError("");
+    try {
+      await deleteCtrlLoopJob(companyID, job.id);
+      request.current?.abort();
+      setData((current) => current ? { ...current, jobs: current.jobs.filter((item) => item.id !== job.id) } : current);
+      setEdit((current) => current?.id === job.id ? null : current);
+      setPreview((current) => current?.id === job.id ? null : current);
+      setHistory((current) => current?.id === job.id ? null : current);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not delete the loop."); }
+    finally { setBusy(""); }
+  }
+
   async function download(job: CtrlLoopJob, version: "current" | "original") {
     setBusy(job.id); setError("");
     try {
@@ -131,25 +145,26 @@ export function CtrlLoopPage({ companyID, currentUserID, currentUserEmail }: { c
       </div>
       <div className="ctrl-loop-table-scroll" aria-busy={loading}>
         <table className="ctrl-loop-table">
-          <thead><tr><th>Name</th><th>Instructions</th><th>Status</th><th>Updates</th><th>Workbook</th><th>Download</th><th>Original</th><th>Last updated</th><th>Input</th><th>Output</th></tr></thead>
+          <thead><tr><th>Name</th><th>Instructions</th><th>Status</th><th>Updates</th><th>Workbook</th><th>Download</th><th>Original</th><th>Last updated</th><th>Input</th><th>Output</th><th>Actions</th></tr></thead>
           <tbody>
             {jobs.map((job) => (
               <tr key={job.id} className={dragged === job.id ? "ctrl-loop-drop-active" : undefined}
                 onDragOver={(event) => { if (!job.file_name && !busy && event.dataTransfer.types.includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setDragged(job.id); } }}
                 onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragged(""); }}
                 onDrop={(event) => { event.preventDefault(); setDragged(""); void upload(job, event.dataTransfer.files); }}>
-                <td><button className="ctrl-loop-name" onClick={() => setEdit(job)}>{job.name}</button><small>{data?.mailboxes.find((mailbox) => mailbox.email_connection_id === job.email_connection_id)?.account_email ?? "Mailbox unavailable"}</small></td>
-                <td className="ctrl-loop-instructions"><button aria-label={`Edit instructions for ${job.name}`} onClick={() => setEdit(job)}><span>{job.instructions}</span></button></td>
+                <td><button className="ctrl-loop-name" disabled={!!busy} onClick={() => setEdit(job)}>{job.name}</button><small>{data?.mailboxes.find((mailbox) => mailbox.email_connection_id === job.email_connection_id)?.account_email ?? "Mailbox unavailable"}</small></td>
+                <td className="ctrl-loop-instructions"><button aria-label={`Edit instructions for ${job.name}`} disabled={!!busy} onClick={() => setEdit(job)}><span>{job.instructions}</span></button></td>
                 <td><span className={`ctrl-loop-status ctrl-loop-status-${job.status.toLowerCase().replace(/ /g, "-")}`}><span aria-hidden="true" className="ctrl-loop-status-dot" />{job.status}</span>{job.error && <small className="ctrl-loop-row-error">{job.error}</small>}</td>
-                <td><button className={`ctrl-loop-count${job.unseen_updates ? " ctrl-loop-count-unseen" : ""}`} aria-label={`${job.unseen_updates} unseen updates for ${job.name}`} onClick={() => setHistory(job)}>{job.unseen_updates}</button></td>
-                <td>{job.file_name ? <button className="ctrl-loop-file" onClick={() => setPreview(job)} title="Open read-only workbook preview"><span aria-hidden="true">X</span>{job.file_name}</button> : <label className={`ctrl-loop-upload${busy ? " ctrl-loop-disabled" : ""}`}><input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label={`Upload workbook for ${job.name}`} disabled={!!busy} onChange={(event) => { void upload(job, event.target.files); event.target.value = ""; }} />{busy === job.id ? "Uploading…" : "Upload .xlsx or drop here"}</label>}</td>
+                <td><button className={`ctrl-loop-count${job.unseen_updates ? " ctrl-loop-count-unseen" : ""}`} aria-label={`${job.unseen_updates} unseen updates for ${job.name}`} disabled={!!busy} onClick={() => setHistory(job)}>{job.unseen_updates}</button></td>
+                <td>{job.file_name ? <button className="ctrl-loop-file" disabled={!!busy} onClick={() => setPreview(job)} title="Open read-only workbook preview"><span aria-hidden="true">X</span>{job.file_name}</button> : <label className={`ctrl-loop-upload${busy ? " ctrl-loop-disabled" : ""}`}><input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label={`Upload workbook for ${job.name}`} disabled={!!busy} onChange={(event) => { void upload(job, event.target.files); event.target.value = ""; }} />{busy === job.id ? "Uploading…" : "Upload .xlsx or drop here"}</label>}</td>
                 <td><button disabled={!job.file_name || !!busy} aria-label={`Download latest workbook for ${job.name}`} onClick={() => { void download(job, "current"); }}>↓ Latest</button></td>
                 <td><button disabled={!job.file_name || !!busy} aria-label={`Download original workbook for ${job.name}`} onClick={() => { void download(job, "original"); }}>↓ Original</button></td>
                 <td className="ctrl-loop-last-updated">{loopDate(job.last_updated, job.time_zone)}<small>{job.time_zone}</small></td>
                 <td><span className="ctrl-loop-placeholder">Email</span></td><td><span className="ctrl-loop-placeholder">Excel</span></td>
+                <td><button className="ctrl-loop-delete" aria-label={`Delete loop ${job.name}`} disabled={!!busy} onClick={() => { void removeLoop(job); }}>{busy === `delete:${job.id}` ? "Deleting…" : "Delete"}</button></td>
               </tr>
             ))}
-            {!jobs.length && <tr><td colSpan={10} className="ctrl-loop-empty">{loading ? "Loading automations…" : "Create a new loop, then attach your workbook."}</td></tr>}
+            {!jobs.length && <tr><td colSpan={11} className="ctrl-loop-empty">{loading ? "Loading automations…" : "Create a new loop, then attach your workbook."}</td></tr>}
           </tbody>
         </table>
       </div>

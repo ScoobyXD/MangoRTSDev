@@ -10,6 +10,7 @@
 .ctrl-loop-page button:disabled, .ctrl-loop-dialog button:disabled, .ctrl-loop-disabled { opacity: .45; cursor: default; }
 .ctrl-loop-page .ctrl-loop-primary, .ctrl-loop-dialog .ctrl-loop-primary { background: #17633f; border-color: #17633f; color: #fff; }
 .ctrl-loop-page .ctrl-loop-primary:hover, .ctrl-loop-dialog .ctrl-loop-primary:hover { background: #104f31; }
+.ctrl-loop-page .ctrl-loop-delete { color: #a43629; }
 .ctrl-loop-intro { margin: 24px 0 18px; color: #65766e; line-height: 1.5; }
 .ctrl-loop-intro button { font-size: 12px; background: transparent; }
 .ctrl-loop-create { margin-bottom: 12px; }

@@ -77,6 +77,7 @@ type CtrlLoopRepository interface {
 	ListCtrlLoopJobs(context.Context, string, string) ([]CtrlLoopJob, error)
 	GetCtrlLoopJob(context.Context, string, string, string) (CtrlLoopJob, error)
 	SaveCtrlLoopJob(context.Context, CtrlLoopJob) (CtrlLoopJob, error)
+	DeleteCtrlLoopJob(context.Context, string, string, string) error
 	AttachCtrlLoopWorkbook(context.Context, string, string, string, int64, string) error
 	WithCtrlLoopCompanyLock(context.Context, string, func() error) error
 	HasCtrlLoopJobsForConnection(context.Context, string, string) (bool, error)
