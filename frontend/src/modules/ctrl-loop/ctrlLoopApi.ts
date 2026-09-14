@@ -22,12 +22,6 @@ export type CtrlLoopChange = {
 };
 export type CtrlLoopRun = { id: string; status: string; created_at: string; completed_at?: string; error?: string; changed_cells: number };
 export type CtrlLoopHistory = { changes: CtrlLoopChange[]; runs: CtrlLoopRun[]; has_more: boolean };
-export type CtrlLoopPreviewCell = { address: string; column: number; text: string; hyperlink?: string; formula?: string };
-export type CtrlLoopPreview = {
-  sheets: { name: string; rows: number; columns: number }[];
-  sheet: { name: string; start_row: number; start_column: number; rows: { row: number; cells: CtrlLoopPreviewCell[] }[] };
-};
-
 function path(companyID: string, suffix = "", extra?: Record<string, string>): string {
   return `/v1/ctrl-loop/jobs${suffix}?${new URLSearchParams({ company_id: companyID, ...extra })}`;
 }
@@ -60,8 +54,13 @@ export function downloadCtrlLoopWorkbook(companyID: string, id: string, version:
     timeoutMs: 120_000, consumeResponse: (response) => response.blob(),
   });
 }
-export function previewCtrlLoopWorkbook(companyID: string, id: string, sheet = "", startRow = 1, startColumn = 1, signal?: AbortSignal): Promise<CtrlLoopPreview> {
-  return request(jobPath(companyID, id, "/preview", { sheet, start_row: String(startRow), start_column: String(startColumn), row_count: "40", column_count: "20" }), { signal, timeoutMs: 120_000 });
+export async function getCtrlLoopExcelURL(companyID: string, id: string, signal?: AbortSignal): Promise<string> {
+  const result = await request<{ url: string }>(jobPath(companyID, id, "/open"), { signal });
+  const url = new URL(result.url);
+  if (url.protocol !== "https:" || url.username || url.password || url.hash || /[|\r\n]/.test(result.url)) {
+    throw new Error("Could not open the workbook in Excel.");
+  }
+  return `ms-excel:ofv|u|${url.href}`;
 }
 export function getCtrlLoopHistory(companyID: string, id: string, beforeID = "", signal?: AbortSignal): Promise<CtrlLoopHistory> {
   return request(jobPath(companyID, id, "/changes", beforeID ? { before_id: beforeID } : undefined), { signal });

@@ -20,6 +20,7 @@
 9. Generic resource attachment listing must reject CtrlLoop jobs; provisional and prior intermediate versions must stay private until selected by the committed current pointer.
 10. The owner-only CtrlLoop Delete command must use the existing company workbook lock and job deletion trigger to retire every exact workbook-version link atomically.
 11. A successful CtrlLoop Delete command must wake the existing attachment cleanup consumer and preserve source emails, other jobs and surviving attachment owners.
+12. Issuing a native Excel link must authorize the exact current attachment through its existing job owner and may grant only five minutes of GET access to that immutable file; it must create no relationship, stored token, alternate identity or write permission.
 
 # Current Signup Company Membership Business Logic Laws
 

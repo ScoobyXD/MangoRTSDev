@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { AppModalPortal } from "../../app/AppModalPortal.js";
 import {
-  getCtrlLoopHistory, markCtrlLoopChangesSeen, previewCtrlLoopWorkbook, saveCtrlLoopJob,
-  type CtrlLoopHistory, type CtrlLoopJob, type CtrlLoopPreview,
+  getCtrlLoopHistory, markCtrlLoopChangesSeen, saveCtrlLoopJob,
+  type CtrlLoopHistory, type CtrlLoopJob,
 } from "../../modules/ctrl-loop/ctrlLoopApi.js";
 import type { CtrlLoopEmailTarget } from "../../modules/ctrl-loop/ctrlLoopEmailRoute.js";
 import { CtrlLoopEmailLink, LazyCtrlLoopEmailPreview } from "./CtrlLoopEmailLink.js";
@@ -46,57 +46,6 @@ export function CtrlLoopEditDialog({ companyID, job, onClose, onSaved }: { compa
       {error && <div role="alert" className="ctrl-loop-error">{error}</div>}
       <footer><button type="button" onClick={onClose}>Cancel</button><button className="ctrl-loop-primary" disabled={busy || !name.trim() || !instructions.trim()} type="submit">{busy ? "Saving…" : "Save Loop"}</button></footer>
     </form>
-  </Dialog>;
-}
-
-function columnName(column: number): string {
-  let name = "";
-  for (let current = column; current > 0; current = Math.floor((current - 1) / 26)) name = String.fromCharCode(65 + ((current - 1) % 26)) + name;
-  return name;
-}
-
-export function CtrlLoopPreviewDialog({ companyID, job, onClose }: { companyID: string; job: CtrlLoopJob; onClose: () => void }) {
-  const [sourceEmail, setSourceEmail] = useState<CtrlLoopEmailTarget | null>(null);
-  const [sheetName, setSheetName] = useState("");
-  const [row, setRow] = useState(1);
-  const [column, setColumn] = useState(1);
-  const [preview, setPreview] = useState<CtrlLoopPreview | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    const controller = new AbortController();
-    setLoading(true); setError("");
-    void previewCtrlLoopWorkbook(companyID, job.id, sheetName, row, column, controller.signal)
-      .then((next) => { if (!controller.signal.aborted) setPreview(next); })
-      .catch((cause) => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Could not preview the workbook."); })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    return () => controller.abort();
-  }, [companyID, job.id, sheetName, row, column]);
-  const sheet = preview?.sheets.find((item) => item.name === preview.sheet.name);
-  const columns = sheet ? Array.from({ length: Math.max(0, Math.min(20, sheet.columns - column + 1)) }, (_, index) => column + index) : [];
-  return <Dialog title={job.file_name ?? "Workbook preview"} onClose={onClose} wide>
-    <p className="ctrl-loop-dialog-note">Read-only preview of the latest saved workbook. Click a timestamp to open its source email.</p>
-    <div className="ctrl-loop-preview-toolbar">
-      <label>Worksheet <select disabled={!preview || loading} value={sheetName || preview?.sheet.name || ""} onChange={(event) => { setSheetName(event.target.value); setRow(1); setColumn(1); }}>
-        {preview?.sheets.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
-      </select></label>
-      <span>{sheet ? `${sheet.rows} rows · ${sheet.columns} columns` : ""}</span>
-    </div>
-    {error && <div role="alert" className="ctrl-loop-error">{error}</div>}
-    <div className="ctrl-loop-workbook-scroll" aria-busy={loading}>
-      {loading ? <p role="status">Loading workbook…</p> : !error && <table className="ctrl-loop-workbook">
-        <thead><tr><th aria-label="Row" />{columns.map((index) => <th key={index} scope="col">{columnName(index)}</th>)}</tr></thead>
-        <tbody>{preview?.sheet.rows.map((item) => <tr key={item.row}><th scope="row">{item.row}</th>{item.cells.map((cell) => {
-          return <td key={cell.address} data-cell={cell.address} title={cell.formula ? `${cell.address}: ${cell.formula}` : cell.address}><CtrlLoopEmailLink href={cell.hyperlink} onOpenEmail={setSourceEmail}>{cell.text || cell.formula}</CtrlLoopEmailLink></td>;
-        })}</tr>)}</tbody>
-      </table>}
-      {!loading && !error && !preview?.sheet.rows.length && <p>This worksheet is empty.</p>}
-    </div>
-    <footer className="ctrl-loop-pagination">
-      <div><button disabled={loading || row === 1} onClick={() => setRow(Math.max(1, row - 40))}>Previous rows</button><span>Rows {row}–{Math.min(row + 39, sheet?.rows ?? row)}</span><button disabled={loading || !sheet || row + 40 > sheet.rows} onClick={() => setRow(row + 40)}>Next rows</button></div>
-      <div><button disabled={loading || column === 1} onClick={() => setColumn(Math.max(1, column - 20))}>Previous columns</button><span>{columnName(column)}–{columnName(Math.min(column + 19, sheet?.columns || column))}</span><button disabled={loading || !sheet || column + 20 > sheet.columns} onClick={() => setColumn(column + 20)}>Next columns</button></div>
-    </footer>
-    {sourceEmail && <React.Suspense fallback={<p role="status">Opening source email…</p>}><LazyCtrlLoopEmailPreview key={`${sourceEmail.companyID}/${sourceEmail.emailThreadID}/${sourceEmail.emailMessageID}`} target={sourceEmail} onClose={() => setSourceEmail(null)} /></React.Suspense>}
   </Dialog>;
 }
 

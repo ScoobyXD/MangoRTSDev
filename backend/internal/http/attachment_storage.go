@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"sort"
@@ -33,6 +34,45 @@ type AttachmentObjectStorage interface {
 	Bucket() string
 	PutObject(ctx context.Context, input AttachmentPutObjectInput) error
 	GetObject(ctx context.Context, input AttachmentGetObjectInput) (AttachmentGetObjectOutput, error)
+}
+
+// Desktop Office cannot send Mango's bearer header. Authorize the file in the
+// job handler before issuing a short-lived, GET-only link for the native app.
+type AttachmentDownloadStorage interface {
+	AttachmentObjectStorage
+	PresignGetObject(context.Context, AttachmentPresignGetInput) (AttachmentPresignedRequest, error)
+}
+
+type AttachmentPresignGetInput struct {
+	Key         string
+	Filename    string
+	ContentType string
+}
+
+func (s *S3AttachmentStorage) PresignGetObject(ctx context.Context, input AttachmentPresignGetInput) (AttachmentPresignedRequest, error) {
+	if !s.validObjectInput(input.Key) {
+		return AttachmentPresignedRequest{}, ErrAttachmentStorageUnavailable
+	}
+	_, presigner, err := s.clients(ctx)
+	if err != nil {
+		return AttachmentPresignedRequest{}, err
+	}
+	const expires = 5 * time.Minute
+	now := time.Now().UTC()
+	request, err := presigner.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.Bucket()), Key: aws.String(input.Key),
+		ResponseContentType:        aws.String(input.ContentType),
+		ResponseContentDisposition: aws.String(mime.FormatMediaType("inline", map[string]string{"filename": input.Filename})),
+		ResponseCacheControl:       aws.String("private, no-store"),
+	}, s3.WithPresignExpires(expires), s3.WithPresignClientFromClientOptions(func(options *s3.Options) {
+		// Excel can send only the URL. Do not require the SDK's optional
+		// x-amz-checksum-mode header when signing this native download.
+		options.ResponseChecksumValidation = aws.ResponseChecksumValidationWhenRequired
+	}))
+	if err != nil {
+		return AttachmentPresignedRequest{}, err
+	}
+	return AttachmentPresignedRequest{Method: request.Method, URL: request.URL, ExpiresAt: now.Add(expires)}, nil
 }
 
 // AttachmentDirectUploadStorage is the S3 control plane used by browser
