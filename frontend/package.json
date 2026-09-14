@@ -4,6 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "dev:landing": "vite --config vite.landing.config.ts --host 127.0.0.1",
+    "build:landing": "tsc -p landing/tsconfig.json && vite build --config vite.landing.config.ts",
+    "preview:landing": "vite preview --config vite.landing.config.ts --host 127.0.0.1",
     "dev": "vite",
     "start": "vite",
     "build": "tsc -b && vite build",
