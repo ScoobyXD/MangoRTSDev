@@ -9,10 +9,12 @@
 !backend/internal/attachmentcleanup/*.go
 !backend/internal/attachments/migration/*.go
 !backend/internal/auth/*.go
+!backend/internal/ctrlloopexcel/*.go
 !backend/internal/domain/*.go
 !backend/internal/emailqueue/*.go
 !backend/internal/http/*.go
 !backend/internal/notifications/*.go
+!backend/internal/openaiagents/*.go
 !backend/internal/realtime/*.go
 !backend/internal/sourceaudit/*.go
 !backend/internal/store/*.go
