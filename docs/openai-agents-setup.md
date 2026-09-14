@@ -64,6 +64,8 @@ Choose **Start voice** to start a Live WebRTC connection. Live uses client deleg
 
 ## Progress, cancellation, and recovery
 
+Provider rejection messages retain OpenAI's request ID when available. Known missing scopes, organization verification requirements, model access errors, and billing codes receive specific explanations; unknown HTTP 403 responses report only that OpenAI denied the request. Check both the saved key permissions and its service account's project role for missing scopes. Use the request ID with OpenAI support when the reason remains unknown. Raw provider response text is never saved or logged because it may contain private input or credentials. Fixing access does not prove that a workbook run has completed; verify its saved update history.
+
 There is no AI scheduler or background app worker. After a user starts or continues work, the open panel calls `/advance` to handle pending read tools and refresh progress; mutations still require an action decision. Opening an existing task reads history only. Choose **Continue task** when available to resume handling app tools. Closing the panel stops those requests and ends voice, but OpenAI may finish the current reasoning turn. Use **Cancel task** to stop future app claims and request provider cancellation.
 
 History snapshots load provider items incrementally in pages of ten and keep unfinished messages available for later updates. **Read progress** uses completed read-only receipt counts (`read_counts`); it does not repeatedly return mailbox bodies to the panel. Those counts show completed calls, not proof that all mail was analyzed.

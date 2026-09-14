@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -143,16 +144,31 @@ type ToolResult struct {
 	Error  string
 }
 
-// APIError deliberately excludes provider bodies, which may echo user input
-// or credentials. StatusCode is available for the app's error handling.
-type APIError struct{ StatusCode int }
+// APIError retains only recognized diagnostics and a provider request ID.
+// Raw provider text may echo user input or credentials and must not escape.
+type APIError struct {
+	StatusCode int
+	RequestID  string
+	detail     string
+}
 
 func (e *APIError) Error() string {
+	message := e.summary()
+	if e.RequestID != "" {
+		message += "; OpenAI request ID: " + e.RequestID
+	}
+	return message
+}
+
+func (e *APIError) summary() string {
+	if e.detail != "" {
+		return e.detail
+	}
 	switch e.StatusCode {
 	case http.StatusUnauthorized:
 		return "OpenAI authentication failed; check the backend API key"
 	case http.StatusForbidden:
-		return "OpenAI access denied; check project permissions and Agents API access"
+		return "OpenAI denied this Agents API request (HTTP 403)"
 	case http.StatusNotFound:
 		return "OpenAI model or agent session is unavailable"
 	case http.StatusConflict:
@@ -162,6 +178,54 @@ func (e *APIError) Error() string {
 	default:
 		return fmt.Sprintf("OpenAI Agents API request failed (HTTP %d)", e.StatusCode)
 	}
+}
+
+var providerRequestID = regexp.MustCompile(`^req_[a-f0-9]{32}$`)
+var missingPermissionScopes = regexp.MustCompile(`(?i)missing scopes: ?([a-z._, ]+)`)
+
+func readAPIError(response *http.Response) *APIError {
+	err := &APIError{StatusCode: response.StatusCode}
+	if id := response.Header.Get("X-Request-Id"); providerRequestID.MatchString(id) {
+		err.RequestID = id
+	}
+	var body struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	data, readErr := io.ReadAll(io.LimitReader(response.Body, (64<<10)+1))
+	if readErr != nil || len(data) > 64<<10 || json.Unmarshal(data, &body) != nil {
+		return err
+	}
+	switch body.Error.Code {
+	case "invalid_api_key":
+		err.detail = "OpenAI rejected the backend API key"
+	case "unsupported_country_region_territory":
+		err.detail = "OpenAI rejected the request's country or region"
+	case "model_not_found":
+		err.detail = "OpenAI could not access the configured model; check its name and project access"
+	case "credit_balance_exhausted", "organization_spend_limit_exceeded", "project_spend_limit_exceeded", "organization_usage_limit_exceeded", "insufficient_quota":
+		err.detail = "OpenAI billing or usage restriction: " + body.Error.Code
+	}
+	if response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusUnauthorized {
+		if match := missingPermissionScopes.FindStringSubmatch(body.Error.Message); len(match) == 2 {
+			var scopes []string
+			for _, scope := range strings.FieldsFunc(match[1], func(r rune) bool { return r == ',' || r == ' ' }) {
+				scope = strings.TrimSuffix(scope, ".")
+				switch scope {
+				case "api.agents.read", "api.agents.write", "api.responses.write":
+					scopes = append(scopes, scope)
+				}
+			}
+			if len(scopes) > 0 {
+				err.detail = "OpenAI reports missing permissions: " + strings.Join(scopes, ", ") + "; check both the key and its project role"
+			}
+		} else if strings.Contains(strings.ToLower(body.Error.Message), "organization must be verified") {
+			err.detail = "OpenAI requires organization verification for this request; check OpenAI organization settings"
+		}
+	}
+	return err
 }
 
 func (c *Client) CreateSession(ctx context.Context, model, instructions, input string, tools []FunctionTool, mcps ...MCPTool) (Session, error) {
@@ -421,7 +485,7 @@ func (c *Client) request(ctx context.Context, method, path string, body any, key
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return &APIError{StatusCode: response.StatusCode}
+		return readAPIError(response)
 	}
 	if out == nil {
 		return nil

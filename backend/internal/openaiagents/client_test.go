@@ -200,6 +200,43 @@ func TestProviderErrorsAndRedirectsDoNotExposePrivateData(t *testing.T) {
 	}
 }
 
+func TestProviderRejectionDiagnostics(t *testing.T) {
+	const requestID = "req_0123456789abcdef0123456789abcdef"
+	for _, tc := range []struct {
+		name, body, requestID, want string
+		status                      int
+	}{
+		{"missing scopes", `{"error":{"message":"You have insufficient permissions. Missing scopes: api.agents.read, api.agents.write, api.responses.write. Check private fixture-key."}}`, requestID, "OpenAI reports missing permissions: api.agents.read, api.agents.write, api.responses.write; check both the key and its project role; OpenAI request ID: " + requestID, 403},
+		{"verification", `{"error":{"message":"Your organization must be verified to use this model. private fixture-key"}}`, requestID, "OpenAI requires organization verification for this request; check OpenAI organization settings; OpenAI request ID: " + requestID, 403},
+		{"region", `{"error":{"code":"unsupported_country_region_territory","message":"private fixture-key"}}`, "", "OpenAI rejected the request's country or region", 403},
+		{"model", `{"error":{"code":"model_not_found","message":"private fixture-key"}}`, "", "OpenAI could not access the configured model; check its name and project access", 404},
+		{"billing", `{"error":{"code":"project_spend_limit_exceeded","message":"private fixture-key"}}`, "", "OpenAI billing or usage restriction: project_spend_limit_exceeded", 429},
+		{"unknown", `{"error":{"code":"private-fixture-key","message":"private fixture-key"}}`, requestID, "OpenAI denied this Agents API request (HTTP 403); OpenAI request ID: " + requestID, 403},
+		{"unknown scopes", `{"error":{"message":"Missing scopes: private.fixture_key"}}`, "", "OpenAI denied this Agents API request (HTTP 403)", 403},
+		{"unsafe request ID", `{}`, "req_private-fixture-key", "OpenAI denied this Agents API request (HTTP 403)", 403},
+		{"invalid JSON", `<html>private fixture-key</html>`, requestID, "OpenAI denied this Agents API request (HTTP 403); OpenAI request ID: " + requestID, 403},
+		{"oversized", strings.Repeat(" ", 64<<10) + `{"error":{"code":"model_not_found"}}`, "", "OpenAI denied this Agents API request (HTTP 403)", 403},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("X-Request-Id", tc.requestID)
+				w.WriteHeader(tc.status)
+				io.WriteString(w, tc.body)
+			}))
+			defer server.Close()
+			client := NewClient("fixture-key", server.Client(), server.URL)
+			_, err := client.CreateSession(context.Background(), "gpt-5.6-luna", "instructions", "private", nil)
+			var apiErr *APIError
+			if !errors.As(err, &apiErr) || apiErr.StatusCode != tc.status || err.Error() != tc.want {
+				t.Fatalf("got %v, want %q (HTTP %d)", err, tc.want, tc.status)
+			}
+			if strings.Contains(err.Error(), "private") || strings.Contains(err.Error(), "fixture-key") {
+				t.Fatalf("provider rejection exposed private data: %v", err)
+			}
+		})
+	}
+}
+
 func TestInvalidInputMakesNoProviderRequest(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("invalid input reached provider") }))
 	defer server.Close()
