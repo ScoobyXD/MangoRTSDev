@@ -106,7 +106,7 @@ func TestMCPHTTPIsolationStagingAcrossReplicasAndSavedOutput(t *testing.T) {
 	for _, tool := range listed.Tools {
 		if tool.Name == "update_cells" {
 			schema, _ := json.Marshal(tool.InputSchema)
-			if strings.Contains(string(schema), "source_url") || strings.Contains(string(schema), "arrival_at") {
+			if strings.Contains(string(schema), "source_url") || strings.Contains(string(schema), "arrival_at") || strings.Contains(string(schema), "app_base_url") || strings.Contains(string(schema), "AppBaseURL") {
 				t.Fatal("model can choose link or arrival")
 			}
 		}
@@ -124,7 +124,7 @@ func TestMCPHTTPIsolationStagingAcrossReplicasAndSavedOutput(t *testing.T) {
 		t.Fatalf("stage failed: %v %+v", err, result)
 	}
 	result, err = s2.CallTool(ctx, &mcp.CallToolParams{Name: "read_cells", Arguments: map[string]any{"job_id": "job-1", "sheet": "Offset layout", "start_cell": "F6", "end_cell": "F6"}})
-	if err != nil || result.IsError || !strings.Contains(toolText(result), "9/13/26 2:31PM") || !strings.Contains(toolText(result), "mail.google.com") {
+	if err != nil || result.IsError || !strings.Contains(toolText(result), "9/13/26 2:31PM") || !strings.Contains(toolText(result), "outlook.office.com") {
 		t.Fatalf("second replica missed staged update: %v %+v", err, result)
 	}
 	// The worker saves the staged .xlsx after the managed agent turn succeeds.

@@ -1,6 +1,6 @@
 # CtrlLoop setup
 
-This change prepares code and configuration only. It does not deploy services, apply database changes, create secrets, change Nylas settings, or enable production. Gmail direct links remain unresolved, so the requested Google workflow is incomplete. Microsoft link construction has synthetic tests but still needs signed-in provider qualification.
+This change prepares code and configuration only. It does not deploy services, apply database changes, create secrets, change Nylas settings, or enable production. Gmail uses Mango's authenticated stored-email popup; Microsoft uses a provider link when its native message ID is usable and the popup otherwise. Live mailbox and managed-agent operation still requires dev qualification.
 
 ## Existing services and configuration
 
@@ -13,6 +13,7 @@ CtrlLoop reuses the managed OpenAI Agents client, Nylas grants and ingestion que
 | `ctrl_loop_model` | Default `gpt-5.6-luna`; supported choices are Luna, Terra, Sol, and GPT-6 Astra using their API IDs. |
 | `MANGORTS_CTRL_LOOP_MCP_URL` | Derived in ECS as `https://<existing-api-domain>/v1/ctrl-loop/mcp` only when enabled. API and worker receive the same value. |
 | `MANGORTS_CTRL_LOOP_MODEL` | Derived from `ctrl_loop_model` for both processes. |
+| `MANGORTS_APP_URL` | Existing app origin, already supplied to API and email worker in ECS. Required for exact stored-email popup links. Use HTTPS, or an explicit localhost/loopback HTTP origin for local development. |
 
 Supplying the OpenAI ARN without enabling CtrlLoop makes the existing interactive Mango AI available on the API. Only an enabled CtrlLoop worker receives that key. The API and worker execution-role policies grant `GetSecretValue` for that exact ARN; application task roles gain no general secret access. The supplied secret should use the existing Secrets Manager encryption/access convention; a customer-managed KMS key may require a separately reviewed decrypt grant.
 
@@ -34,8 +35,8 @@ The repo does not assert that these rollout steps have occurred. Any existing de
 
 Use a harmless mailbox fixture to confirm an Outlook hyperlink opens its exact source message from a fresh browser, after the message moves folders, and with multiple provider accounts signed in. Confirm the arrival text is the Nylas mail-server receipt time in the selected timezone, including daylight-saving transitions. The tests use Microsoft native-shaped fixture IDs; they cannot establish actual browser behavior.
 
-Gmail currently fails explicitly before workbook updates. Nylas exposes native Gmail IDs but not a verified browser permalink. A complete Google solution must first establish a usable exact-message or exact-thread link for the connected account, then qualify fresh-browser and multiple-account clicks. Do not substitute a search URL or an internal Mango viewer. [Provider evidence](ctrl-loop-provider-contracts.md) explains the verified fields and unresolved link contract.
+For Gmail, confirm the downloaded workbook's source link opens Mango, survives sign-in, and shows the exact stored source in the popup: subject, sender, recipients, receipt timestamp and body. Test a source belonging to a different currently selected company, a user without access, and a deleted message. Preview/history clicks should open the same popup in place. No extra Google OAuth flow or permalink service is required for this path. [Provider behavior](ctrl-loop-provider-contracts.md) describes the existing source identities and access rules.
 
-With OpenAI, verify a real managed session imports only the explicit Excel tool allowlist, stages the intended cells, terminates successfully, and saves the version atomically. Re-deliver the same email and restart the worker during processing to check duplicate handling. Confirm the downloaded workbook preserves sheets, formulas and unrelated cells while each successful changed cell contains literal arrival text and a clickable provider link. These live OpenAI/provider checks have not been performed with customer data or credentials.
+With OpenAI, verify a real managed session imports only the explicit Excel tool allowlist, stages the intended cells, terminates successfully, and saves the version atomically. Re-deliver the same email and restart the worker during processing to check duplicate handling. Confirm the downloaded workbook preserves sheets, formulas and unrelated cells while each successful changed cell contains literal arrival text and a clickable provider or Mango source link. These live OpenAI/provider checks have not been performed with customer data or credentials.
 
 Setting `ctrl_loop_enabled=false` removes MCP/model configuration and prevents new workbook activation. Existing activated jobs still accept their eligible incoming mail durably; processing reports a configuration error until restored. SQS owns retries and dead-letter delivery; redrive a dead-lettered run only after fixing its cause. Preserve job records and workbook versions; removing settings does not authorize deleting their files. Removing a job through its owner lifecycle marks unowned versions for the existing cleanup process.

@@ -1,3 +1,12 @@
+# Current CtrlLoop Email Reference Business Logic Laws
+
+1. A CtrlLoop Mango source URL must carry the exact existing company, email thread and email message IDs without a surrogate email identity.
+2. Opening a source reference must require current company membership, enabled mailbox access and ownership of the exact stored personal mailbox.
+3. A source reference must read only its exact durable email message and create no email, relationship, permission, snapshot-copy or resource-registry row.
+4. A deleted or missing source must remain unavailable rather than reconstructing it from the provider, another message or quoted thread history.
+5. A source popup must preserve the existing email ownership and attachment authority and must never mark, reply, archive or otherwise mutate the mailbox.
+6. Removing an automation must not delete its stored source email; the email's existing mailbox lifecycle continues to own that message.
+
 # Current CtrlLoop Attachment Relationship Business Logic Laws
 
 1. Each original and saved workbook version must use `attachment_relationships` with the exact same-company `ctrl_loop_job` and `job_id` owner.

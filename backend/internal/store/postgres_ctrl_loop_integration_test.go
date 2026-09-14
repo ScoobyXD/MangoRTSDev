@@ -166,6 +166,11 @@ func TestPostgresCtrlLoopLifecycle(t *testing.T) {
 		if !accepted || !run.ArrivalAt.Equal(arrival) {
 			t.Fatalf("arrival not retained: %+v", run)
 		}
+		var expectedThread string
+		must(db.QueryRow(`SELECT email_thread_id::text FROM email_messages WHERE company_id=$1 AND email_message_id=$2`, company.CompanyID, run.EmailMessageID).Scan(&expectedThread))
+		if run.EmailThreadID != expectedThread {
+			t.Fatalf("accepted run lost exact source thread: %q want %q", run.EmailThreadID, expectedThread)
+		}
 		duplicate, accepted, err := repo.AcceptCtrlLoopRun(ctx, mail, "inbox-fixture")
 		must(err)
 		if !accepted || duplicate.ID != run.ID {
@@ -506,7 +511,7 @@ func TestPostgresCtrlLoopLifecycle(t *testing.T) {
 		must(err)
 		deleted, err := repo.GetCtrlLoopRun(ctx, company.CompanyID, r.ID)
 		must(err)
-		if deleted.EmailMessageID != "" {
+		if deleted.EmailMessageID != "" || deleted.EmailThreadID != "" {
 			t.Fatal("source deletion left stale email identity")
 		}
 		must(repo.DismissCtrlLoopRun(ctx, company.CompanyID, r.ID, "Source email was deleted before processing."))

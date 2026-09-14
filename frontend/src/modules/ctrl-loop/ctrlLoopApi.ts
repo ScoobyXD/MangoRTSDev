@@ -1,5 +1,7 @@
 import { readAuthConfig } from "../../auth/cognitoAuth.js";
 import { requestJSON, type RequestJSONInit } from "../api/requestJSON.js";
+import type { EmailMessage } from "../communications/communicationsApi.js";
+import type { CtrlLoopEmailTarget } from "./ctrlLoopEmailRoute.js";
 
 export type CtrlLoopStatus = "Awaiting file" | "Listening" | "Processing" | "Error";
 export type CtrlLoopJobInput = { name: string; instructions: string; email_connection_id: string; time_zone: string };
@@ -63,6 +65,21 @@ export function getCtrlLoopHistory(companyID: string, id: string, beforeID = "",
 }
 export function markCtrlLoopChangesSeen(companyID: string, id: string, changeIDs: string[], signal?: AbortSignal): Promise<void> {
   return request(jobPath(companyID, id, "/seen"), { method: "POST", json: { change_ids: changeIDs }, signal });
+}
+
+export type CtrlLoopSourceEmail = { message: EmailMessage; account_email: string };
+
+export async function getCtrlLoopSourceEmail(target: CtrlLoopEmailTarget, signal?: AbortSignal): Promise<CtrlLoopSourceEmail> {
+  const result = await request<CtrlLoopSourceEmail>(`/v1/ctrl-loop/emails/${encodeURIComponent(target.emailThreadID)}/${encodeURIComponent(target.emailMessageID)}?${new URLSearchParams({ company_id: target.companyID })}`, { signal });
+  if (!result?.message || result.message.email_message_id !== target.emailMessageID || result.message.email_thread_id !== target.emailThreadID) {
+    throw new Error("This source email is unavailable.");
+  }
+  // An exact-message preview must never expand local replies into a conversation.
+  return { ...result, message: {
+    ...result.message, local_replies: [], detail_fetched: true,
+    // The source preview reads stored files only; provider-only metadata must not trigger a download.
+    attachments: (result.message.attachments ?? []).filter((attachment) => attachment.attachment_id?.trim()),
+  } };
 }
 
 // Workbook contents are untrusted data. Only ordinary web links become clickable.

@@ -233,14 +233,15 @@ func TestCtrlLoopDisconnectedMailboxDoesNotCompleteEmptyWork(t *testing.T) {
 
 func TestCtrlLoopWorkerWithRealWorkbookAndMCP(t *testing.T) {
 	for _, tc := range []struct {
-		name, sheet, poCell, stampCell string
-		related, failStore, failedTurn bool
+		name, sheet, poCell, stampCell, provider string
+		related, failStore, failedTurn           bool
 	}{
-		{"standard", "WIP", "A2", "C2", true, false, false},
-		{"offset layout", "Factory tracking", "D8", "F8", true, false, false},
-		{"unrelated", "WIP", "A2", "C2", false, false, false},
-		{"save failure", "WIP", "A2", "C2", true, true, false},
-		{"failed turn after staging", "WIP", "A2", "C2", true, false, true},
+		{"standard", "WIP", "A2", "C2", "microsoft", true, false, false},
+		{"offset layout", "Factory tracking", "D8", "F8", "microsoft", true, false, false},
+		{"Gmail stored source", "WIP", "A2", "C2", "google", true, false, false},
+		{"unrelated", "WIP", "A2", "C2", "microsoft", false, false, false},
+		{"save failure", "WIP", "A2", "C2", "microsoft", true, true, false},
+		{"failed turn after staging", "WIP", "A2", "C2", "microsoft", true, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -250,9 +251,12 @@ func TestCtrlLoopWorkerWithRealWorkbookAndMCP(t *testing.T) {
 			job := store.CtrlLoopJob{ID: store.NewUUIDv7String(), CompanyID: store.NewUUIDv7String(), UserID: store.NewUUIDv7String(), EmailConnectionID: store.NewUUIDv7String(), Name: "Factory receipts", Instructions: "Stamp factory receipt for the matching PO", TimeZone: "America/Los_Angeles", FileName: "work.xlsx", Revision: 1}
 			job.OriginalAttachmentID = store.NewUUIDv7String()
 			job.CurrentAttachmentID = job.OriginalAttachmentID
-			run := store.CtrlLoopRun{ID: store.NewUUIDv7String(), CompanyID: job.CompanyID, EmailConnectionID: job.EmailConnectionID, EmailMessageID: store.NewUUIDv7String(), ProviderMessageID: "AAkALgAAAAAAHYQDEapmEc2byACqAC", ArrivalAt: arrived, Status: "processing"}
+			run := store.CtrlLoopRun{ID: store.NewUUIDv7String(), CompanyID: job.CompanyID, EmailConnectionID: job.EmailConnectionID, EmailThreadID: store.NewUUIDv7String(), EmailMessageID: store.NewUUIDv7String(), ProviderMessageID: "AAkALgAAAAAAHYQDEapmEc2byACqAC", ArrivalAt: arrived, Status: "processing"}
+			if tc.provider == "google" {
+				run.ProviderMessageID = "19aabcd123def987"
+			}
 			repo := &ctrlLoopWorkerRepo{MemoryRepo: store.NewMemoryRepo(), work: store.CtrlLoopWork{CtrlLoopJob: job, BaseAttachmentID: job.OriginalAttachmentID, BaseRevision: 1, Targets: json.RawMessage(`[]`)}, run: run, hash: ctrlLoopTokenHash(token), files: map[string]domain.Attachment{}}
-			repo.connection = domain.UserEmailConnection{EmailConnectionID: job.EmailConnectionID, CompanyID: job.CompanyID, UserID: job.UserID, GrantID: "synthetic-grant", Provider: "microsoft", AccountEmail: "owner@example.com", Status: "connected", IngestionStartedAt: arrived.Add(-time.Hour)}
+			repo.connection = domain.UserEmailConnection{EmailConnectionID: job.EmailConnectionID, CompanyID: job.CompanyID, UserID: job.UserID, GrantID: "synthetic-grant", Provider: tc.provider, AccountEmail: "owner@example.com", Status: "connected", IngestionStartedAt: arrived.Add(-time.Hour)}
 			f := excelize.NewFile()
 			_ = f.SetSheetName("Sheet1", tc.sheet)
 			_ = f.SetCellStr(tc.sheet, tc.poCell, "PO-742")
@@ -265,7 +269,7 @@ func TestCtrlLoopWorkerWithRealWorkbookAndMCP(t *testing.T) {
 			original := append([]byte{}, buffer.Bytes()...)
 			f.Close()
 			objects := newFakeAttachmentObjectStorage()
-			s := &Server{repo: repo, attachmentStorage: objects, emailQueue: ctrlLoopTestQueue{}, ctrlLoopModel: "gpt-5.6-luna", nylasGate: newNylasRequestGate(0)}
+			s := &Server{repo: repo, attachmentStorage: objects, emailQueue: ctrlLoopTestQueue{}, ctrlLoopModel: "gpt-5.6-luna", appBaseURL: "https://mango.example.com", nylasGate: newNylasRequestGate(0)}
 			// Seed through the real storage path, then choose its exact immutable ID.
 			originalID, err := s.saveCtrlLoopWorkbook(ctx, job, job.FileName, original)
 			if err != nil {
@@ -395,7 +399,11 @@ func TestCtrlLoopWorkerWithRealWorkbookAndMCP(t *testing.T) {
 			text, _ := opened.GetCellValue(tc.sheet, tc.stampCell)
 			linked, link, _ := opened.GetCellHyperLink(tc.sheet, tc.stampCell)
 			formula, _ := opened.GetCellFormula(tc.sheet, "J20")
-			if text != "9/13/26 2:31PM" || !linked || !strings.HasPrefix(link, "https://outlook.office.com/mail/deeplink/read/") || formula != "SUM(1,2)" {
+			expectedLink := "https://outlook.office.com/mail/deeplink/read/" + run.ProviderMessageID
+			if tc.provider == "google" {
+				expectedLink = s.appBaseURL + "/ctrl-loop/email/" + run.CompanyID + "/" + run.EmailThreadID + "/" + run.EmailMessageID
+			}
+			if text != "9/13/26 2:31PM" || !linked || link != expectedLink || formula != "SUM(1,2)" {
 				t.Fatalf("published content incorrect: %q %q %q", text, link, formula)
 			}
 		})

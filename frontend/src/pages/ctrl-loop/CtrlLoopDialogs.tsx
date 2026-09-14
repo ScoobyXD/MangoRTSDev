@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { AppModalPortal } from "../../app/AppModalPortal.js";
 import {
-  getCtrlLoopHistory, markCtrlLoopChangesSeen, previewCtrlLoopWorkbook, saveCtrlLoopJob, workbookWebLink,
+  getCtrlLoopHistory, markCtrlLoopChangesSeen, previewCtrlLoopWorkbook, saveCtrlLoopJob,
   type CtrlLoopHistory, type CtrlLoopJob, type CtrlLoopMailbox, type CtrlLoopPreview,
 } from "../../modules/ctrl-loop/ctrlLoopApi.js";
+import type { CtrlLoopEmailTarget } from "../../modules/ctrl-loop/ctrlLoopEmailRoute.js";
+import { CtrlLoopEmailLink, LazyCtrlLoopEmailPreview } from "./CtrlLoopEmailLink.js";
 
 export function loopDate(value: string | null | undefined, timeZone: string): string {
   if (!value || !Number.isFinite(new Date(value).getTime())) return "—";
@@ -65,6 +67,7 @@ function columnName(column: number): string {
 }
 
 export function CtrlLoopPreviewDialog({ companyID, job, onClose }: { companyID: string; job: CtrlLoopJob; onClose: () => void }) {
+  const [sourceEmail, setSourceEmail] = useState<CtrlLoopEmailTarget | null>(null);
   const [sheetName, setSheetName] = useState("");
   const [row, setRow] = useState(1);
   const [column, setColumn] = useState(1);
@@ -83,7 +86,7 @@ export function CtrlLoopPreviewDialog({ companyID, job, onClose }: { companyID: 
   const sheet = preview?.sheets.find((item) => item.name === preview.sheet.name);
   const columns = sheet ? Array.from({ length: Math.max(0, Math.min(20, sheet.columns - column + 1)) }, (_, index) => column + index) : [];
   return <Dialog title={job.file_name ?? "Workbook preview"} onClose={onClose} wide>
-    <p className="ctrl-loop-dialog-note">Read-only preview of the latest saved workbook. Email links open your provider in a new tab.</p>
+    <p className="ctrl-loop-dialog-note">Read-only preview of the latest saved workbook. Click a timestamp to open its source email.</p>
     <div className="ctrl-loop-preview-toolbar">
       <label>Worksheet <select disabled={!preview || loading} value={sheetName || preview?.sheet.name || ""} onChange={(event) => { setSheetName(event.target.value); setRow(1); setColumn(1); }}>
         {preview?.sheets.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
@@ -95,8 +98,7 @@ export function CtrlLoopPreviewDialog({ companyID, job, onClose }: { companyID: 
       {loading ? <p role="status">Loading workbook…</p> : !error && <table className="ctrl-loop-workbook">
         <thead><tr><th aria-label="Row" />{columns.map((index) => <th key={index} scope="col">{columnName(index)}</th>)}</tr></thead>
         <tbody>{preview?.sheet.rows.map((item) => <tr key={item.row}><th scope="row">{item.row}</th>{item.cells.map((cell) => {
-          const href = workbookWebLink(cell.hyperlink);
-          return <td key={cell.address} data-cell={cell.address} title={cell.formula ? `${cell.address}: ${cell.formula}` : cell.address}>{href ? <a href={href} target="_blank" rel="noopener noreferrer">{cell.text}</a> : cell.text || cell.formula}</td>;
+          return <td key={cell.address} data-cell={cell.address} title={cell.formula ? `${cell.address}: ${cell.formula}` : cell.address}><CtrlLoopEmailLink href={cell.hyperlink} onOpenEmail={setSourceEmail}>{cell.text || cell.formula}</CtrlLoopEmailLink></td>;
         })}</tr>)}</tbody>
       </table>}
       {!loading && !error && !preview?.sheet.rows.length && <p>This worksheet is empty.</p>}
@@ -105,10 +107,12 @@ export function CtrlLoopPreviewDialog({ companyID, job, onClose }: { companyID: 
       <div><button disabled={loading || row === 1} onClick={() => setRow(Math.max(1, row - 40))}>Previous rows</button><span>Rows {row}–{Math.min(row + 39, sheet?.rows ?? row)}</span><button disabled={loading || !sheet || row + 40 > sheet.rows} onClick={() => setRow(row + 40)}>Next rows</button></div>
       <div><button disabled={loading || column === 1} onClick={() => setColumn(Math.max(1, column - 20))}>Previous columns</button><span>{columnName(column)}–{columnName(Math.min(column + 19, sheet?.columns || column))}</span><button disabled={loading || !sheet || column + 20 > sheet.columns} onClick={() => setColumn(column + 20)}>Next columns</button></div>
     </footer>
+    {sourceEmail && <React.Suspense fallback={<p role="status">Opening source email…</p>}><LazyCtrlLoopEmailPreview key={`${sourceEmail.companyID}/${sourceEmail.emailThreadID}/${sourceEmail.emailMessageID}`} target={sourceEmail} onClose={() => setSourceEmail(null)} /></React.Suspense>}
   </Dialog>;
 }
 
 export function CtrlLoopHistoryDialog({ companyID, job, onClose, onSeen }: { companyID: string; job: CtrlLoopJob; onClose: () => void; onSeen: () => Promise<void> }) {
+  const [sourceEmail, setSourceEmail] = useState<CtrlLoopEmailTarget | null>(null);
   const [history, setHistory] = useState<CtrlLoopHistory | null>(null);
   const [cursors, setCursors] = useState<string[]>([""]);
   const [error, setError] = useState("");
@@ -148,12 +152,13 @@ export function CtrlLoopHistoryDialog({ companyID, job, onClose, onSeen }: { com
         <tbody>{history.changes.map((change) => <tr key={change.id} data-change-id={change.id}>
           <td>{change.sheet} · <strong>{change.cell}</strong>{!change.seen && <span className="ctrl-loop-new">New</span>}</td>
           <td>{change.previous_text || "—"}</td>
-          <td>{workbookWebLink(change.source_url) ? <a href={workbookWebLink(change.source_url)} target="_blank" rel="noopener noreferrer" title={change.arrival_at}>{change.text}</a> : change.text}</td>
+          <td><CtrlLoopEmailLink href={change.source_url} title={change.arrival_at} onOpenEmail={setSourceEmail}>{change.text}</CtrlLoopEmailLink></td>
           <td>{loopDate(change.saved_at, job.time_zone)}</td>
         </tr>)}</tbody>
       </table>{!history.changes.length && <p className="ctrl-loop-empty">No workbook changes yet.</p>}</div>
       <footer className="ctrl-loop-pagination"><button disabled={cursors.length === 1} onClick={() => setCursors(cursors.slice(0, -1))}>Newer changes</button><span>Page {cursors.length}</span><button disabled={!history.has_more || !history.changes.length} onClick={() => setCursors([...cursors, history.changes[history.changes.length - 1].id])}>Older changes</button></footer>
       <details className="ctrl-loop-runs"><summary>Recent processing history</summary>{history.runs.length ? <ol>{history.runs.map((run) => <li key={run.id}><strong>{loopDate(run.completed_at || run.created_at, job.time_zone)}</strong> · {run.status} · {run.changed_cells} changed cells{run.error && <p className="ctrl-loop-row-error">{run.error}</p>}</li>)}</ol> : <p>No emails processed yet.</p>}</details>
     </>}
+    {sourceEmail && <React.Suspense fallback={<p role="status">Opening source email…</p>}><LazyCtrlLoopEmailPreview key={`${sourceEmail.companyID}/${sourceEmail.emailThreadID}/${sourceEmail.emailMessageID}`} target={sourceEmail} onClose={() => setSourceEmail(null)} /></React.Suspense>}
   </Dialog>;
 }

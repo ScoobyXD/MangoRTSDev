@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 	_ "time/tzdata"
@@ -306,6 +307,42 @@ func (stamp Stamp) DisplayText() (string, error) {
 	return stamp.ArrivalAt.In(zone).Format("1/2/06 3:04PM"), nil
 }
 
+const sourceUUID = `[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`
+
+var mangoSourcePath = regexp.MustCompile(`^/ctrl-loop/email/` + sourceUUID + `/` + sourceUUID + `/` + sourceUUID + `$`)
+
+func (stamp Stamp) validateSourceURL() error {
+	invalid := errors.New("source link must open a verified email provider or the configured Mango email page")
+	u, err := url.Parse(stamp.SourceURL)
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || strings.Contains(stamp.SourceURL, "#") {
+		return invalid
+	}
+	if u.Scheme == "https" && strings.EqualFold(u.Host, u.Hostname()) {
+		switch strings.ToLower(u.Hostname()) {
+		case "mail.google.com", "outlook.office.com", "outlook.office365.com", "outlook.live.com":
+			return nil
+		}
+	}
+	base, err := url.Parse(stamp.AppBaseURL)
+	if err != nil || base.Host == "" || base.User != nil || base.RawQuery != "" || base.ForceQuery || strings.Contains(stamp.AppBaseURL, "#") || (base.Path != "" && base.Path != "/") {
+		return invalid
+	}
+	if base.Scheme != "https" {
+		if base.Scheme != "http" {
+			return invalid
+		}
+		switch strings.ToLower(base.Hostname()) {
+		case "localhost", "127.0.0.1", "::1":
+		default:
+			return invalid
+		}
+	}
+	if u.Scheme != base.Scheme || !strings.EqualFold(u.Host, base.Host) || u.EscapedPath() != u.Path || !mangoSourcePath.MatchString(u.Path) {
+		return invalid
+	}
+	return nil
+}
+
 // Apply writes literal text and a native Excel relationship, never a HYPERLINK
 // formula. It returns the original bytes exactly when nothing actually changes.
 func Apply(data []byte, targets []CellTarget, stamp Stamp) ([]byte, []CellChange, error) {
@@ -313,14 +350,8 @@ func Apply(data []byte, targets []CellTarget, stamp Stamp) ([]byte, []CellChange
 	if err != nil {
 		return nil, nil, err
 	}
-	u, err := url.Parse(stamp.SourceURL)
-	if err != nil || u.Scheme != "https" || u.User != nil || u.Port() != "" {
-		return nil, nil, errors.New("a verified HTTPS email provider link is required")
-	}
-	switch strings.ToLower(u.Hostname()) {
-	case "mail.google.com", "outlook.office.com", "outlook.office365.com", "outlook.live.com":
-	default:
-		return nil, nil, errors.New("source link must open Gmail or Outlook")
+	if err := stamp.validateSourceURL(); err != nil {
+		return nil, nil, err
 	}
 	f, err := open(data)
 	if err != nil {

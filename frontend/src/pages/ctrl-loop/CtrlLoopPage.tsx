@@ -127,7 +127,7 @@ export function CtrlLoopPage({ companyID, currentUserID }: { companyID: string; 
           </tbody>
         </table>
       </div>
-      <p className="ctrl-loop-footnote">Each changed cell shows the email’s arrival time and links directly to its source in your email provider. Your original upload stays available.</p>
+      <p className="ctrl-loop-footnote">Each changed cell shows the email’s arrival time and links to its source email. Your original upload stays available.</p>
       {edit && <CtrlLoopEditDialog companyID={companyID} job={edit === "new" ? undefined : edit} mailboxes={data?.mailboxes ?? []} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); void refresh(); }} />}
       {preview && <CtrlLoopPreviewDialog companyID={companyID} job={preview} onClose={() => setPreview(null)} />}
       {history && <CtrlLoopHistoryDialog companyID={companyID} job={history} onClose={() => setHistory(null)} onSeen={refresh} />}

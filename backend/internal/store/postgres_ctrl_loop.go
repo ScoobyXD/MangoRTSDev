@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const ctrlJobColumns = `j.job_id,j.company_id,j.user_id,j.name,j.instructions,j.email_connection_id,c.provider,j.time_zone,
+const ctrlJobColumns = `j.job_id,j.company_id,j.user_id,j.name,j.instructions,j.email_connection_id,j.time_zone,
 CASE WHEN j.current_attachment_id IS NULL THEN 'Awaiting file' WHEN c.status<>'connected' THEN 'Error'
 WHEN j.status='Processing' AND NOT EXISTS(SELECT 1 FROM ctrl_loop_run_jobs w JOIN ctrl_loop_runs r USING(company_id,run_id) WHERE w.company_id=j.company_id AND w.job_id=j.job_id AND r.status IN ('processing','saving') AND r.token_expires_at>now()) THEN 'Error' ELSE j.status END,
 CASE WHEN c.status<>'connected' THEN 'Reconnect this mailbox in Mango Mail.' WHEN j.status='Processing' AND NOT EXISTS(SELECT 1 FROM ctrl_loop_run_jobs w JOIN ctrl_loop_runs r USING(company_id,run_id) WHERE w.company_id=j.company_id AND w.job_id=j.job_id AND r.status IN ('processing','saving') AND r.token_expires_at>now()) THEN 'The worker stopped before saving. The durable queue will retry.' ELSE j.last_error END,
@@ -24,7 +24,7 @@ type ctrlScanner interface{ Scan(...any) error }
 
 func scanCtrlJob(row ctrlScanner) (CtrlLoopJob, error) {
 	var j CtrlLoopJob
-	err := row.Scan(&j.ID, &j.CompanyID, &j.UserID, &j.Name, &j.Instructions, &j.EmailConnectionID, &j.Provider, &j.TimeZone, &j.Status, &j.Error, &j.OriginalAttachmentID, &j.CurrentAttachmentID, &j.FileName, &j.UnseenUpdates, &j.LastUpdated, &j.ActivatedAt, &j.Revision)
+	err := row.Scan(&j.ID, &j.CompanyID, &j.UserID, &j.Name, &j.Instructions, &j.EmailConnectionID, &j.TimeZone, &j.Status, &j.Error, &j.OriginalAttachmentID, &j.CurrentAttachmentID, &j.FileName, &j.UnseenUpdates, &j.LastUpdated, &j.ActivatedAt, &j.Revision)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
 	}
@@ -118,11 +118,11 @@ func (r *PostgresRepo) WithCtrlLoopCompanyLock(ctx context.Context, c string, fn
 	return fn()
 }
 
-const ctrlRunColumns = `r.run_id,r.company_id,r.email_connection_id,coalesce(r.email_message_id::text,''),coalesce(m.provider_message_id,''),r.status,r.last_error,r.arrival_at,r.source_url,r.session_id,r.created_at,r.completed_at,r.changed_cells`
+const ctrlRunColumns = `r.run_id,r.company_id,r.email_connection_id,coalesce(r.email_thread_id::text,''),coalesce(r.email_message_id::text,''),coalesce(m.provider_message_id,''),r.status,r.last_error,r.arrival_at,r.source_url,r.session_id,r.created_at,r.completed_at,r.changed_cells`
 
 func scanCtrlRun(row ctrlScanner) (CtrlLoopRun, error) {
 	var run CtrlLoopRun
-	err := row.Scan(&run.ID, &run.CompanyID, &run.EmailConnectionID, &run.EmailMessageID, &run.ProviderMessageID, &run.Status, &run.Error, &run.ArrivalAt, &run.SourceURL, &run.SessionID, &run.CreatedAt, &run.CompletedAt, &run.ChangedCells)
+	err := row.Scan(&run.ID, &run.CompanyID, &run.EmailConnectionID, &run.EmailThreadID, &run.EmailMessageID, &run.ProviderMessageID, &run.Status, &run.Error, &run.ArrivalAt, &run.SourceURL, &run.SessionID, &run.CreatedAt, &run.CompletedAt, &run.ChangedCells)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
 	}

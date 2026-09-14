@@ -6300,7 +6300,7 @@ function EmailConversationMessage({ message, companyID, sharedInboxID, accountEm
             </div>
           </div>
         )}
-        {expanded && hasCalendarInvite && (
+        {expanded && hasCalendarInvite && showReplyActions && (
           <CalendarInviteCard
             messageID={message.id}
             companyID={companyID}
@@ -6605,9 +6605,10 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
   );
 }
 
-export function EmailReferencePreviewModal({ message, threadMessages, resources, nodes, companyID, sharedInboxID, accountEmail, loading, error, onLoadMessageBody, onOpenNode, onOpenLogicGate, onClose }: {
+export function EmailReferencePreviewModal({ message, threadMessages, singleMessage = false, resources, nodes, companyID, sharedInboxID, accountEmail, loading, error, onLoadMessageBody, onOpenNode, onOpenLogicGate, onClose }: {
   message: EmailMessage | null;
   threadMessages: EmailMessage[];
+  singleMessage?: boolean;
   resources: Array<{ kind: "node" | "logic_gate"; id: string; label: string }>;
   nodes: NodeRecord[];
   companyID: string;
@@ -6649,7 +6650,7 @@ export function EmailReferencePreviewModal({ message, threadMessages, resources,
         <section
           role="dialog"
           aria-modal="true"
-          aria-label={message?.subject ? `Email thread: ${message.subject}` : "Email thread preview"}
+          aria-label={message?.subject ? `${singleMessage ? "Email" : "Email thread"}: ${message.subject}` : singleMessage ? "Source email preview" : "Email thread preview"}
           data-email-reference-preview="true"
           onPointerDown={(event) => event.stopPropagation()}
           style={{ position: "relative", width: fullscreen ? `calc(100vw - ${NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX * 2}px)` : "min(1180px, calc(100vw - 32px))", height: fullscreen ? `calc(100dvh - ${NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX * 2}px)` : "min(860px, calc(100dvh - 32px))", minHeight: "min(360px, calc(100dvh - 32px))", display: "grid", gridTemplateRows: error ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)", gap: 8, padding: "14px 12px 12px", boxSizing: "border-box", border: "1px solid rgba(148,163,184,0.26)", borderRadius: fullscreen ? 14 : 16, background: "linear-gradient(180deg, #fbfbfd 0%, #f2f4f8 100%)", boxShadow: "0 24px 70px rgba(15,23,42,0.28)", overflow: "hidden" }}
@@ -6683,7 +6684,7 @@ export function EmailReferencePreviewModal({ message, threadMessages, resources,
           {message ? (
             <MessageDetail
               message={message}
-              threadMessages={threadMessages}
+              threadMessages={singleMessage ? [message] : threadMessages}
               nodes={nodes}
               companyID={companyID}
               sharedInboxID={sharedInboxID}
@@ -6710,7 +6711,7 @@ export function EmailReferencePreviewModal({ message, threadMessages, resources,
             />
           ) : (
             <div style={{ minHeight: 0, display: "grid", placeItems: "center", color: error ? "#991b1b" : "rgba(71,85,105,0.78)", fontSize: 12, fontWeight: 850 }}>
-              {loading ? "Loading email thread" : "Email thread unavailable"}
+              {loading ? (singleMessage ? "Loading source email" : "Loading email thread") : (singleMessage ? "Source email unavailable" : "Email thread unavailable")}
             </div>
           )}
         </section>

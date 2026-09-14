@@ -18,6 +18,8 @@ type Stamp struct {
 	ArrivalAt time.Time `json:"arrival_at"`
 	Timezone  string    `json:"timezone"`
 	SourceURL string    `json:"source_url"`
+	// AppBaseURL comes only from the server's configured Mango application URL.
+	AppBaseURL string `json:"-"`
 }
 
 type CellTarget struct {

@@ -15,7 +15,6 @@ type CtrlLoopJob struct {
 	Name                 string     `json:"name"`
 	Instructions         string     `json:"instructions"`
 	EmailConnectionID    string     `json:"email_connection_id"`
-	Provider             string     `json:"-"`
 	TimeZone             string     `json:"time_zone"`
 	Status               string     `json:"status"`
 	Error                string     `json:"error"`
@@ -32,6 +31,7 @@ type CtrlLoopRun struct {
 	ID                string     `json:"id"`
 	CompanyID         string     `json:"-"`
 	EmailConnectionID string     `json:"-"`
+	EmailThreadID     string     `json:"-"`
 	EmailMessageID    string     `json:"-"`
 	ProviderMessageID string     `json:"-"`
 	Status            string     `json:"status"`

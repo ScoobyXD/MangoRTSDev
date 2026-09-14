@@ -20,18 +20,28 @@ func TestNylasEmailSourceUsesExactNativeMessageAndArrival(t *testing.T) {
 	}
 }
 
-func TestNylasEmailSourceRejectsUnverifiedLinksAndMissingMetadata(t *testing.T) {
+func TestNylasEmailSourceRequiresStoredViewWhenProviderLinkUnavailable(t *testing.T) {
+	for _, tc := range []struct{ provider, id string }{
+		{"google", "19aabcd123def987"},
+		{"microsoft", "mango-internal-uuid"},
+		{"microsoft", "11111111-1111-4111-8111-111111111111"},
+		{"microsoft", strings.Repeat("A", 2049)},
+	} {
+		source, err := resolveNylasEmailSource(tc.provider, "owner@example.com", NylasMessage{ID: tc.id, Date: 1789344660})
+		if err != nil || source.URL != "" || source.ArrivedAt.Unix() != 1789344660 {
+			t.Fatalf("missing provider link must retain arrival for stored view: %+v %v", source, err)
+		}
+	}
+}
+
+func TestNylasEmailSourceRejectsMissingMetadata(t *testing.T) {
 	message := NylasMessage{ID: "AAkALgAAAAAAHYQDEapmEc2byACqAC", Date: 1789344660}
 	for _, test := range []struct {
 		name, provider, mailbox string
 		message                 NylasMessage
 	}{
-		{"Gmail without permalink", "google", "person@gmail.com", NylasMessage{ID: "19aabcd123def987", ThreadID: "19aabcd123def123", Date: message.Date}},
 		{"unsupported provider", "imap", "person@example.com", message},
 		{"missing arrival", "microsoft", "person@example.com", NylasMessage{ID: message.ID}},
-		{"invalid native ID", "microsoft", "person@example.com", NylasMessage{ID: "mango-internal-uuid", Date: message.Date}},
-		{"internal UUID is not native", "microsoft", "person@example.com", NylasMessage{ID: "11111111-1111-4111-8111-111111111111", Date: message.Date}},
-		{"oversized native ID", "microsoft", "person@example.com", NylasMessage{ID: strings.Repeat("A", 2049), Date: message.Date}},
 		{"missing mailbox", "microsoft", "", message},
 	} {
 		t.Run(test.name, func(t *testing.T) {

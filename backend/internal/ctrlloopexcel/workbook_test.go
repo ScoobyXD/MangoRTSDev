@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"crypto/sha256"
+	"encoding/json"
 	"io"
 	"reflect"
 	"strings"
@@ -60,7 +61,92 @@ func fixture(t *testing.T) []byte {
 }
 
 func arrivalStamp() Stamp {
-	return Stamp{ArrivalAt: time.Date(2026, 9, 13, 21, 31, 0, 0, time.UTC), Timezone: "America/Los_Angeles", SourceURL: "https://mail.google.com/mail/?authuser=planner%40example.com#all/18abc123"}
+	return Stamp{ArrivalAt: time.Date(2026, 9, 13, 21, 31, 0, 0, time.UTC), Timezone: "America/Los_Angeles", SourceURL: "https://outlook.office.com/mail/planner%40example.com/deeplink/read/native-message"}
+}
+
+const mangoEmailPath = "/ctrl-loop/email/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/33333333-3333-4333-8333-333333333333"
+
+func TestApplyWritesTrustedMangoEmailHyperlinks(t *testing.T) {
+	original := fixture(t)
+	hash := sha256.Sum256(original)
+	for _, base := range []string{"https://mango.example", "https://mango.example:8443", "http://localhost:5173", "http://127.0.0.1:5173", "http://[::1]:5173"} {
+		t.Run(base, func(t *testing.T) {
+			stamp := arrivalStamp()
+			stamp.AppBaseURL = base + "/"
+			stamp.SourceURL = base + mangoEmailPath
+			updated, changes, err := Apply(original, []CellTarget{{Sheet: "WIP", Cell: "C2"}}, stamp)
+			if err != nil {
+				t.Fatal(err)
+			}
+			book, err := open(updated)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer book.Close()
+			text, _ := book.GetCellValue("WIP", "C2")
+			formula, _ := book.GetCellFormula("WIP", "C2")
+			kind, _ := book.GetCellType("WIP", "C2")
+			linked, href, _ := book.GetCellHyperLink("WIP", "C2")
+			if text != "9/13/26 2:31PM" || formula != "" || (kind != excelize.CellTypeSharedString && kind != excelize.CellTypeInlineString) || !linked || href != stamp.SourceURL || len(changes) != 1 || changes[0].SourceURL != stamp.SourceURL {
+				t.Fatalf("invalid Mango timestamp hyperlink: %q %q %d %v %q %+v", text, formula, kind, linked, href, changes)
+			}
+			if !bytes.Contains(zipPart(t, updated, "xl/worksheets/_rels/sheet1.xml.rels"), []byte(`Target="`+stamp.SourceURL+`"`)) {
+				t.Fatal("saved workbook lacks the actual Mango hyperlink relationship")
+			}
+			encoded, err := json.Marshal(stamp)
+			if err != nil || bytes.Contains(encoded, []byte("AppBaseURL")) || bytes.Contains(encoded, []byte("app_base_url")) {
+				t.Fatalf("server app configuration leaked into stamp JSON: %s %v", encoded, err)
+			}
+			if sha256.Sum256(original) != hash {
+				t.Fatal("Mango hyperlink changed original uploaded bytes")
+			}
+		})
+	}
+}
+
+func TestApplyRejectsUntrustedSourceLinks(t *testing.T) {
+	data := fixture(t)
+	for _, tc := range []struct{ name, base, link string }{
+		{"unconfigured app", "", "https://mango.example" + mangoEmailPath},
+		{"other app origin", "https://mango.example", "https://evil.example" + mangoEmailPath},
+		{"app lookalike host", "https://mango.example", "https://mango.example.evil.test" + mangoEmailPath},
+		{"different app port", "https://mango.example", "https://mango.example:8443" + mangoEmailPath},
+		{"different local port", "http://localhost:5173", "http://localhost:5174" + mangoEmailPath},
+		{"different loopback host", "http://localhost:5173", "http://127.0.0.1:5173" + mangoEmailPath},
+		{"remote HTTP configuration", "http://mango.example", "http://mango.example" + mangoEmailPath},
+		{"lookalike loopback configuration", "http://localhost.evil.test", "http://localhost.evil.test" + mangoEmailPath},
+		{"HTTP downgrade", "https://mango.example", "http://mango.example" + mangoEmailPath},
+		{"app credentials", "https://mango.example", "https://user:pass@mango.example" + mangoEmailPath},
+		{"app query", "https://mango.example", "https://mango.example" + mangoEmailPath + "?next=https://evil.example"},
+		{"app empty query", "https://mango.example", "https://mango.example" + mangoEmailPath + "?"},
+		{"app fragment", "https://mango.example", "https://mango.example" + mangoEmailPath + "#other"},
+		{"app empty fragment", "https://mango.example", "https://mango.example" + mangoEmailPath + "#"},
+		{"other app path", "https://mango.example", "https://mango.example/email/33333333-3333-4333-8333-333333333333"},
+		{"invalid UUID", "https://mango.example", "https://mango.example" + strings.Replace(mangoEmailPath, "33333333-3333-4333-8333-333333333333", "not-an-id", 1)},
+		{"extra path component", "https://mango.example", "https://mango.example" + mangoEmailPath + "/other"},
+		{"missing UUID", "https://mango.example", "https://mango.example" + strings.TrimSuffix(mangoEmailPath, "/33333333-3333-4333-8333-333333333333")},
+		{"encoded path", "https://mango.example", "https://mango.example" + strings.Replace(mangoEmailPath, "ctrl-loop", "%63trl-loop", 1)},
+		{"encoded slash", "https://mango.example", "https://mango.example" + strings.Replace(mangoEmailPath, "/email/", "%2Femail/", 1)},
+		{"dot path", "https://mango.example", "https://mango.example/other/.." + mangoEmailPath},
+		{"config credentials", "https://user@mango.example", "https://mango.example" + mangoEmailPath},
+		{"config query", "https://mango.example?x=1", "https://mango.example" + mangoEmailPath},
+		{"config fragment", "https://mango.example#x", "https://mango.example" + mangoEmailPath},
+		{"config path", "https://mango.example/other", "https://mango.example" + mangoEmailPath},
+		{"provider credentials", "", "https://user@outlook.office.com/mail/id"},
+		{"provider query", "", "https://outlook.office.com/mail/id?other=1"},
+		{"provider fragment", "", "https://mail.google.com/mail/#all/id"},
+		{"provider port", "", "https://outlook.office.com:443/mail/id"},
+		{"provider empty port", "", "https://outlook.office.com:/mail/id"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stamp := arrivalStamp()
+			stamp.AppBaseURL, stamp.SourceURL = tc.base, tc.link
+			updated, changes, err := Apply(data, []CellTarget{{Sheet: "WIP", Cell: "C2"}}, stamp)
+			if err == nil || updated != nil || changes != nil {
+				t.Fatalf("untrusted link accepted: %s %+v %v", tc.link, changes, err)
+			}
+		})
+	}
 }
 
 func TestApplyArrivalAcrossDaylightSavingTransitions(t *testing.T) {

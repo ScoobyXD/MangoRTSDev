@@ -65,7 +65,7 @@ func (s *Server) ctrlLoopConnection(ctx context.Context, c, u, id string) (domai
 	if err != nil {
 		return connection, err
 	}
-	if connection.CompanyID != c || connection.Scope == "shared" || connection.UserID != u {
+	if connection.CompanyID != c || connection.EmailConnectionID != id || connection.Scope == "shared" || connection.UserID != u {
 		return connection, store.ErrNotFound
 	}
 	user, err := s.repo.GetAuthUserByIDContext(ctx, u)
@@ -78,6 +78,9 @@ func (s *Server) ctrlLoopConnection(ctx context.Context, c, u, id string) (domai
 	return connection, nil
 }
 func (s *Server) ctrlLoopSetupError() string {
+	if _, err := ctrlLoopAppOrigin(s.appBaseURL); err != nil {
+		return err.Error()
+	}
 	if s.ctrlLoopMCPURL == "" {
 		return "Configure MANGORTS_CTRL_LOOP_MCP_URL on the API and email worker before activating a workbook."
 	}
@@ -98,11 +101,7 @@ func (s *Server) ctrlLoopSetupError() string {
 }
 func (s *Server) ctrlLoopJobView(j store.CtrlLoopJob) store.CtrlLoopJob {
 	if j.CurrentAttachmentID != "" {
-		message := ctrlLoopProviderError(j.Provider)
-		if message == "" {
-			message = s.ctrlLoopSetupError()
-		}
-		if message != "" {
+		if message := s.ctrlLoopSetupError(); message != "" {
 			j.Status = "Error"
 			j.Error = message
 		}

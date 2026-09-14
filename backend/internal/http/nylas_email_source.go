@@ -18,19 +18,8 @@ type NylasEmailSource struct {
 var microsoftNativeMessageID = regexp.MustCompile(`^[A-Za-z0-9_+/=-]+$`)
 var uuidMessageID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// Provider readiness can be shown before the user uploads a workbook. It is
-// also checked at execution so an unsupported link cannot produce updates.
-func ctrlLoopProviderError(provider string) string {
-	switch provider {
-	case "microsoft":
-		return ""
-	case "google":
-		return "Gmail direct source links are unavailable through the connected Nylas API; a verified Gmail permalink is required before workbook updates"
-	default:
-		return "source email links are unavailable for this provider"
-	}
-}
-
+// An empty URL means the worker must link to Mango's exact stored email view.
+// The source timestamp remains required regardless of where the email opens.
 func resolveNylasEmailSource(provider, mailbox string, message NylasMessage) (NylasEmailSource, error) {
 	address, err := mail.ParseAddress(mailbox)
 	if err != nil || address.Address != mailbox {
@@ -50,18 +39,14 @@ func resolveNylasEmailSource(provider, mailbox string, message NylasMessage) (Ny
 		// https://developer.nylas.com/docs/dev-guide/best-practices/search/
 		// Microsoft staff documents this exact-message route:
 		// https://learn.microsoft.com/en-my/answers/questions/5508811/outlook-web-deeplink-retrieves-subject-of-email-bu
-		if len(message.ID) < 20 || len(message.ID) > 2048 || !microsoftNativeMessageID.MatchString(message.ID) || uuidMessageID.MatchString(message.ID) {
-			return NylasEmailSource{}, errors.New("source email Microsoft native message ID is unavailable")
+		if len(message.ID) >= 20 && len(message.ID) <= 2048 && microsoftNativeMessageID.MatchString(message.ID) && !uuidMessageID.MatchString(message.ID) {
+			link = "https://outlook.office.com/mail/deeplink/read/" + url.PathEscape(message.ID)
 		}
-		link = "https://outlook.office.com/mail/deeplink/read/" + url.PathEscape(message.ID)
 	case "google":
-		// Gmail's REST API supplies hex IDs, not its opaque browser permalinks.
-		// A legacy #all/<hex> URL is not reliable on a fresh browser load, and a
-		// search URL does not meet CtrlLoop's direct-message-link requirement.
-		// https://github.com/googleworkspace/cli/issues/858
-		return NylasEmailSource{}, errors.New(ctrlLoopProviderError(provider))
+		// Gmail supplies no verified browser permalink through this integration.
+		// The worker uses the already-stored exact message's Mango popup instead.
 	default:
-		return NylasEmailSource{}, errors.New(ctrlLoopProviderError(provider))
+		return NylasEmailSource{}, errors.New("source email provider is unsupported")
 	}
 	return NylasEmailSource{URL: link, ArrivedAt: time.Unix(message.Date, 0).UTC()}, nil
 }

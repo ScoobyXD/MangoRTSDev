@@ -3,7 +3,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-for (const name of ["ctrlLoopApi.test.ts", "CtrlLoopPage.test.tsx"]) {
+for (const name of ["ctrlLoopApi.test.ts", "CtrlLoopPage.test.tsx", "CtrlLoopEmailPreview.test.tsx"]) {
   const outfile = resolve(root, "frontend/.test-dist/ctrl-loop", name.replace(/\.tsx?$/, ".mjs"));
   await build({
     entryPoints: [resolve(root, "tests/frontend/modules/ctrl-loop", name)], outfile,

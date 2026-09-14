@@ -304,6 +304,7 @@ func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/ctrl-loop/jobs", s.handleCtrlLoopJobs)
 	mux.HandleFunc("/v1/ctrl-loop/jobs/", s.handleCtrlLoopJob)
+	mux.HandleFunc("/v1/ctrl-loop/emails/", s.handleCtrlLoopSourceEmail)
 	mux.Handle("/v1/ctrl-loop/mcp", ctrlloopexcel.NewHandler(ctrlLoopExcelBackend{s: s}))
 	mux.HandleFunc("/v1/ai/sessions", s.handleAISessions)
 	mux.HandleFunc("/v1/ai/sessions/", s.handleAISession)
