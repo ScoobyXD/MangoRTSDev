@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   ctrlLoopTitle, deleteCtrlLoopJob, downloadCtrlLoopWorkbook, getCtrlLoopHistory, markCtrlLoopChangesSeen,
-  previewCtrlLoopWorkbook, saveCtrlLoopJob, uploadCtrlLoopWorkbook, workbookWebLink,
+  getCtrlLoopExcelURL, saveCtrlLoopJob, uploadCtrlLoopWorkbook, workbookWebLink,
 } from "../../../../frontend/src/modules/ctrl-loop/ctrlLoopApi.js";
 
 test("CtrlLoop API preserves company scope, exact seen IDs, upload bytes and binary downloads", async () => {
@@ -10,6 +10,7 @@ test("CtrlLoop API preserves company scope, exact seen IDs, upload bytes and bin
   const calls: { url: URL; init: RequestInit }[] = [];
   globalThis.fetch = (async (input: string, init: RequestInit) => {
     calls.push({ url: new URL(input), init });
+    if (input.includes("/open?")) return new Response(JSON.stringify({ url: "https://files.example.com/original?signature=one%2Btwo&expires=300" }));
     if (init.method === "DELETE") return new Response(null, { status: 204 });
     return new Response((init.method ?? "GET") === "GET" && input.includes("/workbook?") ? "xlsx bytes" : "{}", { status: 200 });
   }) as typeof fetch;
@@ -30,10 +31,9 @@ test("CtrlLoop API preserves company scope, exact seen IDs, upload bytes and bin
     assert.equal(await original.text(), "xlsx bytes");
     assert.equal(calls[2].url.searchParams.get("version"), "current");
     assert.equal(calls[3].url.searchParams.get("version"), "original");
-    await previewCtrlLoopWorkbook("company A", "job/1", "Vendor WIP", 41, 21);
-    assert.equal(calls[4].url.searchParams.get("sheet"), "Vendor WIP");
-    assert.equal(calls[4].url.searchParams.get("start_row"), "41");
-    assert.equal(calls[4].url.searchParams.get("start_column"), "21");
+    assert.equal(await getCtrlLoopExcelURL("company A", "job/1"), "ms-excel:ofv|u|https://files.example.com/original?signature=one%2Btwo&expires=300");
+    assert.equal(calls[4].url.pathname, "/v1/ctrl-loop/jobs/job%2F1/open");
+    assert.equal(calls[4].url.searchParams.get("company_id"), "company A");
     await getCtrlLoopHistory("company A", "job/1", "9007199254740995");
     assert.equal(calls[5].url.searchParams.get("before_id"), "9007199254740995");
     const input = { name: "Orders", instructions: "Stamp shipped cell", email_connection_id: "mailbox-one", time_zone: "America/Los_Angeles" };
@@ -56,4 +56,14 @@ test("workbook links stay direct and reject executable URLs while the title aggr
   for (const link of ["javascript:alert(1)", "data:text/html,hello", "file:///C:/secrets", "/source-email/1", "https://user:password@example.com"]) assert.equal(workbookWebLink(link), undefined);
   assert.equal(ctrlLoopTitle([{ unseen_updates: 2 }, { unseen_updates: 1 }, { unseen_updates: 0 }]), "[3] [CTRL] Loop");
   assert.equal(ctrlLoopTitle([]), "[CTRL] Loop");
+});
+
+test("Excel launch links reject non-HTTPS URLs, credentials and Office command injection", async () => {
+  const previousFetch = globalThis.fetch;
+  try {
+    for (const url of ["http://files.example.com/a.xlsx", "file:///C:/a.xlsx", "javascript:alert(1)", "https://user:pass@files.example.com/a.xlsx", "https://files.example.com/a.xlsx|s|https://evil.example.com", "https://files.example.com/a.xlsx#fragment"]) {
+      globalThis.fetch = (async () => new Response(JSON.stringify({ url }))) as typeof fetch;
+      await assert.rejects(getCtrlLoopExcelURL("company A", "job/1"));
+    }
+  } finally { globalThis.fetch = previousFetch; }
 });

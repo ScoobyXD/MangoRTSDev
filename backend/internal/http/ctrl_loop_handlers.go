@@ -243,29 +243,29 @@ func (s *Server) handleCtrlLoopJob(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 		w.WriteHeader(200)
 		_, _ = w.Write(data)
-	case "preview":
+	case "open":
 		if r.Method != http.MethodGet {
 			writeError(w, 405, "method_not_allowed")
 			return
 		}
-		data, err := s.ctrlLoopWorkbookBytes(r.Context(), c, job.CurrentAttachmentID)
+		attachment, err := s.ctrlLoopWorkbookAttachment(c, job.CurrentAttachmentID)
 		if err != nil {
 			ctrlLoopError(w, err)
 			return
 		}
-		param := func(key string, defaultValue int) int {
-			v, err := strconv.Atoi(r.URL.Query().Get(key))
-			if err != nil {
-				return defaultValue
-			}
-			return v
-		}
-		preview, err := ctrlloopexcel.Preview(data, r.URL.Query().Get("sheet"), param("start_row", 1), param("row_count", 50), param("start_column", 1), param("column_count", 20))
-		if err != nil {
-			writeError(w, 400, err.Error())
+		storage, ok := s.attachmentStorage.(AttachmentDownloadStorage)
+		if !ok {
+			ctrlLoopError(w, ErrAttachmentStorageUnavailable)
 			return
 		}
-		writeJSON(w, 200, preview)
+		link, err := storage.PresignGetObject(r.Context(), AttachmentPresignGetInput{
+			Key: attachment.StorageKey, Filename: job.FileName, ContentType: ctrlLoopMIME,
+		})
+		if err != nil {
+			ctrlLoopError(w, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"url": link.URL, "expires_at": link.ExpiresAt})
 	case "changes":
 		if r.Method != http.MethodGet {
 			writeError(w, 405, "method_not_allowed")
@@ -368,19 +368,26 @@ func (s *Server) saveCtrlLoopWorkbook(ctx context.Context, job store.CtrlLoopJob
 	}})
 	return id, err
 }
-func (s *Server) ctrlLoopWorkbookBytes(ctx context.Context, c, id string) ([]byte, error) {
+func (s *Server) ctrlLoopWorkbookAttachment(c, id string) (domain.Attachment, error) {
 	if id == "" {
-		return nil, store.ErrNotFound
+		return domain.Attachment{}, store.ErrNotFound
 	}
 	if s.attachmentStorage == nil {
-		return nil, ErrAttachmentStorageUnavailable
+		return domain.Attachment{}, ErrAttachmentStorageUnavailable
 	}
 	a, err := s.repo.GetAttachment(c, id)
 	if err != nil {
-		return nil, err
+		return domain.Attachment{}, err
 	}
-	if a.CompanyID != c || a.DeletedTimestamp != nil || a.ByteSize > ctrlloopexcel.MaxFileBytes || a.StorageBucket != s.attachmentStorage.Bucket() {
-		return nil, store.ErrNotFound
+	if a.CompanyID != c || a.DeletedTimestamp != nil || a.ByteSize < 0 || a.ByteSize > ctrlloopexcel.MaxFileBytes || a.StorageBucket != s.attachmentStorage.Bucket() {
+		return domain.Attachment{}, store.ErrNotFound
+	}
+	return a, nil
+}
+func (s *Server) ctrlLoopWorkbookBytes(ctx context.Context, c, id string) ([]byte, error) {
+	a, err := s.ctrlLoopWorkbookAttachment(c, id)
+	if err != nil {
+		return nil, err
 	}
 	obj, err := s.attachmentStorage.GetObject(ctx, AttachmentGetObjectInput{Key: a.StorageKey})
 	if err != nil {

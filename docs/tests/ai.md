@@ -4,6 +4,9 @@
 2. CtrlLoop MCP must use authenticated HTTPS service transport; every MCP server must have an explicit nonempty tool allowlist without wildcards.
 3. MCP credentials must appear only in transport configuration and must never appear in instructions or user input.
 4. A configured required MCP server must fail the session if unavailable; existing interactive approval rules must remain unchanged.
+5. Provider failures must retain a valid OpenAI request ID and report only recognized permission, verification, model, or billing diagnostics.
+6. Provider error bodies, unknown codes, credentials, and private input must never appear in returned errors or logs.
+7. An unrecognized HTTP 403 must report denial without claiming that key permissions caused it.
 
 # Current Interactive AI Business Logic Laws
 

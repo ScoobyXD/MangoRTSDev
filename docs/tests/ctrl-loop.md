@@ -3,7 +3,7 @@
 1. [CTRL] Loop lives in the existing Mango app and starts work only from newly accepted incoming Inbox messages after a workbook's activation timestamp.
 2. Activation never backfills mailbox history, a previously downloaded thread, or a fixed recent-message count.
 3. Each automation belongs to one exact company member and one of that member's exact personal Google or Microsoft Nylas mailbox connections.
-4. Every job API read, upload, preview, download, edit and seen update requires the automation's exact owner, current company membership and enabled mailbox access.
+4. Every job API read, upload, native Excel open, download, edit and seen update requires the automation's exact owner, current company membership and enabled mailbox access.
 5. Each automation stores its name and instructions as text and takes its explicit IANA timezone from the browser when created.
 6. The four displayed automation statuses are exactly Awaiting file, Listening, Processing and Error.
 7. Awaiting file means no original workbook exists; Listening means configured waiting work; Processing means a live worker attempt; Error includes a useful connection, setup or processing explanation.
@@ -31,7 +31,7 @@
 29. One unseen update equals one committed changed-cell history entry; counts and history persist on the server while the browser is closed.
 30. Opening history marks only the displayed entry IDs seen; newer or undisplayed entries remain unseen.
 31. The active [CTRL] Loop tab displays its aggregate unseen count in the browser title and restores the prior title when leaving.
-32. Workbook preview is read-only, exposes actual cell values and formula text, and opens Mango source links in the email popup while other safe web hyperlinks open in a new browser tab.
+32. Clicking a workbook filename must open its current saved version in desktop Excel using the native read-only Office command; the custom workbook reader must not exist.
 33. Original and current downloads resolve only that authorized job's exact attachment pointers.
 34. Removing a company member or mailbox deletes dependent automation ownership and retires its exact attachment relationships through existing attachment cleanup.
 35. Deleted runs are terminal queue receipts; deleting an accepted source email records a terminal no-edit outcome instead of blocking later company work.
@@ -61,6 +61,9 @@
 59. The local launcher must import the deployed OpenAI secret reference only when no explicit local reference exists and never read the OpenAI secret value.
 60. Normal localhost testing must continue using the shared dev email worker and its public MCP endpoint without requiring a laptop tunnel or starting a competing queue consumer.
 61. The local launcher must clear stale inherited CTRL Loop URL/model values when deployed values are absent and report the missing dev setup at startup.
+62. Native Excel opening must authorize the exact current workbook and issue a GET-only S3 link that expires after five minutes; signed URLs must never be stored in job data or logged.
+63. Native Excel opening must preserve the original and current workbook pointers and all history; local edits must not synchronize back to Mango.
+64. Failed or cancelled native-open requests must launch no file; company changes must cancel pending launches, and explicit original/current downloads must remain available.
 
 # Verification
 
@@ -70,7 +73,7 @@
 
 `scripts/test_ctrl_loop_postgres.mjs` uses only a disposable synthetic database. It tests canonical schema and the forward migrations, exact identities, ownership, cutoff, company locking, duplicate delivery, staged-union transactions, expiry/freeze, successful publication, persistent seen counts and lifecycle cleanup.
 
-`node tests/frontend/scripts/run-ctrl-loop-tests.mjs` verifies direct creation, automatic email/timezone defaults, instruction editing, page-specific seen IDs, safe links, preview windows, company-switch cancellation and uploads. Frontend production build and synthetic browser review cover the integrated navigation/table/dialogs.
+`node tests/frontend/scripts/run-ctrl-loop-tests.mjs` verifies direct creation, automatic email/timezone defaults, instruction editing, page-specific seen IDs, safe native Excel links, company-switch cancellation and uploads. Frontend production build and synthetic browser review cover the integrated navigation/table/dialogs.
 
 `backend/internal/http/ctrl_loop_upload_auth_test.go` sends generated Excel bytes through authentication and verifies their preservation, company access checks and unchanged JSON validation on other routes.
 
@@ -79,3 +82,5 @@ The CtrlLoop deletion HTTP and disposable repository tests cover owner/company a
 The Gmail worker fixture verifies real Excel/MCP output with the exact stored-message Mango URL. Source-reader tests verify message contents, exact IDs, permission changes and zero provider calls. UI tests cover the popup, safe rendering, source links and sign-in return routing.
 
 Live configured-dev OpenAI/Nylas/S3/SQS operation and signed-in provider-link behavior require operator qualification; no customer data or live database writes are used by these fixtures. Gmail now uses Mango's stored-email popup when no provider permalink is available. See [setup and remaining qualification](../ctrl-loop-setup.md) and [provider evidence](../ctrl-loop-provider-contracts.md).
+
+Native Excel handler/storage tests verify exact owner/company/mailbox access, current-version selection, rejected deleted or mismatched metadata, no-store responses and five-minute GET-only signing with synthetic credentials. Desktop Excel protocol handling requires installed Excel and browser permission.

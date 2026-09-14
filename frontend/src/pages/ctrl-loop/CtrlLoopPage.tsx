@@ -3,10 +3,10 @@ import { readAuthConfig } from "../../auth/cognitoAuth.js";
 import { fetchCommunicationsAuthURL, type EmailProvider } from "../../modules/communications/communicationsApi.js";
 import { realtimePersonalMailboxScope, subscribeRealtimeScope } from "../../modules/realtime/realtimeWebSocket.js";
 import {
-  ctrlLoopTitle, deleteCtrlLoopJob, downloadCtrlLoopWorkbook, listCtrlLoopJobs, saveCtrlLoopJob, uploadCtrlLoopWorkbook,
+  ctrlLoopTitle, deleteCtrlLoopJob, downloadCtrlLoopWorkbook, getCtrlLoopExcelURL, listCtrlLoopJobs, saveCtrlLoopJob, uploadCtrlLoopWorkbook,
   type CtrlLoopJob, type CtrlLoopJobs,
 } from "../../modules/ctrl-loop/ctrlLoopApi.js";
-import { CtrlLoopEditDialog, CtrlLoopHistoryDialog, CtrlLoopPreviewDialog, loopDate } from "./CtrlLoopDialogs.js";
+import { CtrlLoopEditDialog, CtrlLoopHistoryDialog, loopDate } from "./CtrlLoopDialogs.js";
 import "./ctrlLoop.css";
 
 const defaultInstructions = `Track order milestones using incoming emails.
@@ -26,10 +26,11 @@ export function CtrlLoopPage({ companyID, currentUserID, currentUserEmail }: { c
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [edit, setEdit] = useState<CtrlLoopJob | null>(null);
-  const [preview, setPreview] = useState<CtrlLoopJob | null>(null);
   const [history, setHistory] = useState<CtrlLoopJob | null>(null);
   const [dragged, setDragged] = useState("");
   const request = useRef<AbortController | null>(null);
+  const openingWorkbook = useRef<AbortController | null>(null);
+  useEffect(() => () => openingWorkbook.current?.abort(), [companyID]);
   const jobs = data?.jobs ?? [];
   const refresh = useCallback(async () => {
     request.current?.abort();
@@ -102,10 +103,26 @@ export function CtrlLoopPage({ companyID, currentUserID, currentUserEmail }: { c
       request.current?.abort();
       setData((current) => current ? { ...current, jobs: current.jobs.filter((item) => item.id !== job.id) } : current);
       setEdit((current) => current?.id === job.id ? null : current);
-      setPreview((current) => current?.id === job.id ? null : current);
       setHistory((current) => current?.id === job.id ? null : current);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not delete the loop."); }
     finally { setBusy(""); }
+  }
+
+  async function openInExcel(job: CtrlLoopJob) {
+    if (busy) return;
+    openingWorkbook.current?.abort();
+    const controller = new AbortController();
+    openingWorkbook.current = controller;
+    setBusy(job.id); setError("");
+    try {
+      const url = await getCtrlLoopExcelURL(companyID, job.id, controller.signal);
+      if (controller.signal.aborted) return;
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      document.body.appendChild(anchor); anchor.click(); anchor.remove();
+    } catch (cause) {
+      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Could not open the workbook in Excel.");
+    } finally { if (!controller.signal.aborted) setBusy(""); }
   }
 
   async function download(job: CtrlLoopJob, version: "current" | "original") {
@@ -156,7 +173,7 @@ export function CtrlLoopPage({ companyID, currentUserID, currentUserEmail }: { c
                 <td className="ctrl-loop-instructions"><button aria-label={`Edit instructions for ${job.name}`} disabled={!!busy} onClick={() => setEdit(job)}><span>{job.instructions}</span></button></td>
                 <td><span className={`ctrl-loop-status ctrl-loop-status-${job.status.toLowerCase().replace(/ /g, "-")}`}><span aria-hidden="true" className="ctrl-loop-status-dot" />{job.status}</span>{job.error && <small className="ctrl-loop-row-error">{job.error}</small>}</td>
                 <td><button className={`ctrl-loop-count${job.unseen_updates ? " ctrl-loop-count-unseen" : ""}`} aria-label={`${job.unseen_updates} unseen updates for ${job.name}`} disabled={!!busy} onClick={() => setHistory(job)}>{job.unseen_updates}</button></td>
-                <td>{job.file_name ? <button className="ctrl-loop-file" disabled={!!busy} onClick={() => setPreview(job)} title="Open read-only workbook preview"><span aria-hidden="true">X</span>{job.file_name}</button> : <label className={`ctrl-loop-upload${busy ? " ctrl-loop-disabled" : ""}`}><input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label={`Upload workbook for ${job.name}`} disabled={!!busy} onChange={(event) => { void upload(job, event.target.files); event.target.value = ""; }} />{busy === job.id ? "Uploading…" : "Upload .xlsx or drop here"}</label>}</td>
+                <td>{job.file_name ? <button className="ctrl-loop-file" disabled={!!busy} onClick={() => { void openInExcel(job); }} title="Open latest workbook in desktop Excel"><span aria-hidden="true">X</span>{job.file_name}</button> : <label className={`ctrl-loop-upload${busy ? " ctrl-loop-disabled" : ""}`}><input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-label={`Upload workbook for ${job.name}`} disabled={!!busy} onChange={(event) => { void upload(job, event.target.files); event.target.value = ""; }} />{busy === job.id ? "Uploading…" : "Upload .xlsx or drop here"}</label>}</td>
                 <td><button disabled={!job.file_name || !!busy} aria-label={`Download latest workbook for ${job.name}`} onClick={() => { void download(job, "current"); }}>↓ Latest</button></td>
                 <td><button disabled={!job.file_name || !!busy} aria-label={`Download original workbook for ${job.name}`} onClick={() => { void download(job, "original"); }}>↓ Original</button></td>
                 <td className="ctrl-loop-last-updated">{loopDate(job.last_updated, job.time_zone)}<small>{job.time_zone}</small></td>
@@ -168,9 +185,8 @@ export function CtrlLoopPage({ companyID, currentUserID, currentUserEmail }: { c
           </tbody>
         </table>
       </div>
-      <p className="ctrl-loop-footnote">Each changed cell shows the email’s arrival time and links to its source email. Your original upload stays available.</p>
+      <p className="ctrl-loop-footnote">Each changed cell shows the email’s arrival time and links to its source email. Your original upload stays available. Click a filename to open desktop Excel. Local edits do not sync back to Mango.</p>
       {edit && <CtrlLoopEditDialog companyID={companyID} job={edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); void refresh(); }} />}
-      {preview && <CtrlLoopPreviewDialog companyID={companyID} job={preview} onClose={() => setPreview(null)} />}
       {history && <CtrlLoopHistoryDialog companyID={companyID} job={history} onClose={() => setHistory(null)} onSeen={refresh} />}
     </section>
   );

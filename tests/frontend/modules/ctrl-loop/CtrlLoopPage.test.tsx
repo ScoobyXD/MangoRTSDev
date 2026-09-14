@@ -227,28 +227,52 @@ test("CtrlLoop deletion requires confirmation, retains a failed row and removes 
   });
 });
 
-test("CtrlLoop deletion closes its workbook preview and cancels the pending preview read", async () => {
-  let previewSignal: AbortSignal | undefined;
-  await withPageBrowser(async (input, init) => {
-    if (init.method === "DELETE") return new Response(null, { status: 204 });
-    if (new URL(input).pathname.endsWith("/preview")) {
-      previewSignal = init.signal ?? undefined;
-      return new Promise<Response>((_resolve, reject) => init.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true }));
-    }
+test("CtrlLoop filename opens the authorized latest workbook in Excel without a preview", async () => {
+  const calls: URL[] = [];
+  let fail = false;
+  await withPageBrowser(async (input) => {
+    const url = new URL(input); calls.push(url);
+    if (url.pathname.endsWith("/open")) return fail ? jsonResponse({ error: "Workbook unavailable" }, 404) : jsonResponse({ url: "https://files.example.com/current.xlsx?signature=abc%2B123" });
     return jsonResponse({ jobs: [{ ...existingJob, file_name: "Orders.xlsx" }], mailboxes: [] });
   }, async (root) => {
-    window.confirm = () => true;
+    const launched: string[] = [];
+    document.addEventListener("click", (event) => {
+      const target = event.target as HTMLAnchorElement;
+      if (target.tagName === "A") { event.preventDefault(); launched.push(target.href); }
+    });
     await act(async () => { root.render(<CtrlLoopPage companyID="company-one" currentUserID="" currentUserEmail="buyer@example.com" />); });
     await act(async () => { document.querySelector<HTMLButtonElement>(".ctrl-loop-file")!.click(); });
-    assert.ok(document.querySelector('[role="dialog"]'));
-    await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="Delete loop Existing Loop"]')!.click(); });
-    assert.equal(previewSignal?.aborted, true);
+    assert.deepEqual(launched, ["ms-excel:ofv|u|https://files.example.com/current.xlsx?signature=abc%2B123"]);
     assert.equal(document.querySelector('[role="dialog"]'), null);
-    assert.equal(document.querySelector(".ctrl-loop-name"), null);
+    assert.equal(calls.at(-1)?.pathname, "/v1/ctrl-loop/jobs/existing-job/open");
+    assert.equal(calls.at(-1)?.searchParams.get("company_id"), "company-one");
+    assert.equal(calls.some((url) => url.pathname.endsWith("/preview")), false);
+    fail = true;
+    await act(async () => { document.querySelector<HTMLButtonElement>(".ctrl-loop-file")!.click(); });
+    assert.equal(launched.length, 1);
+    assert.match(document.querySelector('[role="alert"]')?.textContent ?? "", /unavailable/i);
+    assert.equal(document.querySelector<HTMLButtonElement>(".ctrl-loop-file")!.disabled, false);
   });
 });
 
-test("CtrlLoop renders the four states, reads real workbook cells, marks only displayed changes and clears company data", async () => {
+test("CtrlLoop cancels a pending Excel launch when the company changes", async () => {
+  let signal: AbortSignal | undefined;
+  await withPageBrowser(async (input, init) => {
+    if (new URL(input).pathname.endsWith("/open")) {
+      signal = init.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true }));
+    }
+    return jsonResponse({ jobs: [{ ...existingJob, file_name: "Orders.xlsx" }], mailboxes: [] });
+  }, async (root) => {
+    await act(async () => { root.render(<CtrlLoopPage key="one" companyID="company-one" currentUserID="" currentUserEmail="buyer@example.com" />); });
+    await act(async () => { document.querySelector<HTMLButtonElement>(".ctrl-loop-file")!.click(); });
+    assert.equal(document.querySelector<HTMLButtonElement>(".ctrl-loop-file")!.disabled, true);
+    await act(async () => { root.render(<CtrlLoopPage key="two" companyID="company-two" currentUserID="" currentUserEmail="buyer@example.com" />); });
+    assert.equal(signal?.aborted, true);
+  });
+});
+
+test("CtrlLoop renders the four states, uploads workbooks, marks only displayed changes and clears company data", async () => {
   const jobs: CtrlLoopJob[] = ["Awaiting file", "Listening", "Processing", "Error"].map((status, index) => ({
     id: `job-${index}`, name: `Automation ${index}`, instructions: "Stamp the shipped cell for matching purchase orders",
     email_connection_id: "mailbox-one", time_zone: "America/Los_Angeles", revision: 1,
@@ -258,22 +282,10 @@ test("CtrlLoop renders the four states, reads real workbook cells, marks only di
   const seenBodies: unknown[] = [];
   const uploaded: unknown[] = [];
   const calls: URL[] = [];
-  let previewSignal: AbortSignal | null = null;
-  let delayPreview = false;
   await withPageBrowser(async (input, init) => {
       const url = new URL(input); calls.push(url);
       let payload: unknown = { jobs: url.searchParams.get("company_id") === "company-two" ? [] : jobs, mailboxes: [{ email_connection_id: "mailbox-one", account_email: "buyer@example.com", provider: "google", status: "connected" }] };
       if (init.method === "POST" && url.pathname.endsWith("/workbook")) { uploaded.push(init.body); jobs[0].file_name = "Vendor.xlsx"; jobs[0].status = "Listening"; payload = jobs[0]; }
-      if (url.pathname.endsWith("/preview")) {
-        previewSignal = init.signal ?? null;
-        if (delayPreview) return new Promise<Response>((_resolve, reject) => init.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true }));
-        payload = { sheets: [{ name: "Supplier WIP", rows: 88, columns: 22 }, { name: "Summary", rows: 2, columns: 3 }], sheet: { name: url.searchParams.get("sheet") || "Supplier WIP", start_row: 1, start_column: 1, rows: [{ row: 1, cells: [
-          { address: "A1", column: 1, text: "PO 123" },
-          { address: "B1", column: 2, text: "9/13/26 2:31PM", hyperlink: "https://mail.google.com/mail/u/buyer%40example.com/#all/18abc123" },
-          { address: "C1", column: 3, text: "40", formula: "SUM(D2:D4)" },
-          { address: "D1", column: 4, text: "Untrusted link", hyperlink: "javascript:alert(1)" },
-        ] }] } };
-      }
       if (url.pathname.endsWith("/changes")) payload = { has_more: false, runs: [{ id: "run-1", status: "completed", created_at: "2026-09-13T22:35:00Z", changed_cells: 2 }], changes: ["100", "99"].map((id) => ({ id, run_id: "run-1", job_id: "job-1", sheet: "Supplier WIP", cell: id === "100" ? "B5" : "C5", previous_text: "", text: "9/13/26 2:31PM", source_url: "https://mail.google.com/mail/u/buyer%40example.com/#all/18abc123", arrival_at: "2026-09-13T21:31:00Z", saved_at: "2026-09-13T22:35:00Z", seen: false })) };
       if (url.pathname.endsWith("/seen")) { seenBodies.push(JSON.parse(init.body as string)); jobs[1].unseen_updates = 1; payload = {}; }
       return jsonResponse(payload);
@@ -296,22 +308,7 @@ test("CtrlLoop renders the four states, reads real workbook cells, marks only di
     assert.equal(document.querySelectorAll("[data-change-id]").length, 2);
     assert.equal(document.title, "[1] [CTRL] Loop", "a newer unseen cell outside the read history must remain unread");
     await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="Close dialog"]')!.click(); });
-    await act(async () => { document.querySelector<HTMLButtonElement>(".ctrl-loop-file")!.click(); });
-    const stamp = document.querySelector<HTMLAnchorElement>('[data-cell="B1"] a')!;
-    assert.equal(stamp.textContent, "9/13/26 2:31PM");
-    assert.equal(stamp.target, "_blank");
-    assert.ok(stamp.href.startsWith("https://mail.google.com/"));
-    assert.equal(document.querySelector('[data-cell="D1"] a'), null);
-    assert.ok(document.querySelector('[data-cell="C1"]')!.getAttribute("title")!.includes("SUM(D2:D4)"));
-    assert.equal(document.querySelector("[contenteditable]"), null);
-    const nextRows = Array.from(document.querySelectorAll("button")).find((button) => button.textContent === "Next rows")!;
-    await act(async () => { nextRows.click(); });
-    assert.ok(calls.some((url) => url.searchParams.get("start_row") === "41"));
-    await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="Close dialog"]')!.click(); });
-    delayPreview = true;
-    await act(async () => { document.querySelector<HTMLButtonElement>(".ctrl-loop-file")!.click(); });
     await act(async () => { root.render(<CtrlLoopPage key="two" companyID="company-two" currentUserID="" currentUserEmail="buyer@example.com" />); });
-    assert.ok((previewSignal as unknown as AbortSignal).aborted);
     assert.ok(!document.body.textContent?.includes("Automation 1"));
     assert.equal(document.querySelector('[role="dialog"]'), null);
     assert.equal(document.title, "[CTRL] Loop");
