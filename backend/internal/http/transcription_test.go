@@ -354,6 +354,7 @@ func TestTranscriptionProviderTimeoutStartsAfterUpload(t *testing.T) {
 }
 
 func TestTranscriptionHTTPFullDuplexClearsOnlyRouteDeadlines(t *testing.T) {
+	const routeTimeout = 500 * time.Millisecond
 	for _, useHTTP2 := range []bool{false, true} {
 		name := "HTTP1"
 		if useHTTP2 {
@@ -375,8 +376,9 @@ func TestTranscriptionHTTPFullDuplexClearsOnlyRouteDeadlines(t *testing.T) {
 				}
 			})
 			api := httptest.NewUnstartedServer(server.Routes())
-			api.Config.WriteTimeout = 5 * time.Millisecond
-			api.Config.ReadTimeout = 5 * time.Millisecond
+			// Allow TLS to connect before testing an upload that exceeds both deadlines.
+			api.Config.WriteTimeout = routeTimeout
+			api.Config.ReadTimeout = routeTimeout
 			api.EnableHTTP2 = useHTTP2
 			api.StartTLS()
 			defer api.Close()
@@ -418,7 +420,7 @@ func TestTranscriptionHTTPFullDuplexClearsOnlyRouteDeadlines(t *testing.T) {
 			if err := decoder.Decode(&progress); err != nil || progress.Type != "progress" {
 				t.Fatalf("missing progress during upload: %+v error=%v", progress, err)
 			}
-			time.Sleep(25 * time.Millisecond)
+			time.Sleep(2 * routeTimeout)
 			if _, err := writer.Write([]byte("-last")); err != nil {
 				t.Fatal(err)
 			}
@@ -427,7 +429,7 @@ func TestTranscriptionHTTPFullDuplexClearsOnlyRouteDeadlines(t *testing.T) {
 			if err := decoder.Decode(&result); err != nil || result.Type != "result" || result.Text != "Ready for review." {
 				t.Fatalf("result=%+v error=%v", result, err)
 			}
-			if api.Config.WriteTimeout != 5*time.Millisecond || api.Config.ReadTimeout != 5*time.Millisecond {
+			if api.Config.WriteTimeout != routeTimeout || api.Config.ReadTimeout != routeTimeout {
 				t.Fatal("dictation must not change global server timeouts")
 			}
 		})
