@@ -460,7 +460,18 @@ func requestCompanyID(r *http.Request) (string, error) {
 }
 
 func requestBodyCompanyIDIgnoredByHandler(r *http.Request) bool {
-	return r.Method == http.MethodPost && (r.URL.Path == "/v1/communications/messages/send" || r.URL.Path == "/v1/attachments" || r.URL.Path == "/v1/transcriptions")
+	if r.Method != http.MethodPost {
+		return false
+	}
+	switch r.URL.Path {
+	case "/v1/communications/messages/send", "/v1/attachments", "/v1/transcriptions":
+		return true
+	}
+	if path, ok := strings.CutPrefix(r.URL.Path, "/v1/ctrl-loop/jobs/"); ok {
+		jobID, action, _ := strings.Cut(path, "/")
+		return jobID != "" && action == "workbook"
+	}
+	return false
 }
 
 func readCompanyIDFromJSONBody(r *http.Request, maxScanBytes int64) (string, bool, error) {

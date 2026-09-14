@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { AppModalPortal } from "../../app/AppModalPortal.js";
 import {
   getCtrlLoopHistory, markCtrlLoopChangesSeen, previewCtrlLoopWorkbook, saveCtrlLoopJob,
-  type CtrlLoopHistory, type CtrlLoopJob, type CtrlLoopMailbox, type CtrlLoopPreview,
+  type CtrlLoopHistory, type CtrlLoopJob, type CtrlLoopPreview,
 } from "../../modules/ctrl-loop/ctrlLoopApi.js";
 import type { CtrlLoopEmailTarget } from "../../modules/ctrl-loop/ctrlLoopEmailRoute.js";
 import { CtrlLoopEmailLink, LazyCtrlLoopEmailPreview } from "./CtrlLoopEmailLink.js";
@@ -23,39 +23,28 @@ function Dialog({ title, onClose, children, wide = false }: { title: string; onC
   </AppModalPortal>;
 }
 
-export function CtrlLoopEditDialog({ companyID, job, mailboxes, onClose, onSaved }: { companyID: string; job?: CtrlLoopJob; mailboxes: CtrlLoopMailbox[]; onClose: () => void; onSaved: () => void }) {
-  const [name, setName] = useState(job?.name ?? "");
-  const [instructions, setInstructions] = useState(job?.instructions ?? "");
-  const [mailbox, setMailbox] = useState(job?.email_connection_id ?? mailboxes.find((item) => item.status === "connected")?.email_connection_id ?? "");
-  const [timeZone, setTimeZone] = useState(job?.time_zone ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
+export function CtrlLoopEditDialog({ companyID, job, onClose, onSaved }: { companyID: string; job: CtrlLoopJob; onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(job.name);
+  const [instructions, setInstructions] = useState(job.instructions);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function save(event: React.FormEvent) {
     event.preventDefault();
     if (busy) return;
     setError("");
-    try { new Intl.DateTimeFormat("en-US", { timeZone: timeZone.trim() }).format(); }
-    catch { setError("Enter a valid timezone, such as America/Los_Angeles."); return; }
     setBusy(true);
     try {
-      await saveCtrlLoopJob(companyID, { name: name.trim(), instructions: instructions.trim(), email_connection_id: mailbox, time_zone: timeZone.trim() }, job);
+      await saveCtrlLoopJob(companyID, { name: name.trim(), instructions: instructions.trim(), email_connection_id: job.email_connection_id, time_zone: job.time_zone }, job);
       onSaved();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not save the automation."); setBusy(false); }
   }
-  return <Dialog title={job ? "Edit automation" : "New automation"} onClose={onClose}>
+  return <Dialog title="Edit Loop" onClose={onClose}>
     <form className="ctrl-loop-form" onSubmit={(event) => { void save(event); }}>
       <label>Name<input required maxLength={160} value={name} onChange={(event) => setName(event.target.value)} placeholder="Purchase order WIP" /></label>
-      <label>Instructions<textarea required maxLength={12000} rows={6} value={instructions} onChange={(event) => setInstructions(event.target.value)} placeholder="When a supplier confirms a PO has shipped, find that PO in this workbook and stamp its Shipped cell." /></label>
+      <label>Instructions<textarea autoFocus required maxLength={12000} rows={18} value={instructions} onChange={(event) => setInstructions(event.target.value)} /></label>
       <p>Describe which emails matter and which cells to update. Each changed cell contains the email arrival time with a link to the source email.</p>
-      <label>Connected mailbox<select required value={mailbox} onChange={(event) => setMailbox(event.target.value)}>
-        <option value="">Select a mailbox</option>
-        {job?.email_connection_id && !mailboxes.some((item) => item.email_connection_id === job.email_connection_id) && <option value={job.email_connection_id} disabled>Mailbox unavailable</option>}
-        {mailboxes.map((item) => <option key={item.email_connection_id} value={item.email_connection_id}>{item.account_email} · {item.provider === "google" ? "Gmail" : "Outlook"}{item.status !== "connected" ? ` (${item.status})` : ""}</option>)}
-      </select></label>
-      {!mailboxes.length && <p>Close this form and connect a mailbox to get started.</p>}
-      <label>Timezone<input required value={timeZone} onChange={(event) => setTimeZone(event.target.value)} placeholder="America/Los_Angeles" /><small>Email arrival timestamps are written in this timezone.</small></label>
       {error && <div role="alert" className="ctrl-loop-error">{error}</div>}
-      <footer><button type="button" onClick={onClose}>Cancel</button><button className="ctrl-loop-primary" disabled={busy || !mailbox || !name.trim() || !instructions.trim()} type="submit">{busy ? "Saving…" : "Save automation"}</button></footer>
+      <footer><button type="button" onClick={onClose}>Cancel</button><button className="ctrl-loop-primary" disabled={busy || !name.trim() || !instructions.trim()} type="submit">{busy ? "Saving…" : "Save Loop"}</button></footer>
     </form>
   </Dialog>;
 }
