@@ -171,6 +171,7 @@ resource "aws_ecs_task_definition" "backend" {
           { name = "MANGORTS_BOOTSTRAP_DEV_COMPANY_NAME", value = var.bootstrap_company_name },
           { name = "DB_HOST", value = local.db_host },
           { name = "DB_PORT", value = tostring(local.db_port) },
+          { name = "DB_CONNECT_TIMEOUT_SECONDS", value = var.environment == "dev" ? "60" : "5" },
           { name = "DB_NAME", value = local.db_name },
           { name = "DB_USER", value = local.db_user },
           { name = "DB_SSLMODE", value = "require" }
@@ -253,11 +254,12 @@ resource "aws_ecs_service" "backend" {
   wait_for_steady_state              = true
   deployment_minimum_healthy_percent = var.environment == "qa" ? 0 : 100
   deployment_maximum_percent         = var.environment == "qa" ? 100 : 200
+  health_check_grace_period_seconds   = var.environment == "dev" ? 180 : 0
 
   network_configuration {
     subnets          = local.ecs_subnet_ids
     security_groups  = [aws_security_group.ecs.id]
-    assign_public_ip = false
+    assign_public_ip = var.ecs_nat_gateway_mode == "none"
   }
 
   load_balancer {

@@ -75,7 +75,7 @@ jobs:
           TF_PRIVATE_SUBNET_IDS: ${{ vars.TF_PRIVATE_SUBNET_IDS || '[]' }}
           TF_CREATE_PRIVATE_ECS_SUBNETS: ${{ vars.TF_CREATE_PRIVATE_ECS_SUBNETS || 'false' }}
           TF_ECS_PRIVATE_SUBNET_CIDRS: ${{ vars.TF_ECS_PRIVATE_SUBNET_CIDRS || '[]' }}
-          TF_ECS_NAT_GATEWAY_MODE: ${{ vars.TF_ECS_NAT_GATEWAY_MODE || 'single' }}
+          TF_ECS_NAT_GATEWAY_MODE: ${{ vars.TF_ECS_NAT_GATEWAY_MODE || 'none' }}
           TF_ATTACHMENT_S3_BUCKET: ${{ vars.TF_ATTACHMENT_S3_BUCKET || 'mangorts-dev-attachments' }}
           TF_EXISTING_DB_HOST: ${{ vars.TF_EXISTING_DB_HOST }}
           TF_EXISTING_DB_PORT: ${{ vars.TF_EXISTING_DB_PORT || '5432' }}

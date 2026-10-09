@@ -64,7 +64,7 @@ resource "aws_elasticache_serverless_cache" "realtime" {
   description          = "MangoRTS ${var.environment} committed-event realtime backplane"
   engine               = "valkey"
   major_engine_version = var.realtime_valkey_major_engine_version
-  subnet_ids           = local.ecs_subnet_ids
+  subnet_ids           = local.ecs_private_subnet_ids
   security_group_ids   = [aws_security_group.realtime_valkey[0].id]
   user_group_id        = aws_elasticache_user_group.realtime[0].user_group_id
 

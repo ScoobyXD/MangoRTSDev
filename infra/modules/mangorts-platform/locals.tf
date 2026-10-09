@@ -62,8 +62,9 @@ locals {
   db_security_group_id          = var.database_connection_mode == "managed" ? var.managed_db_security_group_id : var.existing_db_security_group_id
 
   managed_ecs_private_subnet_count = var.create_private_ecs_subnets ? length(var.ecs_private_subnet_cidrs) : 0
-  managed_nat_gateway_count        = var.create_private_ecs_subnets ? (var.ecs_nat_gateway_mode == "per_az" ? local.managed_ecs_private_subnet_count : 1) : 0
-  ecs_subnet_ids                   = var.create_private_ecs_subnets ? aws_subnet.ecs_private[*].id : var.private_subnet_ids
+  managed_nat_gateway_count        = var.create_private_ecs_subnets && var.ecs_nat_gateway_mode != "none" ? (var.ecs_nat_gateway_mode == "per_az" ? local.managed_ecs_private_subnet_count : 1) : 0
+  ecs_private_subnet_ids           = var.create_private_ecs_subnets ? aws_subnet.ecs_private[*].id : var.private_subnet_ids
+  ecs_subnet_ids                   = var.ecs_nat_gateway_mode == "none" ? var.public_subnet_ids : local.ecs_private_subnet_ids
   github_oidc_provider_arn         = var.create_github_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : var.github_oidc_provider_arn
   github_oidc_subjects = length(var.github_oidc_subjects) > 0 ? var.github_oidc_subjects : concat(
     ["repo:${var.github_owner}/${var.github_repository}:ref:refs/heads/${var.github_branch}"],

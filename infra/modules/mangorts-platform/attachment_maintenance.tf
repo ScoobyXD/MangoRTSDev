@@ -32,6 +32,7 @@ resource "aws_ecs_task_definition" "attachment_maintenance" {
       { name = "MANGORTS_ATTACHMENT_AWS_REGION", value = var.aws_region },
       { name = "DB_HOST", value = local.db_host },
       { name = "DB_PORT", value = tostring(local.db_port) },
+      { name = "DB_CONNECT_TIMEOUT_SECONDS", value = var.environment == "dev" ? "60" : "5" },
       { name = "DB_NAME", value = local.db_name },
       { name = "DB_USER", value = local.db_user },
       { name = "DB_SSLMODE", value = "require" },
@@ -127,7 +128,7 @@ resource "aws_cloudwatch_event_target" "attachment_maintenance" {
     network_configuration {
       subnets          = local.ecs_subnet_ids
       security_groups  = [aws_security_group.ecs.id]
-      assign_public_ip = false
+      assign_public_ip = var.ecs_nat_gateway_mode == "none"
     }
   }
   depends_on = [aws_iam_role_policy.attachment_maintenance_events]

@@ -10,16 +10,16 @@ origin_subdomain = "origin.dev"
 # Use the VPC that contains the existing dev PostgreSQL/Aurora DB.
 vpc_id = "vpc-0123456789abcdef0"
 
-# Existing public subnets for ALB and NAT placement.
+# Existing public subnets for the ALB and ECS tasks when NAT mode is none.
 public_subnet_ids = ["subnet-aaaaaaaaaaaaaaaaa", "subnet-bbbbbbbbbbbbbbbbb"]
 
-# Preferred when the existing VPC does not already have private app subnets.
+# Keep these private subnets for Valkey even when ECS tasks use public subnets.
 create_private_ecs_subnets = true
 ecs_private_subnet_cidrs   = ["172.31.128.0/20", "172.31.144.0/20"]
-ecs_nat_gateway_mode       = "single"
+ecs_nat_gateway_mode       = "none"
 private_subnet_ids         = []
 
-# If you already have private subnets with NAT/VPC-endpoint egress, use this instead:
+# For existing private subnets, use this instead. Keep NAT mode none for public ECS egress:
 # create_private_ecs_subnets = false
 # private_subnet_ids = ["subnet-ccccccccccccccccc", "subnet-ddddddddddddddddd"]
 
@@ -40,8 +40,8 @@ email_worker_enabled                  = true
 email_sqs_database_migration_complete = true
 email_reconciliation_schedule_enabled = false
 email_worker_concurrency              = 3
-email_worker_cpu                      = 512
-email_worker_memory                   = 1024
+email_worker_cpu                      = 256
+email_worker_memory                   = 512
 email_worker_alarm_action_arns        = [] # Optional SNS/incident destinations; CloudWatch alarms still exist when this is empty.
 
 # Private, TLS-only, IAM-authenticated Valkey Pub/Sub backplane for committed

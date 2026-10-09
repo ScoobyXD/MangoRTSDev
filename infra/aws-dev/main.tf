@@ -46,8 +46,10 @@ module "platform" {
   backend_cpu                               = var.backend_cpu
   backend_memory                            = var.backend_memory
   backend_desired_count                     = var.backend_desired_count
+  ecs_container_insights_enabled            = false
   email_sqs_enabled                         = var.email_sqs_enabled
   email_worker_enabled                      = var.email_worker_enabled
+  email_worker_desired_count                = var.email_worker_desired_count
   email_sqs_database_migration_complete     = var.email_sqs_database_migration_complete
   email_reconciliation_schedule_enabled     = var.email_reconciliation_schedule_enabled
   email_worker_concurrency                  = var.email_worker_concurrency

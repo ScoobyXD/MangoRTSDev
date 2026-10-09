@@ -50,7 +50,7 @@ resource "aws_route_table" "ecs_private" {
 }
 
 resource "aws_route" "ecs_private_nat" {
-  count = local.managed_ecs_private_subnet_count
+  count = var.ecs_nat_gateway_mode == "none" ? 0 : local.managed_ecs_private_subnet_count
 
   route_table_id         = aws_route_table.ecs_private[count.index].id
   destination_cidr_block = "0.0.0.0/0"

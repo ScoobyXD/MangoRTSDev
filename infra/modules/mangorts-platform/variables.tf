@@ -80,13 +80,13 @@ variable "ecs_private_subnet_cidrs" {
 }
 
 variable "ecs_nat_gateway_mode" {
-  description = "NAT gateway mode for Terraform-managed ECS private subnets. Use single for lower cost or per_az for AZ-local egress."
+  description = "ECS egress mode: none uses public task IPs and keeps private subnets, single uses one NAT, and per_az uses one NAT per AZ."
   type        = string
   default     = "single"
 
   validation {
-    condition     = contains(["single", "per_az"], var.ecs_nat_gateway_mode)
-    error_message = "ecs_nat_gateway_mode must be single or per_az."
+    condition     = contains(["none", "single", "per_az"], var.ecs_nat_gateway_mode)
+    error_message = "ecs_nat_gateway_mode must be none, single, or per_az."
   }
 }
 
@@ -265,6 +265,17 @@ variable "email_worker_enabled" {
   description = "Run one private non-production email worker service."
   type        = bool
   default     = false
+}
+
+variable "email_worker_desired_count" {
+  description = "Number of email worker tasks. Use zero to pause processing and retain worker resources."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = contains([0, 1], var.email_worker_desired_count)
+    error_message = "email_worker_desired_count must be 0 or 1."
+  }
 }
 
 variable "email_sqs_database_migration_complete" {

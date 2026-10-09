@@ -68,13 +68,13 @@ variable "ecs_private_subnet_cidrs" {
 }
 
 variable "ecs_nat_gateway_mode" {
-  description = "NAT gateway mode for Terraform-managed ECS private subnets. Use single for lower dev cost or per_az for AZ-local egress."
+  description = "ECS egress mode: none uses public task IPs and keeps private subnets, single uses one NAT, and per_az uses one NAT per AZ."
   type        = string
-  default     = "single"
+  default     = "none"
 
   validation {
-    condition     = contains(["single", "per_az"], var.ecs_nat_gateway_mode)
-    error_message = "ecs_nat_gateway_mode must be single or per_az."
+    condition     = contains(["none", "single", "per_az"], var.ecs_nat_gateway_mode)
+    error_message = "ecs_nat_gateway_mode must be none, single, or per_az."
   }
 }
 
@@ -177,13 +177,13 @@ variable "container_port" {
 variable "backend_cpu" {
   description = "Fargate task CPU units."
   type        = number
-  default     = 1024
+  default     = 256
 }
 
 variable "backend_memory" {
   description = "Fargate task memory MiB."
   type        = number
-  default     = 2048
+  default     = 512
 }
 
 variable "backend_desired_count" {
@@ -207,6 +207,17 @@ variable "email_worker_enabled" {
   description = "Run the single private DEV email worker during normal deployments."
   type        = bool
   default     = true
+}
+
+variable "email_worker_desired_count" {
+  description = "Number of DEV email worker tasks. Use zero to pause processing and retain worker resources."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = contains([0, 1], var.email_worker_desired_count)
+    error_message = "email_worker_desired_count must be 0 or 1."
+  }
 }
 
 variable "email_sqs_database_migration_complete" {
@@ -235,13 +246,13 @@ variable "email_worker_concurrency" {
 variable "email_worker_cpu" {
   description = "Fargate CPU units for the private DEV email worker."
   type        = number
-  default     = 512
+  default     = 256
 }
 
 variable "email_worker_memory" {
   description = "Fargate memory MiB for the private DEV email worker."
   type        = number
-  default     = 1024
+  default     = 512
 }
 
 variable "email_worker_alarm_action_arns" {

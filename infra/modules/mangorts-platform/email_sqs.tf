@@ -239,6 +239,7 @@ resource "aws_ecs_task_definition" "email_worker" {
           { name = "MANGORTS_API_URL", value = "https://${local.api_domain}" },
           { name = "DB_HOST", value = local.db_host },
           { name = "DB_PORT", value = tostring(local.db_port) },
+          { name = "DB_CONNECT_TIMEOUT_SECONDS", value = var.environment == "dev" ? "60" : "5" },
           { name = "DB_NAME", value = local.db_name },
           { name = "DB_USER", value = local.db_user },
           { name = "DB_SSLMODE", value = "require" }
@@ -311,7 +312,7 @@ resource "aws_ecs_service" "email_worker" {
   name                               = "${local.name_prefix}-email-worker"
   cluster                            = aws_ecs_cluster.main.id
   task_definition                    = aws_ecs_task_definition.email_worker[0].arn
-  desired_count                      = var.deployment_maintenance_mode ? 0 : 1
+  desired_count                      = var.deployment_maintenance_mode ? 0 : var.email_worker_desired_count
   launch_type                        = "FARGATE"
   wait_for_steady_state              = true
   deployment_minimum_healthy_percent = var.environment == "qa" ? 0 : 100
@@ -320,7 +321,7 @@ resource "aws_ecs_service" "email_worker" {
   network_configuration {
     subnets          = local.ecs_subnet_ids
     security_groups  = [aws_security_group.ecs.id]
-    assign_public_ip = false
+    assign_public_ip = var.ecs_nat_gateway_mode == "none"
   }
 
   depends_on = [
@@ -449,7 +450,7 @@ resource "aws_scheduler_schedule" "email_reconciliation" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "email_worker_not_running" {
-  count = local.email_worker_service_enabled && var.cloudwatch_alarms_enabled && var.ecs_container_insights_enabled ? 1 : 0
+  count = local.email_worker_service_enabled && var.cloudwatch_alarms_enabled ? 1 : 0
 
   alarm_name          = "${local.name_prefix}-email-worker-not-running"
   alarm_description   = "The private email worker ECS service has no running task."
